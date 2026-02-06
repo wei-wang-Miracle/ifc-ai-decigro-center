@@ -15,8 +15,7 @@ const deptTreeOptions = ref<any[]>([]) // 用于选择父部门
 const form = reactive<any>({
     deptId: null,
     parentId: 0,
-    deptName: '',
-    tenantCode: 'HEYI'
+    deptName: ''
 })
 
 const ruleFormRef = ref<FormInstance>()
@@ -96,8 +95,7 @@ const resetForm = () => {
     Object.assign(form, {
         deptId: null,
         parentId: 0,
-        deptName: '',
-        tenantCode: 'HEYI'
+        deptName: ''
     })
     ruleFormRef.value?.resetFields()
 }
@@ -138,11 +136,6 @@ onMounted(() => {
               </template>
           </el-table-column>
           <el-table-column prop="deptId" label="组织编码" width="120" />
-          <el-table-column prop="tenantCode" label="所属租户" width="120">
-              <template #default="scope">
-                  <el-tag size="small" type="info">{{ scope.row.tenantCode }}</el-tag>
-              </template>
-          </el-table-column>
           <el-table-column label="管理操作" width="220" fixed="right">
             <template #default="scope">
                 <el-button link type="primary" :icon="Plus" @click="handleAdd(scope.row)">添加子项</el-button>
@@ -164,9 +157,7 @@ onMounted(() => {
             <el-form-item label="部门名称" prop="deptName">
                 <el-input v-model="form.deptName" placeholder="如：研发中心" />
             </el-form-item>
-            <el-form-item label="租户编码" prop="tenantCode">
-                <el-input v-model="form.tenantCode" placeholder="HEYI" />
-            </el-form-item>
+
         </el-form>
         <template #footer>
             <span class="dialog-footer">

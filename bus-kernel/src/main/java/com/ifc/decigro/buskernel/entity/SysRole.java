@@ -4,10 +4,10 @@ import com.mybatisflex.annotation.Column;
 import com.mybatisflex.annotation.Id;
 import com.mybatisflex.annotation.KeyType;
 import com.mybatisflex.annotation.Table;
-import com.mybatisflex.core.handler.Fastjson2TypeHandler;
+import com.ifc.decigro.buskernel.common.handler.Fastjson2TypeHandler;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
-import java.io.Serializable;
 import java.util.List;
 
 /**
@@ -15,8 +15,9 @@ import java.util.List;
  * 定义基础权限与工具集模板
  */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @Table("sys_role")
-public class SysRole implements Serializable {
+public class SysRole extends BaseEntity {
 
     /**
      * 主键 ID

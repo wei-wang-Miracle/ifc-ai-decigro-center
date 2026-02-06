@@ -4,11 +4,10 @@ import com.mybatisflex.annotation.Column;
 import com.mybatisflex.annotation.Id;
 import com.mybatisflex.annotation.KeyType;
 import com.mybatisflex.annotation.Table;
-import com.mybatisflex.core.handler.Fastjson2TypeHandler;
+import com.ifc.decigro.buskernel.common.handler.Fastjson2TypeHandler;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
-import java.io.Serializable;
-import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -16,8 +15,9 @@ import java.util.List;
  * 系统的核心，承载记忆与当前职能
  */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @Table("sys_user")
-public class SysUser implements Serializable {
+public class SysUser extends BaseEntity {
 
     /**
      * 主键 ID
@@ -85,16 +85,4 @@ public class SysUser implements Serializable {
      * 账户状态 (1:启用, 0:禁用)
      */
     private Boolean isEnabled;
-
-    /**
-     * 创建时间
-     */
-    @Column(onInsertValue = "now()")
-    private LocalDateTime createdTime;
-
-    /**
-     * 更新时间
-     */
-    @Column(onInsertValue = "now()", onUpdateValue = "now()")
-    private LocalDateTime updatedTime;
 }

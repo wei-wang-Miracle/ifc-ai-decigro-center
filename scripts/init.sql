@@ -21,7 +21,6 @@ CREATE TABLE IF NOT EXISTS sys_dept (
     dept_id BIGSERIAL PRIMARY KEY,
     parent_id BIGINT,
     dept_name VARCHAR(64) NOT NULL,
-    tenant_code VARCHAR(32),
     created_time TIMESTAMP DEFAULT NOW(),
     updated_time TIMESTAMP DEFAULT NOW()
 );
@@ -59,8 +58,8 @@ CREATE TABLE IF NOT EXISTS sys_login_log (
 INSERT INTO sys_tenant (tenant_code, tenant_name, is_enabled)
 VALUES ('HEYI', '和一集团', TRUE) ON CONFLICT (tenant_code) DO NOTHING;
 -- Init Dept
-INSERT INTO sys_dept (dept_id, parent_id, dept_name, tenant_code)
-VALUES (100, 0, '平台管理部', 'HEYI') ON CONFLICT (dept_id) DO NOTHING;
+INSERT INTO sys_dept (dept_id, parent_id, dept_name)
+VALUES (100, 0, '平台管理部') ON CONFLICT (dept_id) DO NOTHING;
 -- Init Role
 INSERT INTO sys_role (role_id, role_name, role_desc, is_enabled)
 VALUES (1, 'ADMIN', 'Super Administrator', TRUE) ON CONFLICT (role_id) DO NOTHING;

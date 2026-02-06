@@ -5,8 +5,8 @@ import com.mybatisflex.annotation.Id;
 import com.mybatisflex.annotation.KeyType;
 import com.mybatisflex.annotation.Table;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
-import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
@@ -14,8 +14,9 @@ import java.time.LocalDateTime;
  * 满足 4.4 监控需求
  */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @Table("sys_login_log")
-public class SysLoginLog implements Serializable {
+public class SysLoginLog extends BaseEntity {
 
     /**
      * Token 签名 (主键)
@@ -49,16 +50,4 @@ public class SysLoginLog implements Serializable {
      * 登录状态 (1:启用, 0:禁用)，踢下线
      */
     private Boolean isEnabled;
-
-    /**
-     * 创建时间
-     */
-    @Column(onInsertValue = "now()")
-    private LocalDateTime createdTime;
-
-    /**
-     * 更新时间
-     */
-    @Column(onInsertValue = "now()", onUpdateValue = "now()")
-    private LocalDateTime updatedTime;
 }

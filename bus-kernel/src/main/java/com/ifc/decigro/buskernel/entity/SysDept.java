@@ -5,9 +5,8 @@ import com.mybatisflex.annotation.Id;
 import com.mybatisflex.annotation.KeyType;
 import com.mybatisflex.annotation.Table;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
-import java.io.Serializable;
-import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -15,8 +14,9 @@ import java.util.List;
  * 定义职能边界与工作流上下文
  */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @Table("sys_dept")
-public class SysDept implements Serializable {
+public class SysDept extends BaseEntity {
 
     /**
      * 主键 ID
@@ -33,25 +33,6 @@ public class SysDept implements Serializable {
      * 部门名称
      */
     private String deptName;
-
-    /**
-     * 租户编码
-     * 用于多租户隔离
-     */
-    @Column(tenantId = true)
-    private String tenantCode;
-
-    /**
-     * 创建时间
-     */
-    @Column(onInsertValue = "now()")
-    private LocalDateTime createdTime;
-
-    /**
-     * 更新时间
-     */
-    @Column(onInsertValue = "now()", onUpdateValue = "now()")
-    private LocalDateTime updatedTime;
 
     /**
      * 子部门列表 (非数据库字段)
