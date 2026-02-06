@@ -1,0 +1,48 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: bus-kernel
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:5432/decigro
+    username: postgres
+    password: 123456
+    driver-class-name: org.postgresql.Driver
+    type: com.zaxxer.hikari.HikariDataSource
+
+mybatis-flex:
+  mapper-locations: classpath*:/mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+logging:
+  level:
+    com.ifc.decigro.buskernel: DEBUG
+
+crypto:
+  rsa:
+    public-key: |
+      -----BEGIN PUBLIC KEY-----
+      MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC8zjdUEzNZnI1cWnIdW6/EbR57
+      A1i11ba/HWu2GUfUws1VD01FWm1fYBQ9Ja5HRipmy6Rdfa07x3VEob7IKUvElK2e
+      nNnIiwFKdFvE9mQv5W7VMIER5OWLdN2Wv/oddUMRN22WiYV0+6gv3w7tmCeLrdvx
+      zZoWePu3FK33009HSQIDAQAB
+      -----END PUBLIC KEY-----
+    private-key: |
+      -----BEGIN PRIVATE KEY-----
+      MIICdgIBADANBgkqhkiG9w0BAQEFAASCAmAwggJcAgEAAoGBALzON1QTM1mcjVxa
+      ch1br8RtHnsDWLXVtr8da7YZR9TCzVUPTUVabV9gFD0lrkdGKmbLpF19rTvHdUSh
+      vsgpS8SUrZ6c2ciLAUp0W8T2ZC/lbtUwgRHk5Yt03Za/+h11QxE3bZaJhXT7qC/f
+      Du2YJ4ut2/HNmhZ4+7cUrffTT0dJAgMBAAECgYBDGtQlaLGejvrbMTZP4u+E0/e6
+      ZwUXk77hDFblIPUb1KTgL5EaLjqjZGWtGgBoSrL1WDmyFOIGVi0C2K4TPEI2HufI
+      ulaOfwjh8yj9RKJ35bRoi1Rrbd52noBCQ+3i3hbWWH1RgHty8Njh5wqjg0+5VxBh
+      Xm7NmB967EuVeqOHAQJBAOWzocA5IZAqr6ESVRBPtiUutpjbtTLyczzxleyY6FyW
+      FjIQA9PRjdCoXhLf03EfE5G0bJbQJtSAkYbORv0liGkCQQDSa/OVpfOTnK93Awy5
+      q6o/9LNRVGBUbBgFYNWCp0M6+BWXm5pnv4mGujKrBRoFaSfh151+ccrm/olnmXyF
+      CuvhAkEAzTA0qpCeYbkv4FOO9x4tmHNtG4kQCS25MVShV5OT5bkQpLHXqWzFIQJ1
+      3qhgqelXws2IPwQ725Hp7aDwmwvfGQJAcGHLdK9vSfUzGYL9duSiRwowA03nLO+W
+      XLj9D4y5sXLyRUiLzMFVeClWClTtMtqYvFvl97Raw8hKJpSpFn1gwQJAbdNyw/NR
+      gqp9JcybZ+wo5rcsu/iub0PN9ox2v1GSICuv30QuPvSBiSTt+T+OXf5ehEE6Luni
+      eBd2m/8JQWoYiQ==
+      -----END PRIVATE KEY-----
