@@ -2,6 +2,7 @@ package com.ifc.decigro.buskernel.service.impl;
 
 import cn.hutool.crypto.digest.BCrypt;
 import com.ifc.decigro.buskernel.common.auth.TokenProvider;
+import com.ifc.decigro.buskernel.common.exception.BusinessException;
 import com.ifc.decigro.buskernel.common.crypto.RsaUtils;
 import com.ifc.decigro.buskernel.entity.SysLoginLog;
 import com.ifc.decigro.buskernel.entity.SysUser;
@@ -49,19 +50,19 @@ public class SysUserServiceImpl implements SysUserService {
 
         if (user == null) {
             log.error("登录失败：未找到用户名为 {} 的用户", request.getUsername());
-            throw new RuntimeException("用户名或密码错误");
+            throw new BusinessException("用户名或密码错误");
         }
 
         // 使用 BCrypt 校验密码 (目前先支持明文兼容，后续全量切换)
         if (!checkPassword(password, user.getPassword())) {
-            throw new RuntimeException("用户名或密码错误");
+            throw new BusinessException("用户名或密码错误");
         }
 
         if (!user.getIsEnabled()) {
-            throw new RuntimeException("账户已被禁用，请联系管理员");
+            throw new BusinessException("账户已被禁用，请联系管理员");
         }
 
-        String tenantCode = "HEYI"; 
+        String tenantCode = "HEYI";
         String deptId = user.getDeptId() != null ? user.getDeptId().toString() : "0";
         String token = tokenProvider.createToken(tenantCode, deptId, user.getUsername());
 
@@ -150,14 +151,14 @@ public class SysUserServiceImpl implements SysUserService {
     public void updatePassword(String username, String oldPassword, String newPassword) {
         SysUser user = getByUsername(username);
         if (user == null) {
-            throw new RuntimeException("用户不存在");
+            throw new BusinessException("用户不存在");
         }
 
         String rawOldPassword = rsaUtils.decrypt(oldPassword);
         String rawNewPassword = rsaUtils.decrypt(newPassword);
 
         if (!checkPassword(rawOldPassword, user.getPassword())) {
-            throw new RuntimeException("旧密码错误");
+            throw new BusinessException("旧密码错误");
         }
 
         user.setPassword(BCrypt.hashpw(rawNewPassword, BCrypt.gensalt()));

@@ -1,5 +1,6 @@
 package com.ifc.decigro.buskernel.controller;
 
+import com.ifc.decigro.buskernel.common.api.Result;
 import com.ifc.decigro.buskernel.entity.SysLoginLog;
 import com.ifc.decigro.buskernel.mapper.SysLoginLogMapper;
 import com.mybatisflex.core.query.QueryWrapper;
@@ -10,6 +11,9 @@ import java.util.List;
 
 import static com.ifc.decigro.buskernel.entity.table.SysLoginLogTableDef.SYS_LOGIN_LOG;
 
+/**
+ * 在线用户管理控制器
+ */
 @RestController
 @RequestMapping("/api/sys/online")
 public class OnlineUserController {
@@ -22,12 +26,13 @@ public class OnlineUserController {
      * 仅返回 isEnabled 为 true 的记录
      */
     @GetMapping("/list")
-    public List<SysLoginLog> list() {
-        return loginLogMapper.selectListByQuery(QueryWrapper.create()
+    public Result<List<SysLoginLog>> list() {
+        List<SysLoginLog> onlineUsers = loginLogMapper.selectListByQuery(QueryWrapper.create()
                 .select()
                 .from(SYS_LOGIN_LOG)
                 .where(SYS_LOGIN_LOG.IS_ENABLED.eq(true))
                 .orderBy(SYS_LOGIN_LOG.LOGIN_TIME.desc()));
+        return Result.success(onlineUsers);
     }
 
     /**
@@ -35,10 +40,11 @@ public class OnlineUserController {
      * 将有效状态 isEnabled 置为 false
      */
     @PostMapping("/kickout/{tokenSign}")
-    public void kickout(@PathVariable String tokenSign) {
+    public Result<Void> kickout(@PathVariable String tokenSign) {
         SysLoginLog loginLog = new SysLoginLog();
         loginLog.setTokenSign(tokenSign);
         loginLog.setIsEnabled(false);
         loginLogMapper.update(loginLog);
+        return Result.success();
     }
 }
