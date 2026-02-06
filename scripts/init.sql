@@ -1,6 +1,6 @@
 -- Database Initialization Script for DeciGro Center
 -- 1. Create Tables
--- SysTenant
+-- SysTenant (租户表)
 CREATE TABLE IF NOT EXISTS sys_tenant (
     tenant_code VARCHAR(32) PRIMARY KEY,
     tenant_name VARCHAR(100) NOT NULL,
@@ -8,15 +8,17 @@ CREATE TABLE IF NOT EXISTS sys_tenant (
     created_time TIMESTAMP DEFAULT NOW(),
     updated_time TIMESTAMP DEFAULT NOW()
 );
--- SysRole
+-- SysRole (角色表)
 CREATE TABLE IF NOT EXISTS sys_role (
     role_id BIGSERIAL PRIMARY KEY,
     role_name VARCHAR(50) NOT NULL,
     role_desc VARCHAR(255),
     tool_list JSONB,
-    is_enabled BOOLEAN DEFAULT TRUE
+    is_enabled BOOLEAN DEFAULT TRUE,
+    created_time TIMESTAMP DEFAULT NOW(),
+    updated_time TIMESTAMP DEFAULT NOW()
 );
--- SysDept
+-- SysDept (部门表)
 CREATE TABLE IF NOT EXISTS sys_dept (
     dept_id BIGSERIAL PRIMARY KEY,
     parent_id BIGINT,
@@ -24,7 +26,7 @@ CREATE TABLE IF NOT EXISTS sys_dept (
     created_time TIMESTAMP DEFAULT NOW(),
     updated_time TIMESTAMP DEFAULT NOW()
 );
--- SysUser
+-- SysUser (用户表)
 CREATE TABLE IF NOT EXISTS sys_user (
     id BIGSERIAL PRIMARY KEY,
     username VARCHAR(64) NOT NULL UNIQUE,
@@ -42,7 +44,7 @@ CREATE TABLE IF NOT EXISTS sys_user (
     created_time TIMESTAMP DEFAULT NOW(),
     updated_time TIMESTAMP DEFAULT NOW()
 );
--- SysLoginLog
+-- SysLoginLog (登录日志表)
 CREATE TABLE IF NOT EXISTS sys_login_log (
     token_sign VARCHAR(64) PRIMARY KEY,
     username VARCHAR(64) NOT NULL,
@@ -64,7 +66,7 @@ VALUES (100, 0, '平台管理部') ON CONFLICT (dept_id) DO NOTHING;
 INSERT INTO sys_role (role_id, role_name, role_desc, is_enabled)
 VALUES (1, 'ADMIN', 'Super Administrator', TRUE) ON CONFLICT (role_id) DO NOTHING;
 -- Init Admin User
--- Password is 'admin' (In real app, should be encrypted, but PRD asked for reversible encryption or plain for now as per simple auth controller implementation)
+-- Password is 'admin' (Plain text for initial setup, usually encrypted by AuthController later)
 INSERT INTO sys_user (
         id,
         username,
@@ -75,32 +77,25 @@ INSERT INTO sys_user (
         is_enabled
     )
 VALUES (1, 'admin', 'admin', 'Super Admin', 100, 1, TRUE) ON CONFLICT (id) DO NOTHING;
--- Reset Sequence
+-- Reset Sequence for PostgreSQL BIGSERIAL tables
 SELECT setval(
         'sys_user_id_seq',
         (
-            SELECT MAX(id)
+            SELECT COALESCE(MAX(id), 1)
             FROM sys_user
         )
     );
 SELECT setval(
         'sys_role_role_id_seq',
         (
-            SELECT MAX(role_id)
+            SELECT COALESCE(MAX(role_id), 1)
             FROM sys_role
         )
     );
 SELECT setval(
         'sys_dept_dept_id_seq',
         (
-            SELECT MAX(dept_id)
+            SELECT COALESCE(MAX(dept_id), 1)
             FROM sys_dept
-        )
-    );
-SELECT setval(
-        'sys_menu_menu_id_seq',
-        (
-            SELECT MAX(menu_id)
-            FROM sys_menu
         )
     );
