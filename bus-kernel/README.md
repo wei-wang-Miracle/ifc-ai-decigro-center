@@ -41,41 +41,52 @@ Tool Gatekeeper:
 
 - 用户通过Agent进行访问时，Agent仅可以使用用户可以使用的工具（包含工具获取和使用拦截）
 
-### Tool Card (参考Claude Skill 设计思想)
+### Tool Card (参考 Claude Skill 设计思想)
 
 "AI-friendly Tool Card"，本质上是一份给 LLM 看的“自述文件”。它不仅要符合编程规范（Schema），更要符合语言模型的认知逻辑（Semantics）。
 
-1. 身份与意图 (Identity & Intent) —— 解决“AI 调用谁？”
+#### 1. 身份与意图 (Identity & Intent) —— 解决“AI 调用谁？”
 
-- tool_name(唯一标识)
-  要求: 语义清晰，建议用 snake_case，如 get_weather_data 而不是 func_01。
-- tool_description(工具描述)
-  要素: 必须包含 "做什么" (Action)、"什么时候用" (Trigger) 和 "局限性" (Constraint)。
-  AI 友好写法: 不要写 "API to get weather"，要写 "Retrieves current weather conditions for a specific location. Use this tool when the user asks about temperature, rain, or forecast."
+- **tool_name** (唯一标识)
+  要求: 语义清晰，建议用 `snake_case`，如 `get_weather_data`。
+- **tool_description** (核心 Prompt)
+  要素: 必须包含 **Action (做什么)**、**Trigger (什么时候用)** 和 **Constraint (限制条件)**。
+  示例: "Retrieves current weather. Use when user asks for temperature. Input strictly city name."
+- **tool_tags** (标签)
+  用途: 用于检索或权限分组，格式为 JSON 数组，如 `['finance', 'external_api']`。
+- **tool_version** (版本号)
+  默认 `1.0.0`，用于追踪工具迭代。
+- **tool_privileges** (权限等级)
+  枚举值：`public` (公开)、`protected` (受保护)。
 
-2. 调用协议 Or 引用执行 —— 解决“怎么调用？“
+#### 2. 调用协议 (Protocol) —— 解决“怎么调用？”
 
-- use_protocol: "http" | "reference"
-  - http: 使用 HTTP 协议调用工具
-  - reference: 引用执行，即在当前对话中直接执行工具
-- parameters (JSON Schema)
-  - 字段名
-  - 数据类型
-  - 是否必传
-  - Field Description (关键语义):重点: 字段描述比字段名更重要。
-    示例: 对于字段 query，不要只写 "The query string"，要写 "The search keyword extracted from user's prompt, optimized for a search engine (e.g., remove stop words)." —— 这实际上是在把 Prompt Engineering 内嵌到工具定义中。
-  - Enumerations (枚举约束):
-    如果参数只有固定几个值（如 ["metric", "imperial"]），必须显式列出，防止 AI 产生幻觉（比如编造一个 "scientific" 单位）。
-- parameter_examples (JSON Array): Few Shot少样本提示，让模型更好的理解如何请求
+- **tool_protocol** (协议类型)
+  - `http`: 通过 REST API 调用工具，需提供 `url_path`。
+  - `reference`: 引用本地实体执行，需提供 `reference_target`（如实体表名）。
+- **url_path / reference_target**
+  具体的调用路径或引用目标。
 
-3. 结果预期 (Outcome & Feedback) —— 解决“能够得到什么？”
+#### 3. 参数定义 (Parameters) —— 解决“传什么？”
 
-- Output Schema (返回结构):
-  告诉 AI 返回的是一段文本、一个 JSON 还是一个图片 URL。这决定了 Agent 拿到结果后是直接输出给用户，还是需要进行下一轮处理。
+- **tool_parameters** (入参定义)
+  结构: `[{ "param_name": "city", "param_type": "string", "param_description": "...", "param_required": true, "param_example": "Beijing" }]`
+  **Prompt 思想**: 字段描述 (param_description) 应当包含如何从用户输入中提取该值的逻辑。
+- **output_schema** (出参定义)
+  结构与入参一致，定义工具返回的数据结构（如返回字段、类型及含义），帮助 Agent 理解如何解析结果。
 
-- Error Handling (异常契约):
-  定义当工具调用失败时，会返回什么？（是返回 null 还是具体的 error_message）。
-  AI 友好策略: 错误信息应当是“可自愈的”。例如返回 "Error: Date format invalid, please use YYYY-MM-DD"，这样 Agent 可以在下一轮自动修正参数重试。
+#### 4. 少样本增强 (Few-Shot Examples) —— 解决“模型认知”
+
+- **input_examples** (Few-Shot Input)
+  用于告诉 Agent 用户可能会怎么问，辅助模型进行 Intent Detection 和 Slot Filling。
+- **output_examples** (Few-Shot Output)
+  工具预期返回的数据结构示例，帮助 Agent 建立正确的结果处理逻辑。
+
+#### 5. 元数据 (Meta Information)
+
+- **is_online**: 布尔值，标识工具是否处于激活上线状态。
+- **manager_by**: 维护责任人。
+- **create_time / update_time**: 生命周期追踪。
 
 ## 接口文档
 

@@ -68,6 +68,12 @@ const router = createRouter({
           name: 'ToolManagement',
           component: () => import('../views/tool/index.vue'),
           meta: { title: '工具管理' }
+        },
+        {
+          path: '/agent/list',
+          name: 'AgentManagement',
+          component: () => import('../views/agent/index.vue'),
+          meta: { title: '智能体管理' }
         }
       ]
     }

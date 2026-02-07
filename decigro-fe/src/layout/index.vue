@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '../stores/user'
-import { ArrowRight, User, Lock, SwitchButton, Calendar, Stamp, List, OfficeBuilding, Monitor, ArrowDown, PriceTag, Box } from '@element-plus/icons-vue'
+import { ArrowRight, User, Lock, SwitchButton, Calendar, Stamp, List, OfficeBuilding, Monitor, ArrowDown, PriceTag, Box, Cpu } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -103,6 +103,10 @@ const breadcrumbs = computed(() => {
             <el-menu-item index="/tool/list">
                 <el-icon><Box /></el-icon>
                 工具管理
+            </el-menu-item>
+            <el-menu-item index="/agent/list">
+                <el-icon><Cpu /></el-icon>
+                智能体管理
             </el-menu-item>
         </el-menu>
         
