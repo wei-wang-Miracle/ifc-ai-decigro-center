@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive, computed } from 'vue'
 import request from '../../utils/request'
-import { Plus, Edit, Delete, Search, Refresh, Check, Close, View } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Search, Refresh, Check, Close } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 
@@ -28,9 +28,10 @@ interface ToolCard {
     toolProtocol: string
     urlPath: string
     referenceTarget: string
-    toolParameters: ToolParameter[]
-    inputExamples: any[]
-    outputExamples: any[]
+    toolParameters: ToolParameter[]  // 入参定义
+    outputSchema: ToolParameter[]    // 出参定义（结构与入参相同）
+    inputExamples: string            // 输入示例（TEXT）
+    outputExamples: string           // 输出示例（TEXT）
     isOnline: boolean
     createTime: string
     updateTime: string
@@ -61,8 +62,9 @@ const form = reactive<ToolCard>({
     urlPath: '',
     referenceTarget: '',
     toolParameters: [],
-    inputExamples: [],
-    outputExamples: [],
+    outputSchema: [],
+    inputExamples: '',
+    outputExamples: '',
     isOnline: false,
     createTime: '',
     updateTime: '',
@@ -130,6 +132,7 @@ const schemaPreview = computed(() => {
     }
 })
 
+
 // ============================================
 // 第三部分：接口调用
 // ============================================
@@ -179,11 +182,12 @@ const handleAdd = () => {
 const handleEdit = (card: ToolCard) => {
     dialogTitle.value = '编辑工具'
     Object.assign(form, JSON.parse(JSON.stringify(card)))
-    // 确保数组字段存在
+    // 确保字段存在
     if (!form.toolParameters) form.toolParameters = []
+    if (!form.outputSchema) form.outputSchema = []
     if (!form.toolTags) form.toolTags = []
-    if (!form.inputExamples) form.inputExamples = []
-    if (!form.outputExamples) form.outputExamples = []
+    if (!form.inputExamples) form.inputExamples = ''
+    if (!form.outputExamples) form.outputExamples = ''
     dialogVisible.value = true
 }
 
@@ -255,8 +259,9 @@ const resetForm = () => {
         urlPath: '',
         referenceTarget: '',
         toolParameters: [],
-        inputExamples: [],
-        outputExamples: [],
+        outputSchema: [],
+        inputExamples: '',
+        outputExamples: '',
         isOnline: false,
         createTime: '',
         updateTime: '',
@@ -278,6 +283,21 @@ const handleAddParam = () => {
 
 const handleRemoveParam = (index: number) => {
     form.toolParameters.splice(index, 1)
+}
+
+// --- 出参管理（outputSchema） ---
+const handleAddOutput = () => {
+    form.outputSchema.push({
+        param_name: '',
+        param_type: 'string',
+        param_description: '',
+        param_required: false,
+        param_example: ''
+    })
+}
+
+const handleRemoveOutput = (index: number) => {
+    form.outputSchema.splice(index, 1)
 }
 
 // --- 标签管理 ---
@@ -355,8 +375,8 @@ onMounted(() => {
     <!-- 卡片网格 -->
     <div class="card-grid" v-loading="loading">
         <div 
-            v-for="card in cardList" 
-            :key="card.id" 
+            v-for="(card, index) in cardList" 
+            :key="card.id ?? `temp-${index}`" 
             class="tool-card"
             :class="{ 'is-online': card.isOnline }"
             @click="handleView(card)">
@@ -560,6 +580,81 @@ onMounted(() => {
                     </el-table-column>
                 </el-table>
             </div>
+            
+            <!-- 出参配置（Output Schema） -->
+            <div class="form-section">
+                <div class="section-title">
+                    ▸ 出参配置（返回值结构）
+                    <el-button size="small" :icon="Plus" @click="handleAddOutput">添加出参</el-button>
+                </div>
+                <el-table :data="form.outputSchema" border size="small" class="param-table">
+                    <el-table-column label="字段名" width="130">
+                        <template #default="scope">
+                            <el-input v-model="scope.row.param_name" size="small" class="mono-input" />
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="类型" width="100">
+                        <template #default="scope">
+                            <el-select v-model="scope.row.param_type" size="small">
+                                <el-option v-for="t in paramTypeOptions" :key="t" :label="t" :value="t" />
+                            </el-select>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="描述">
+                        <template #default="scope">
+                            <el-input v-model="scope.row.param_description" size="small" />
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="必填" width="60" align="center">
+                        <template #default="scope">
+                            <el-checkbox v-model="scope.row.param_required" />
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="示例" width="120">
+                        <template #default="scope">
+                            <el-input v-model="scope.row.param_example" size="small" class="mono-input" />
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="" width="50">
+                        <template #default="scope">
+                            <el-button link type="danger" :icon="Delete" @click="handleRemoveOutput(scope.$index)" />
+                        </template>
+                    </el-table-column>
+                </el-table>
+            </div>
+            
+            <!-- Few-Shot 样本（可选） -->
+            <el-collapse class="fewshot-collapse">
+                <el-collapse-item>
+                    <template #title>
+                        <span class="collapse-title">▸ Few-Shot 样本（可选增量）</span>
+                    </template>
+                    <div class="fewshot-section">
+                        <el-row :gutter="16">
+                            <el-col :span="12">
+                                <div class="fewshot-label">输入示例 (Input Examples)</div>
+                                <el-input
+                                    v-model="form.inputExamples"
+                                    type="textarea"
+                                    :rows="5"
+                                    placeholder="可填入任意文本或 JSON，用于描述用户可能的提问方式"
+                                    class="mono-textarea" />
+                                <div class="fewshot-hint">可填入任意文本含 JSON，用于信息补充</div>
+                            </el-col>
+                            <el-col :span="12">
+                                <div class="fewshot-label">输出示例 (Output Examples)</div>
+                                <el-input
+                                    v-model="form.outputExamples"
+                                    type="textarea"
+                                    :rows="5"
+                                    placeholder="可填入任意文本或 JSON，用于描述工具返回数据结构"
+                                    class="mono-textarea" />
+                                <div class="fewshot-hint">可填入任意文本含 JSON，用于信息补充</div>
+                            </el-col>
+                        </el-row>
+                    </div>
+                </el-collapse-item>
+            </el-collapse>
             
             <!-- JSON Schema 预览 -->
             <div class="form-section">
@@ -1040,6 +1135,49 @@ onMounted(() => {
 
 .tool-dialog :deep(.el-dialog__title) {
     font-weight: 700;
+}
+
+/* --- Few-Shot 折叠面板 --- */
+.fewshot-collapse {
+    margin-bottom: 20px;
+    border: 1px dashed #e5e7eb;
+    border-radius: 2px;
+}
+
+.fewshot-collapse :deep(.el-collapse-item__header) {
+    background: #fafafa;
+    padding: 0 16px;
+    height: 40px;
+    border-bottom: none;
+}
+
+.collapse-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #6b7280;
+}
+
+.fewshot-section {
+    padding: 16px;
+}
+
+.fewshot-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 8px;
+}
+
+.fewshot-hint {
+    font-size: 11px;
+    color: #9ca3af;
+    margin-top: 4px;
+}
+
+.mono-textarea :deep(.el-textarea__inner) {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    border-radius: 2px;
 }
 
 .w-full {

@@ -97,21 +97,29 @@ public class ToolCard implements Serializable {
     private List<Map<String, Object>> toolParameters;
 
     /**
-     * 输入示例（Few-Shot Input）
-     * 用于告诉 Agent 用户可能会怎么提问
-     * 结构: ["查询北京天气", "上海今天温度多少"]
-     * 或 [{"scenario": "Normal", "content": "..."}]
+     * 出参定义列表（JSONB）
+     * 结构与 toolParameters 相同: [{ "param_name": "temperature", "param_type":
+     * "number",
+     * "param_description": "返回的温度值", "param_required": true,
+     * "param_example": 25 }]
+     * 用于描述工具返回数据的结构
      */
     @Column(typeHandler = Fastjson2TypeHandler.class)
-    private List<Object> inputExamples;
+    private List<Map<String, Object>> outputSchema;
 
     /**
-     * 输出示例（Few-Shot Output）
-     * 用于告诉 Agent 工具返回的数据结构
-     * 结构: [{"temperature": 25, "unit": "celsius", "city": "Beijing"}]
+     * 输入示例（Few-Shot Input）- TEXT 类型
+     * 可填入任意文本（含 JSON），用于信息补充
+     * 例如用户可能的提问方式、参数示例等
      */
-    @Column(typeHandler = Fastjson2TypeHandler.class)
-    private List<Object> outputExamples;
+    private String inputExamples;
+
+    /**
+     * 输出示例（Few-Shot Output）- TEXT 类型
+     * 可填入任意文本（含 JSON），用于信息补充
+     * 例如工具返回的数据结构示例
+     */
+    private String outputExamples;
 
     /**
      * 是否上线

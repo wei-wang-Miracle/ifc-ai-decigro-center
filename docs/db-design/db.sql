@@ -113,14 +113,14 @@ CREATE TABLE tool_cards (
     -- 存储为一个 JSON Array，符合前端表单结构，便于编辑
     -- 结构: [{ "param_name": "city", "param_type": "string", "param_description": "...", "param_required": true, "param_example": "Beijing" }]
     tool_parameters JSONB NOT NULL DEFAULT '[]'::jsonb,
-    -- 4. Few-Shot Examples (少样本增强)
-    -- 输入示例：用户视角的 Prompt 或 参数 JSON
-    -- 结构: ["Check weather in Tokyo", "What is the price of AAPL?"]
-    -- 或者更结构化: [{"scenario": "Normal query", "content": "..."}]
-    input_examples JSONB DEFAULT '[]'::jsonb,
+    -- 出参定义（结构与 tool_parameters 一致）
+    -- 结构: [{ "param_name": "temperature", "param_type": "number", "param_description": "温度值", "param_required": true, "param_example": 25 }]
+    output_schema JSONB NOT NULL DEFAULT '[]'::jsonb,
+    -- 4. Few-Shot Examples (少样本增强) - 改为 TEXT 类型，可填入任意文本含 JSON
+    -- 输入示例：用于补充用户视角的 Prompt 或参数示例
+    input_examples TEXT DEFAULT '',
     -- 输出示例：工具预期返回的数据结构示例，帮助 Agent 理解 schema
-    -- 结构: [{"temperature": 25, "unit": "celsius"}]
-    output_examples JSONB DEFAULT '[]'::jsonb,
+    output_examples TEXT DEFAULT '',
     is_online BOOLEAN DEFAULT false,
     -- 5. Meta Information (元数据)
     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
