@@ -807,6 +807,7 @@ onMounted(() => {
     flex: 1;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    align-content: start;
     gap: 16px;
     overflow-y: auto;
     padding: 4px;
