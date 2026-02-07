@@ -84,3 +84,57 @@ COMMENT ON COLUMN customer_tag_enum.enum_code IS '枚举值代码';
 COMMENT ON COLUMN customer_tag_enum.enum_name IS '枚举展示名称';
 COMMENT ON COLUMN customer_tag_enum.create_time IS '创建时间';
 COMMENT ON COLUMN customer_tag_enum.update_time IS '最后更新时间';
+-- ----------------------------
+-- Table structure for tool_cards
+-- ----------------------------
+CREATE TABLE tool_cards (
+    id BIGINT NOT NULL,
+    -- 1. Identity & Intent (身份与意图)
+    tool_name VARCHAR(128) NOT NULL,
+    -- 唯一标识，建议 snake_case，如 'get_weather_data'
+    tool_description TEXT NOT NULL,
+    -- 核心 Prompt：包含 Action, Trigger, Constraint。
+    -- Ex: "Retrieves weather. Use when user asks for temperature. Input strictly city name."
+    tool_tags JSONB DEFAULT '[]'::jsonb,
+    -- 标签，用于检索或权限分组，如 ['finance', 'external_api']
+    tool_version VARCHAR(32) DEFAULT '1.0.0',
+    -- 版本号
+    tool_privileges VARCHAR(32) DEFAULT 'public',
+    -- 权限枚举：public、protected
+    -- 2. Protocol (调用协议)
+    tool_protocol VARCHAR(32) NOT NULL,
+    -- 协议枚举：http、reference
+    url_path VARCHAR(128),
+    -- 当 protocol='http' 时必填，例如 '/api/v1/weather'
+    -- 基础 Host 通常在 MAS 环境变量中配置，此处仅存 Path，也可存完整 URL
+    reference_target VARCHAR(128),
+    -- 当 protocol='reference' 时必填，例如 'tool_cards'
+    -- 3. Parameters (参数定义)
+    -- 存储为一个 JSON Array，符合前端表单结构，便于编辑
+    -- 结构: [{ "param_name": "city", "param_type": "string", "param_description": "...", "param_required": true, "param_example": "Beijing" }]
+    tool_parameters JSONB NOT NULL DEFAULT '[]'::jsonb,
+    -- 4. Few-Shot Examples (少样本增强)
+    -- 输入示例：用户视角的 Prompt 或 参数 JSON
+    -- 结构: ["Check weather in Tokyo", "What is the price of AAPL?"]
+    -- 或者更结构化: [{"scenario": "Normal query", "content": "..."}]
+    input_examples JSONB DEFAULT '[]'::jsonb,
+    -- 输出示例：工具预期返回的数据结构示例，帮助 Agent 理解 schema
+    -- 结构: [{"temperature": 25, "unit": "celsius"}]
+    output_examples JSONB DEFAULT '[]'::jsonb,
+    is_online BOOLEAN DEFAULT false,
+    -- 5. Meta Information (元数据)
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    -- 原CREATE_DATE
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    manager_by VARCHAR(64),
+    -- 创建人 ID 或 Name
+    -- 约束
+    CONSTRAINT uq_tool_name UNIQUE (tool_name)
+);
+-- ----------------------------
+-- Comments (AI 辅助理解数据库结构)
+-- ----------------------------
+COMMENT ON TABLE tool_cards IS 'MAS 工具注册表，存储 Tool Card 定义';
+COMMENT ON COLUMN tool_cards.tool_parameters IS '参数列表数组，每个元素包含 name, type, description, required, example';
+COMMENT ON COLUMN tool_cards.input_examples IS 'Few-Shot Input: 用于告诉 Agent 用户可能会怎么问';
+COMMENT ON COLUMN tool_cards.output_examples IS 'Few-Shot Output: 用于告诉 Agent 工具会怎么回';

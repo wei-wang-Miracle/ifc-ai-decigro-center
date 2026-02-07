@@ -62,6 +62,12 @@ const router = createRouter({
           name: 'TagManagement',
           component: () => import('../views/tag/index.vue'),
           meta: { title: '标签管理' }
+        },
+        {
+          path: '/tool/list',
+          name: 'ToolManagement',
+          component: () => import('../views/tool/index.vue'),
+          meta: { title: '工具管理' }
         }
       ]
     }

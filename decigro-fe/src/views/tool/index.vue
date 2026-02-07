@@ -1,0 +1,1048 @@
+<script setup lang="ts">
+import { ref, onMounted, reactive, computed } from 'vue'
+import request from '../../utils/request'
+import { Plus, Edit, Delete, Search, Refresh, Check, Close, View } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import type { FormInstance, FormRules } from 'element-plus'
+
+// ============================================
+// 第一部分：数据定义
+// ============================================
+
+// --- 接口类型定义 ---
+interface ToolParameter {
+    param_name: string
+    param_type: string
+    param_description: string
+    param_required: boolean
+    param_example: string
+}
+
+interface ToolCard {
+    id: number | null
+    toolName: string
+    toolDescription: string
+    toolTags: string[]
+    toolVersion: string
+    toolPrivileges: string
+    toolProtocol: string
+    urlPath: string
+    referenceTarget: string
+    toolParameters: ToolParameter[]
+    inputExamples: any[]
+    outputExamples: any[]
+    isOnline: boolean
+    createTime: string
+    updateTime: string
+    managerBy: string
+}
+
+// --- 列表相关 ---
+const cardList = ref<ToolCard[]>([])  // 卡片列表数据
+const loading = ref(false)
+const total = ref(0)
+const pageNum = ref(1)
+const pageSize = ref(12)
+const searchKeyword = ref('')
+const searchTag = ref('')
+
+// --- 表单相关 ---
+const dialogVisible = ref(false)
+const dialogTitle = ref('')
+const formRef = ref<FormInstance>()
+const form = reactive<ToolCard>({
+    id: null,
+    toolName: '',
+    toolDescription: '',
+    toolTags: [],
+    toolVersion: '1.0.0',
+    toolPrivileges: 'public',
+    toolProtocol: 'http',
+    urlPath: '',
+    referenceTarget: '',
+    toolParameters: [],
+    inputExamples: [],
+    outputExamples: [],
+    isOnline: false,
+    createTime: '',
+    updateTime: '',
+    managerBy: ''
+})
+
+const formRules = reactive<FormRules>({
+    toolName: [
+        { required: true, message: '请输入工具名称', trigger: 'blur' },
+        { pattern: /^[a-z0-9_]+$/, message: '仅支持小写字母、数字、下划线', trigger: 'blur' }
+    ],
+    toolDescription: [{ required: true, message: '请输入工具描述', trigger: 'blur' }],
+    toolProtocol: [{ required: true, message: '请选择协议', trigger: 'change' }]
+})
+
+// --- 详情预览抽屉 ---
+const previewVisible = ref(false)
+const previewData = ref<ToolCard | null>(null)
+
+// --- 标签输入 ---
+const newTag = ref('')
+
+// --- 协议类型选项 ---
+const protocolOptions = [
+    { label: 'HTTP 接口', value: 'http' },
+    { label: '内部引用', value: 'reference' }
+]
+
+// --- 权限选项 ---
+const privilegesOptions = [
+    { label: '公开', value: 'public' },
+    { label: '受保护', value: 'protected' }
+]
+
+// --- 参数类型选项 ---
+const paramTypeOptions = ['string', 'number', 'boolean', 'array', 'object']
+
+// ============================================
+// 第二部分：计算属性
+// ============================================
+
+// 转换为 OpenAI Function Schema 格式预览
+const schemaPreview = computed(() => {
+    const properties: any = {}
+    const required: string[] = []
+    
+    form.toolParameters.forEach(param => {
+        properties[param.param_name] = {
+            type: param.param_type,
+            description: param.param_description
+        }
+        if (param.param_required) {
+            required.push(param.param_name)
+        }
+    })
+    
+    return {
+        name: form.toolName,
+        description: form.toolDescription,
+        parameters: {
+            type: 'object',
+            properties,
+            required
+        }
+    }
+})
+
+// ============================================
+// 第三部分：接口调用
+// ============================================
+
+// --- 获取工具列表 ---
+const fetchList = async () => {
+    loading.value = true
+    try {
+        const params: any = {
+            page: pageNum.value,
+            size: pageSize.value
+        }
+        if (searchKeyword.value) {
+            params.keyword = searchKeyword.value
+        }
+        if (searchTag.value) {
+            params.tag = searchTag.value
+        }
+        const res: any = await request.get('/tool-cards', { params })
+        cardList.value = res.records || []
+        total.value = res.totalRow || 0
+    } catch (e) {
+        console.error('获取工具列表失败', e)
+    } finally {
+        loading.value = false
+    }
+}
+
+// ============================================
+// 第四部分：交互方法
+// ============================================
+
+// --- 搜索 ---
+const handleSearch = () => {
+    pageNum.value = 1
+    fetchList()
+}
+
+// --- 新增工具 ---
+const handleAdd = () => {
+    dialogTitle.value = '新增工具'
+    resetForm()
+    dialogVisible.value = true
+}
+
+// --- 编辑工具 ---
+const handleEdit = (card: ToolCard) => {
+    dialogTitle.value = '编辑工具'
+    Object.assign(form, JSON.parse(JSON.stringify(card)))
+    // 确保数组字段存在
+    if (!form.toolParameters) form.toolParameters = []
+    if (!form.toolTags) form.toolTags = []
+    if (!form.inputExamples) form.inputExamples = []
+    if (!form.outputExamples) form.outputExamples = []
+    dialogVisible.value = true
+}
+
+// --- 删除工具 ---
+const handleDelete = (card: ToolCard) => {
+    ElMessageBox.confirm(
+        `确定要删除工具 "${card.toolName}" 吗？`,
+        '警告',
+        {
+            confirmButtonText: '确定',
+            cancelButtonText: '取消',
+            type: 'warning'
+        }
+    ).then(async () => {
+        try {
+            await request.delete(`/tool-cards/${card.id}`)
+            ElMessage.success('删除成功')
+            fetchList()
+        } catch (e) {
+            console.error('删除失败', e)
+        }
+    })
+}
+
+// --- 查看详情 ---
+const handleView = (card: ToolCard) => {
+    previewData.value = card
+    previewVisible.value = true
+}
+
+// --- 上线/下线 ---
+const handleToggleOnline = async (card: ToolCard) => {
+    try {
+        const action = card.isOnline ? 'offline' : 'online'
+        await request.put(`/tool-cards/${card.id}/${action}`)
+        ElMessage.success(card.isOnline ? '已下线' : '已上线')
+        fetchList()
+    } catch (e) {
+        console.error('状态切换失败', e)
+    }
+}
+
+// --- 保存工具 ---
+const submitForm = async (formEl: FormInstance | undefined) => {
+    if (!formEl) return
+    await formEl.validate(async (valid) => {
+        if (valid) {
+            try {
+                await request.post('/tool-cards', form)
+                ElMessage.success(`${dialogTitle.value}成功`)
+                dialogVisible.value = false
+                fetchList()
+            } catch (e: any) {
+                ElMessage.error(e.message || '保存失败')
+            }
+        }
+    })
+}
+
+const resetForm = () => {
+    Object.assign(form, {
+        id: null,
+        toolName: '',
+        toolDescription: '',
+        toolTags: [],
+        toolVersion: '1.0.0',
+        toolPrivileges: 'public',
+        toolProtocol: 'http',
+        urlPath: '',
+        referenceTarget: '',
+        toolParameters: [],
+        inputExamples: [],
+        outputExamples: [],
+        isOnline: false,
+        createTime: '',
+        updateTime: '',
+        managerBy: ''
+    })
+    formRef.value?.resetFields()
+}
+
+// --- 参数管理 ---
+const handleAddParam = () => {
+    form.toolParameters.push({
+        param_name: '',
+        param_type: 'string',
+        param_description: '',
+        param_required: false,
+        param_example: ''
+    })
+}
+
+const handleRemoveParam = (index: number) => {
+    form.toolParameters.splice(index, 1)
+}
+
+// --- 标签管理 ---
+const handleAddTag = () => {
+    if (newTag.value && !form.toolTags.includes(newTag.value)) {
+        form.toolTags.push(newTag.value)
+        newTag.value = ''
+    }
+}
+
+const handleRemoveTag = (tag: string) => {
+    const index = form.toolTags.indexOf(tag)
+    if (index > -1) {
+        form.toolTags.splice(index, 1)
+    }
+}
+
+// --- 分页 ---
+const handlePageChange = (page: number) => {
+    pageNum.value = page
+    fetchList()
+}
+
+// ============================================
+// 第五部分：生命周期
+// ============================================
+
+onMounted(() => {
+    fetchList()
+})
+</script>
+
+<template>
+  <div class="tool-registry">
+    <!-- 顶部操作栏 -->
+    <div class="header-bar">
+        <!-- 左侧：标题与新增 -->
+        <div class="header-left">
+            <div class="header-icon">
+                <span class="pixel-icon">▣</span>
+            </div>
+            <div class="header-info">
+                <h3 class="header-title">MAS 工具注册中心</h3>
+                <p class="header-subtitle">共 {{ total }} 个工具</p>
+            </div>
+            <el-button type="primary" :icon="Plus" @click="handleAdd" class="add-btn">
+                注册工具
+            </el-button>
+        </div>
+        
+        <!-- 右侧：搜索 -->
+        <div class="header-right">
+            <el-input
+                v-model="searchKeyword"
+                placeholder="名称/描述"
+                :prefix-icon="Search"
+                clearable
+                style="width: 140px"
+                @keyup.enter="handleSearch"
+                @clear="handleSearch"
+                class="search-input" />
+            <el-input
+                v-model="searchTag"
+                placeholder="标签"
+                clearable
+                style="width: 100px"
+                @keyup.enter="handleSearch"
+                @clear="handleSearch"
+                class="search-input" />
+            <el-button :icon="Search" @click="handleSearch" class="action-btn" />
+            <el-button :icon="Refresh" @click="fetchList" class="action-btn" />
+        </div>
+    </div>
+
+    <!-- 卡片网格 -->
+    <div class="card-grid" v-loading="loading">
+        <div 
+            v-for="card in cardList" 
+            :key="card.id" 
+            class="tool-card"
+            :class="{ 'is-online': card.isOnline }"
+            @click="handleView(card)">
+            
+            <!-- 像素状态灯 -->
+            <div class="status-indicator" :class="card.isOnline ? 'online' : 'offline'">
+                <span class="pixel"></span>
+                <span class="pixel"></span>
+                <span class="pixel"></span>
+                <span class="pixel"></span>
+                <span class="pixel center"></span>
+                <span class="pixel"></span>
+                <span class="pixel"></span>
+                <span class="pixel"></span>
+                <span class="pixel"></span>
+            </div>
+            
+            <!-- 协议标签 -->
+            <div class="protocol-badge">
+                {{ card.toolProtocol === 'http' ? 'HTTP' : 'REF' }}
+            </div>
+            
+            <!-- 卡片内容 -->
+            <div class="card-content">
+                <h4 class="card-title">{{ card.toolName }}</h4>
+                <p class="card-desc">{{ card.toolDescription }}</p>
+                
+                <!-- 标签 -->
+                <div class="card-tags" v-if="card.toolTags && card.toolTags.length">
+                    <span v-for="tag in card.toolTags.slice(0, 3)" :key="tag" class="pixel-tag">
+                        {{ tag }}
+                    </span>
+                    <span v-if="card.toolTags.length > 3" class="pixel-tag more">
+                        +{{ card.toolTags.length - 3 }}
+                    </span>
+                </div>
+                
+                <!-- 版本 -->
+                <div class="card-version">
+                    VER {{ card.toolVersion }}
+                </div>
+            </div>
+            
+            <!-- 操作区 -->
+            <div class="card-actions" @click.stop>
+                <el-button 
+                    :icon="card.isOnline ? Close : Check" 
+                    size="small" 
+                    :type="card.isOnline ? 'danger' : 'success'"
+                    circle
+                    @click="handleToggleOnline(card)" />
+                <el-button :icon="Edit" size="small" circle @click="handleEdit(card)" />
+                <el-button :icon="Delete" size="small" type="danger" circle @click="handleDelete(card)" />
+            </div>
+        </div>
+        
+        <!-- 空状态 -->
+        <div v-if="!loading && cardList.length === 0" class="empty-state">
+            <div class="pixel-icon large">□</div>
+            <p>暂无工具，点击"注册工具"开始添加</p>
+        </div>
+    </div>
+
+    <!-- 分页 -->
+    <div class="pagination-bar" v-if="total > pageSize">
+        <el-pagination
+            background
+            layout="prev, pager, next"
+            :total="total"
+            :page-size="pageSize"
+            :current-page="pageNum"
+            @current-change="handlePageChange" />
+    </div>
+
+    <!-- 编辑弹窗 -->
+    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="720px" class="tool-dialog">
+        <el-form ref="formRef" :model="form" :rules="formRules" label-width="100px" class="tool-form">
+            <!-- 基本信息 -->
+            <div class="form-section">
+                <div class="section-title">▸ 基本信息</div>
+                <el-row :gutter="16">
+                    <el-col :span="12">
+                        <el-form-item label="工具名称" prop="toolName">
+                            <el-input 
+                                v-model="form.toolName" 
+                                placeholder="snake_case 格式"
+                                :disabled="form.id !== null"
+                                class="mono-input" />
+                        </el-form-item>
+                    </el-col>
+                    <el-col :span="12">
+                        <el-form-item label="版本号">
+                            <el-input v-model="form.toolVersion" placeholder="1.0.0" class="mono-input" />
+                        </el-form-item>
+                    </el-col>
+                </el-row>
+                <el-form-item label="工具描述" prop="toolDescription">
+                    <el-input 
+                        v-model="form.toolDescription" 
+                        type="textarea" 
+                        :rows="3" 
+                        placeholder="包含 Trigger(何时用) / Action(做什么) / Constraint(限制)" />
+                </el-form-item>
+                <el-row :gutter="16">
+                    <el-col :span="12">
+                        <el-form-item label="权限级别">
+                            <el-select v-model="form.toolPrivileges" class="w-full">
+                                <el-option 
+                                    v-for="opt in privilegesOptions" 
+                                    :key="opt.value" 
+                                    :label="opt.label" 
+                                    :value="opt.value" />
+                            </el-select>
+                        </el-form-item>
+                    </el-col>
+                    <el-col :span="12">
+                        <el-form-item label="标签">
+                            <div class="tag-input-group">
+                                <el-input v-model="newTag" placeholder="添加标签" size="small" @keyup.enter="handleAddTag" />
+                                <el-button size="small" @click="handleAddTag">+</el-button>
+                            </div>
+                            <div class="tag-list">
+                                <el-tag 
+                                    v-for="tag in form.toolTags" 
+                                    :key="tag" 
+                                    closable 
+                                    size="small"
+                                    @close="handleRemoveTag(tag)">
+                                    {{ tag }}
+                                </el-tag>
+                            </div>
+                        </el-form-item>
+                    </el-col>
+                </el-row>
+            </div>
+            
+            <!-- 协议配置 -->
+            <div class="form-section">
+                <div class="section-title">▸ 协议配置</div>
+                <el-row :gutter="16">
+                    <el-col :span="8">
+                        <el-form-item label="协议类型" prop="toolProtocol">
+                            <el-select v-model="form.toolProtocol" class="w-full">
+                                <el-option 
+                                    v-for="opt in protocolOptions" 
+                                    :key="opt.value" 
+                                    :label="opt.label" 
+                                    :value="opt.value" />
+                            </el-select>
+                        </el-form-item>
+                    </el-col>
+                    <el-col :span="16">
+                        <el-form-item v-if="form.toolProtocol === 'http'" label="URL Path">
+                            <el-input v-model="form.urlPath" placeholder="/api/v1/xxx" class="mono-input" />
+                        </el-form-item>
+                        <el-form-item v-else label="引用目标">
+                            <el-input v-model="form.referenceTarget" placeholder="目标服务/表名" class="mono-input" />
+                        </el-form-item>
+                    </el-col>
+                </el-row>
+            </div>
+            
+            <!-- 参数配置 -->
+            <div class="form-section">
+                <div class="section-title">
+                    ▸ 参数配置
+                    <el-button size="small" :icon="Plus" @click="handleAddParam">添加参数</el-button>
+                </div>
+                <el-table :data="form.toolParameters" border size="small" class="param-table">
+                    <el-table-column label="参数名" width="130">
+                        <template #default="scope">
+                            <el-input v-model="scope.row.param_name" size="small" class="mono-input" />
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="类型" width="100">
+                        <template #default="scope">
+                            <el-select v-model="scope.row.param_type" size="small">
+                                <el-option v-for="t in paramTypeOptions" :key="t" :label="t" :value="t" />
+                            </el-select>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="描述">
+                        <template #default="scope">
+                            <el-input v-model="scope.row.param_description" size="small" />
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="必填" width="60" align="center">
+                        <template #default="scope">
+                            <el-checkbox v-model="scope.row.param_required" />
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="示例" width="120">
+                        <template #default="scope">
+                            <el-input v-model="scope.row.param_example" size="small" class="mono-input" />
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="" width="50">
+                        <template #default="scope">
+                            <el-button link type="danger" :icon="Delete" @click="handleRemoveParam(scope.$index)" />
+                        </template>
+                    </el-table-column>
+                </el-table>
+            </div>
+            
+            <!-- JSON Schema 预览 -->
+            <div class="form-section">
+                <div class="section-title">▸ OpenAI Schema 预览</div>
+                <pre class="schema-preview">{{ JSON.stringify(schemaPreview, null, 2) }}</pre>
+            </div>
+        </el-form>
+        <template #footer>
+            <el-button @click="dialogVisible = false">取消</el-button>
+            <el-button type="primary" @click="submitForm(formRef)">保存</el-button>
+        </template>
+    </el-dialog>
+
+    <!-- 详情抽屉 -->
+    <el-drawer v-model="previewVisible" title="工具详情" size="500px">
+        <template v-if="previewData">
+            <div class="preview-section">
+                <div class="preview-header">
+                    <span class="preview-name">{{ previewData.toolName }}</span>
+                    <el-tag :type="previewData.isOnline ? 'success' : 'info'" size="small">
+                        {{ previewData.isOnline ? 'ONLINE' : 'DRAFT' }}
+                    </el-tag>
+                </div>
+                <p class="preview-desc">{{ previewData.toolDescription }}</p>
+            </div>
+            
+            <div class="preview-section">
+                <div class="preview-label">协议</div>
+                <div class="preview-value mono">
+                    {{ previewData.toolProtocol.toUpperCase() }} 
+                    {{ previewData.toolProtocol === 'http' ? previewData.urlPath : previewData.referenceTarget }}
+                </div>
+            </div>
+            
+            <div class="preview-section" v-if="previewData.toolParameters?.length">
+                <div class="preview-label">参数定义</div>
+                <pre class="preview-json">{{ JSON.stringify(previewData.toolParameters, null, 2) }}</pre>
+            </div>
+            
+            <div class="preview-section" v-if="previewData.inputExamples?.length">
+                <div class="preview-label">输入示例</div>
+                <pre class="preview-json">{{ JSON.stringify(previewData.inputExamples, null, 2) }}</pre>
+            </div>
+            
+            <div class="preview-section" v-if="previewData.outputExamples?.length">
+                <div class="preview-label">输出示例</div>
+                <pre class="preview-json">{{ JSON.stringify(previewData.outputExamples, null, 2) }}</pre>
+            </div>
+        </template>
+    </el-drawer>
+  </div>
+</template>
+
+<style scoped>
+/* ============================================
+   极简复古像素风格 - MAS Tool Registry
+   ============================================ */
+
+/* --- 基础布局 --- */
+.tool-registry {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+/* --- 顶部操作栏 --- */
+.header-bar {
+    background: #fff;
+    border: 1px solid #1a1a1a;
+    border-radius: 2px;
+    padding: 16px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 2px 2px 0 rgba(0,0,0,0.1);
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.header-icon {
+    width: 40px;
+    height: 40px;
+    background: #1a1a1a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 2px;
+}
+
+.pixel-icon {
+    color: #4ade80;
+    font-size: 20px;
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+}
+
+.pixel-icon.large {
+    font-size: 48px;
+    color: #9ca3af;
+}
+
+.header-info {
+    min-width: 0;
+}
+
+.header-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1a1a1a;
+    margin: 0;
+    font-family: 'Inter', sans-serif;
+    letter-spacing: -0.02em;
+}
+
+.header-subtitle {
+    font-size: 11px;
+    color: #6b7280;
+    margin: 2px 0 0;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.add-btn {
+    border-radius: 2px !important;
+    font-weight: 600;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.search-input :deep(.el-input__wrapper) {
+    border-radius: 2px;
+    border: 1px solid #d1d5db;
+}
+
+.action-btn {
+    border-radius: 2px !important;
+    border: 1px solid #d1d5db !important;
+}
+
+/* --- 卡片网格 --- */
+.card-grid {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+    overflow-y: auto;
+    padding: 4px;
+}
+
+/* --- 工具卡片 --- */
+.tool-card {
+    background: #fff;
+    border: 1px solid #1a1a1a;
+    border-radius: 2px;
+    padding: 16px;
+    position: relative;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    box-shadow: 2px 2px 0 rgba(0,0,0,0.08);
+}
+
+.tool-card:hover {
+    border-width: 2px;
+    padding: 15px;
+    box-shadow: 3px 3px 0 rgba(0,0,0,0.12);
+}
+
+/* 扫描线效果 */
+.tool-card:hover::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 100%;
+    background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.03) 2px,
+        rgba(0,0,0,0.03) 4px
+    );
+    pointer-events: none;
+    animation: scanline 0.5s ease-out;
+}
+
+@keyframes scanline {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+
+.tool-card.is-online {
+    border-color: #16a34a;
+}
+
+/* --- 像素状态灯 (3x3 矩阵) --- */
+.status-indicator {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 18px;
+    height: 18px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+}
+
+.status-indicator .pixel {
+    width: 5px;
+    height: 5px;
+    background: #d1d5db;
+    border-radius: 0;
+}
+
+.status-indicator.online .pixel {
+    background: #4ade80;
+}
+
+.status-indicator.online .pixel.center {
+    background: #22c55e;
+    box-shadow: 0 0 4px #22c55e;
+}
+
+.status-indicator.offline .pixel.center {
+    background: #9ca3af;
+}
+
+/* --- 协议标签 --- */
+.protocol-badge {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    font-size: 10px;
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-weight: 700;
+    color: #6b7280;
+    background: #f3f4f6;
+    padding: 2px 6px;
+    border: 1px solid #d1d5db;
+    border-radius: 0;
+    letter-spacing: 0.5px;
+}
+
+/* --- 卡片内容 --- */
+.card-content {
+    margin-top: 28px;
+}
+
+.card-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #1a1a1a;
+    margin: 0 0 8px;
+    font-family: 'JetBrains Mono', monospace;
+    word-break: break-all;
+}
+
+.card-desc {
+    font-size: 12px;
+    color: #6b7280;
+    margin: 0 0 12px;
+    line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* --- 像素标签 --- */
+.card-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 12px;
+}
+
+.pixel-tag {
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    color: #374151;
+    background: #e5e7eb;
+    padding: 2px 6px;
+    border: 1px solid #d1d5db;
+    border-radius: 0;
+}
+
+.pixel-tag.more {
+    background: #f9fafb;
+    color: #9ca3af;
+}
+
+/* --- 版本号 --- */
+.card-version {
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    color: #9ca3af;
+    letter-spacing: 1px;
+}
+
+/* --- 卡片操作区 --- */
+.card-actions {
+    position: absolute;
+    bottom: 12px;
+    right: 12px;
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.tool-card:hover .card-actions {
+    opacity: 1;
+}
+
+/* --- 空状态 --- */
+.empty-state {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px;
+    color: #9ca3af;
+}
+
+.empty-state p {
+    margin-top: 16px;
+    font-size: 14px;
+}
+
+/* --- 分页 --- */
+.pagination-bar {
+    display: flex;
+    justify-content: center;
+    padding: 12px 0;
+}
+
+/* --- 表单样式 --- */
+.tool-form {
+    max-height: 60vh;
+    overflow-y: auto;
+    padding-right: 12px;
+}
+
+.form-section {
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px dashed #e5e7eb;
+}
+
+.form-section:last-child {
+    border-bottom: none;
+}
+
+.section-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #374151;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.mono-input :deep(.el-input__inner) {
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.tag-input-group {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 8px;
+}
+
+.tag-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.param-table {
+    border-radius: 0 !important;
+}
+
+.param-table :deep(.el-table__header th) {
+    background: #f3f4f6 !important;
+    font-weight: 600;
+    font-size: 12px;
+}
+
+/* --- Schema 预览 --- */
+.schema-preview {
+    background: #1a1a1a;
+    color: #4ade80;
+    padding: 12px;
+    border-radius: 2px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    overflow-x: auto;
+    max-height: 200px;
+}
+
+/* --- 详情抽屉 --- */
+.preview-section {
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px dashed #e5e7eb;
+}
+
+.preview-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.preview-name {
+    font-size: 18px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    color: #1a1a1a;
+}
+
+.preview-desc {
+    font-size: 14px;
+    color: #6b7280;
+    line-height: 1.6;
+}
+
+.preview-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #9ca3af;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.preview-value {
+    font-size: 14px;
+    color: #374151;
+}
+
+.preview-value.mono {
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.preview-json {
+    background: #f3f4f6;
+    padding: 12px;
+    border-radius: 2px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    overflow-x: auto;
+    color: #374151;
+    border: 1px solid #e5e7eb;
+}
+
+/* --- 弹窗样式覆盖 --- */
+.tool-dialog :deep(.el-dialog) {
+    border-radius: 2px !important;
+}
+
+.tool-dialog :deep(.el-dialog__header) {
+    border-bottom: 1px solid #e5e7eb;
+    padding: 16px 20px;
+}
+
+.tool-dialog :deep(.el-dialog__title) {
+    font-weight: 700;
+}
+
+.w-full {
+    width: 100%;
+}
+</style>
