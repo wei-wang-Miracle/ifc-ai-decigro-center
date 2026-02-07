@@ -76,3 +76,18 @@ Tool Gatekeeper:
 - Error Handling (异常契约):
   定义当工具调用失败时，会返回什么？（是返回 null 还是具体的 error_message）。
   AI 友好策略: 错误信息应当是“可自愈的”。例如返回 "Error: Date format invalid, please use YYYY-MM-DD"，这样 Agent 可以在下一轮自动修正参数重试。
+
+## 接口文档
+
+项目集成了 `springdoc-openapi`，自动生成符合 OpenAPI 3 规范的接口文档。
+
+### 访问地址
+
+- **Swagger UI**: [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html)
+- **OpenAPI JSON**: [http://localhost:8080/v3/api-docs](http://localhost:8080/v3/api-docs)
+
+### 主要功能
+
+1. **自动化**: 无需手动维护文档，随着代码更新自动同步。
+2. **交互式**: 可以在浏览器直接测试接口。
+3. **标准化**: 生成标准的 OpenAPI 3.0 定义文件。
