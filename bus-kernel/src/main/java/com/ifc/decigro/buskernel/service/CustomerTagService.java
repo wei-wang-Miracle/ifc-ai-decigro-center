@@ -44,4 +44,13 @@ public interface CustomerTagService {
      * 注意: 会级联删除关联的枚举值记录
      */
     void deleteByField(String tagField);
+
+    /**
+     * 批量迁移标签
+     * 
+     * 功能: 将源分类下的所有标签全量迁移到目标分类
+     * 参数: sourceCategoryId 源分类ID
+     * 参数: targetCategoryId 目标分类ID
+     */
+    void migrateTags(Long sourceCategoryId, Long targetCategoryId);
 }

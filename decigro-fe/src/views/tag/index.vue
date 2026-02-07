@@ -3,7 +3,7 @@ import { ref, onMounted, reactive, computed } from 'vue'
 import request from '../../utils/request'
 import { 
     Plus, Edit, Delete, Search, Refresh, Setting, 
-    FolderOpened, Collection, PriceTag 
+    FolderOpened, Collection, PriceTag, Switch 
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
@@ -29,12 +29,24 @@ const categoryRules = reactive<FormRules>({
     name: [{ required: true, message: '请输入分类名称', trigger: 'blur' }]
 })
 
+// --- 迁移相关 ---
+const migrateDialogVisible = ref(false)
+const migrateForm = reactive({
+    sourceId: null as number | null,
+    sourceName: '',
+    targetId: null as number | null
+})
+const migrateFormRef = ref<FormInstance>()
+const migrateRules = reactive<FormRules>({
+    targetId: [{ required: true, message: '请选择目标分类', trigger: 'change' }]
+})
+
 // --- 标签列表相关 ---
 const tagTableData = ref<any[]>([])  // 右侧标签表格数据
 const tagLoading = ref(false)
 const tagTotal = ref(0)
 const tagPageNum = ref(1)
-const tagPageSize = ref(20)
+const tagPageSize = ref(10)
 const searchKeyword = ref('')
 
 const tagDialogVisible = ref(false)
@@ -220,6 +232,40 @@ const submitCategoryForm = async (formEl: FormInstance | undefined) => {
     })
 }
 
+
+// --- 迁移分类下的标签 ---
+const handleMigrate = (data: any) => {
+    migrateForm.sourceId = data.id
+    migrateForm.sourceName = data.name
+    migrateForm.targetId = null
+    migrateDialogVisible.value = true
+}
+
+const submitMigrateForm = async (formEl: FormInstance | undefined) => {
+    if (!formEl) return
+    await formEl.validate(async (valid) => {
+        if (valid) {
+            if (migrateForm.sourceId === migrateForm.targetId) {
+                ElMessage.warning('目标分类不能与源分类相同')
+                return
+            }
+            try {
+                await request.post('/tags/migrate', null, {
+                    params: {
+                        sourceId: migrateForm.sourceId,
+                        targetId: migrateForm.targetId
+                    }
+                })
+                ElMessage.success('标签迁移成功')
+                migrateDialogVisible.value = false
+                fetchTagList() // 刷新当前列表
+            } catch (e) {
+                console.error('迁移标签失败', e)
+            }
+        }
+    })
+}
+
 const resetCategoryForm = () => {
     Object.assign(categoryForm, {
         id: null,
@@ -363,7 +409,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex h-full gap-4">
+  <div class="flex h-full gap-4 overflow-hidden">
     <!-- 左侧分类树 (20%) -->
     <div class="w-1/5 min-w-[240px] bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col">
         <!-- 树顶部 -->
@@ -391,7 +437,6 @@ onMounted(() => {
             <el-tree
                 :data="categoryTree"
                 node-key="id"
-                default-expand-all
                 :expand-on-click-node="false"
                 @node-click="handleCategoryClick"
                 :props="{ label: 'name', children: 'children' }">
@@ -400,6 +445,7 @@ onMounted(() => {
                         <span class="truncate">{{ node.label }}</span>
                         <div class="hidden group-hover:flex space-x-1">
                             <el-button :icon="Plus" size="small" link @click.stop="handleAddCategory(data.id)" />
+                            <el-button :icon="Switch" size="small" link title="迁移标签" @click.stop="handleMigrate(data)" />
                             <el-button :icon="Edit" size="small" link @click.stop="handleEditCategory(data)" />
                             <el-button :icon="Delete" size="small" link type="danger" @click.stop="handleDeleteCategory(data)" />
                         </div>
@@ -410,7 +456,7 @@ onMounted(() => {
     </div>
 
     <!-- 右侧标签列表 (80%) -->
-    <div class="flex-1 min-w-0 flex flex-col space-y-4">
+    <div class="flex-1 min-w-0 flex flex-col space-y-4 overflow-hidden">
         <!-- 顶部操作栏 -->
         <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-wrap gap-4 justify-between items-center bg-gradient-to-r from-white to-slate-50">
             <!-- 左侧：标题与新增 -->
@@ -443,8 +489,8 @@ onMounted(() => {
         </div>
 
         <!-- 表格区域 -->
-        <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex-1 flex flex-col">
-            <el-table v-loading="tagLoading" :data="tagTableData" style="width: 100%" class="custom-table flex-1">
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex-1 flex flex-col overflow-hidden">
+            <el-table v-loading="tagLoading" :data="tagTableData" style="width: 100%" height="100%" class="custom-table flex-1">
                 <el-table-column prop="tagField" label="字段名" width="150">
                     <template #default="scope">
                         <span class="font-mono text-sm text-gray-600">{{ scope.row.tagField }}</span>
@@ -551,6 +597,29 @@ onMounted(() => {
         <template #footer>
             <el-button @click="tagDialogVisible = false">取消</el-button>
             <el-button type="primary" @click="submitTagForm(tagFormRef)">确认</el-button>
+        </template>
+    </el-dialog>
+
+    <!-- 迁移标签弹窗 -->
+    <el-dialog v-model="migrateDialogVisible" title="迁移标签" width="420px">
+        <div class="mb-4 text-sm text-gray-500">
+            将分类 <span class="font-bold text-brand-600">"{{ migrateForm.sourceName }}"</span> 下的所有标签迁移至：
+        </div>
+        <el-form ref="migrateFormRef" :model="migrateForm" :rules="migrateRules" label-width="80px">
+            <el-form-item label="目标分类" prop="targetId">
+                <el-select v-model="migrateForm.targetId" placeholder="请选择目标分类" class="w-full">
+                    <el-option 
+                        v-for="item in flatCategoryList" 
+                        :key="item.id" 
+                        :label="item.name" 
+                        :value="item.id"
+                        :disabled="item.id === migrateForm.sourceId" />
+                </el-select>
+            </el-form-item>
+        </el-form>
+        <template #footer>
+            <el-button @click="migrateDialogVisible = false">取消</el-button>
+            <el-button type="primary" @click="submitMigrateForm(migrateFormRef)">确定迁移</el-button>
         </template>
     </el-dialog>
 

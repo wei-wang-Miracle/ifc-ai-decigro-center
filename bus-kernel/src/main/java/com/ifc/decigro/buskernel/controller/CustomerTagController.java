@@ -32,7 +32,7 @@ public class CustomerTagController {
             @RequestParam(required = false) Long categoryId,
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "10") int size) {
         return Result.success(tagService.page(categoryId, keyword, page, size));
     }
 
@@ -60,6 +60,21 @@ public class CustomerTagController {
     @DeleteMapping("/{tagField}")
     public Result<Void> delete(@PathVariable String tagField) {
         tagService.deleteByField(tagField);
+        return Result.success();
+    }
+
+    /**
+     * 批量迁移分类下的标签
+     * 
+     * 参数说明:
+     * - sourceId: 迁出的分类ID
+     * - targetId: 迁入的分类ID
+     */
+    @PostMapping("/migrate")
+    public Result<Void> migrate(
+            @RequestParam Long sourceId,
+            @RequestParam Long targetId) {
+        tagService.migrateTags(sourceId, targetId);
         return Result.success();
     }
 }

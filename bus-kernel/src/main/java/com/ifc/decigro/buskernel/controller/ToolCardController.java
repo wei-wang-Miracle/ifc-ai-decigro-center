@@ -37,7 +37,7 @@ public class ToolCardController {
             @Parameter(description = "关键字，模糊匹配名称或描述") @RequestParam(required = false) String keyword,
             @Parameter(description = "标签筛选") @RequestParam(required = false) String tag,
             @Parameter(description = "页码") @RequestParam(defaultValue = "1") int page,
-            @Parameter(description = "每页条数") @RequestParam(defaultValue = "20") int size) {
+            @Parameter(description = "每页条数") @RequestParam(defaultValue = "10") int size) {
         return Result.success(toolCardService.page(keyword, tag, page, size));
     }
 

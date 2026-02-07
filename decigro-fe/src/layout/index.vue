@@ -176,7 +176,7 @@ const breadcrumbs = computed(() => {
 
         <!-- 内容渲染区 -->
         <main class="flex-1 p-6 overflow-auto">
-             <div class="max-w-7xl mx-auto">
+             <div class="max-w-7xl mx-auto h-full">
                 <RouterView />
              </div>
         </main>

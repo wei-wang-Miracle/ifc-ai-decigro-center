@@ -129,4 +129,26 @@ public class CustomerTagServiceImpl implements CustomerTagService {
         // 第二步：删除标签本身
         tagMapper.deleteById(tagField);
     }
+
+    /**
+     * 批量迁移标签实现
+     * 使用 MyBatis-Flex 的 updateChain 进行批量更新
+     */
+    @Override
+    @Transactional
+    public void migrateTags(Long sourceCategoryId, Long targetCategoryId) {
+        if (sourceCategoryId == null || targetCategoryId == null) {
+            return;
+        }
+
+        // 创建更新对象，只设置要修改的字段
+        CustomerTag updater = new CustomerTag();
+        updater.setCategoryId(targetCategoryId);
+
+        // 构建查询条件并更新数据
+        QueryWrapper query = QueryWrapper.create()
+                .where("category_id = ?", sourceCategoryId);
+
+        tagMapper.updateByQuery(updater, query);
+    }
 }
