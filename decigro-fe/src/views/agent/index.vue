@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive } from 'vue'
 import request from '../../utils/request'
-import { Plus, Edit, Delete, Search, Refresh, Check, Close, Cpu } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Edit, Search, Refresh, Check, Close, Cpu } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 
 // ============================================
@@ -129,15 +129,6 @@ const handleEdit = (card: AgentCard) => {
     dialogVisible.value = true
 }
 
-const handleDelete = (card: AgentCard) => {
-    ElMessageBox.confirm(`确定要移除智能体 "${card.agentAlias}" 吗？`, '警告', { type: 'warning' })
-    .then(async () => {
-        await request.delete(`/agent-cards/${card.agentName}`)
-        ElMessage.success('移除成功')
-        fetchList()
-    })
-}
-
 const handleFlip = (name: string) => {
     if (flippedCards.value.has(name)) flippedCards.value.delete(name)
     else flippedCards.value.add(name)
@@ -217,10 +208,11 @@ onMounted(() => fetchList())
     <!-- 工牌网格 -->
     <div class="badge-wall" v-loading="loading">
         <div 
-            v-for="card in cardList" 
+            v-for="(card, index) in cardList" 
             :key="card.agentName" 
-            class="badge-container"
-            :class="{ 'is-flipped': flippedCards.has(card.agentName) }">
+            class="badge-container entrance-swing"
+            :class="{ 'is-flipped': flippedCards.has(card.agentName) }"
+            :style="{ animationDelay: `${index * 0.1}s` }">
             
             <div class="lanyard"><div class="lanyard-clip"></div><div class="lanyard-string"></div></div>
             
@@ -243,9 +235,11 @@ onMounted(() => fetchList())
                     
                     <div class="card-main">
                         <div class="avatar-box">
-                            <div class="pixel-avatar-inner">
-                                <span>{{ card.agentAlias[0] }}</span>
-                            </div>
+                            <img 
+                                :src="`https://api.dicebear.com/9.x/notionists/svg?seed=${card.agentName}`" 
+                                :alt="card.agentAlias"
+                                class="pixel-avatar-img"
+                            />
                         </div>
                         
                         <div class="info-content">
@@ -293,7 +287,6 @@ onMounted(() => fetchList())
                     <div class="back-actions">
                         <el-button circle :icon="card.isOnline ? Close : Check" :type="card.isOnline ? 'info' : 'success'" @click="handleToggleOnline(card)" />
                         <el-button circle :icon="Edit" @click="handleEdit(card)" />
-                        <el-button circle :icon="Delete" type="danger" @click="handleDelete(card)" />
                     </div>
                 </div>
             </div>
@@ -369,9 +362,25 @@ onMounted(() => fetchList())
 .header-icon { width: 40px; height: 40px; background: #000; display: flex; align-items: center; justify-content: center; border-radius: 4px; }
 .header-title { font-weight: 800; font-size: 18px; margin: 0; }
 .header-subtitle { font-size: 12px; color: #666; margin: 0; font-family: monospace; }
-.badge-wall { flex: 1; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 40px 24px; padding: 20px; overflow-y: auto; background: #f0f2f5; }
-.badge-container { display: flex; flex-direction: column; align-items: center; perspective: 1000px; }
-.lanyard { display: flex; flex-direction: column; align-items: center; z-index: 10; cursor: pointer; }
+.badge-wall { flex: 1; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 60px 24px; padding: 40px 20px 20px; overflow-y: auto; background: #f8faff; }
+.badge-container { display: flex; flex-direction: column; align-items: center; perspective: 1000px; transform-origin: top center; }
+
+/* 入场摆动动画 */
+.entrance-swing {
+    animation: swing-in 1.2s cubic-bezier(0.36, 0, 0.66, -0.56) backwards;
+}
+
+@keyframes swing-in {
+    0% { transform: rotateX(-30deg) rotateY(-10deg) translateY(-20px); opacity: 0; }
+    20% { transform: rotateX(15deg) rotateY(5deg); opacity: 1; }
+    40% { transform: rotateX(-10deg) rotateY(-3deg); }
+    60% { transform: rotateX(5deg) rotateY(2deg); }
+    80% { transform: rotateX(-2deg) rotateY(-1deg); }
+    100% { transform: rotateX(0) rotateY(0); }
+}
+
+.lanyard { display: flex; flex-direction: column; align-items: center; z-index: 10; cursor: pointer; transition: transform 0.3s ease; }
+.badge-container:hover .lanyard { transform: translateY(2px); }
 .lanyard-clip { width: 30px; height: 12px; background: #333; border-radius: 4px; }
 .lanyard-string { width: 4px; height: 15px; background: #4285f4; }
 .badge-flipper { width: 220px; height: 320px; position: relative; transform-style: preserve-3d; transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
@@ -393,12 +402,12 @@ onMounted(() => fetchList())
 .id-text { color: #fff; font-size: 13px; font-weight: 700; letter-spacing: 0.5px; font-family: 'JetBrains Mono', monospace; }
 
 .card-main { flex: 1; display: flex; flex-direction: column; align-items: flex-start; padding: 0 20px; }
-.avatar-box { width: 90px; height: 90px; background: #fff; border: 1px solid #edf2f7; border-radius: 12px; padding: 6px; margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
-.pixel-avatar-inner { width: 100%; height: 100%; background: #f8fafc; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 44px; font-weight: 900; color: #4285f4; border: 1px dashed #e2e8f0; }
+.avatar-box { width: 90px; height: 90px; background: #fff; border: 1px solid #edf2f7; border-radius: 12px; padding: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.pixel-avatar-img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
 
 .info-content { text-align: left; width: 100%; }
 .info-alias { font-size: 20px; font-weight: 800; color: #1a202c; margin: 0 0 8px 0; letter-spacing: -0.5px; }
-.info-desc { font-size: 13px; color: #718096; line-height: 1.5; margin: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.info-desc { font-size: 13px; color: #718096; line-height: 1.5; margin: 0; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 
 .card-divider { height: 1px; background: radial-gradient(circle, #e2e8f0 0%, transparent 100%); margin: 15px 20px; }
 
