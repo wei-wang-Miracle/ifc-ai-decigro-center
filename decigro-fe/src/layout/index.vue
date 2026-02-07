@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '../stores/user'
-import { ArrowRight, User, Lock, SwitchButton, Calendar, Stamp, List, OfficeBuilding, Monitor, ArrowDown } from '@element-plus/icons-vue'
+import { ArrowRight, User, Lock, SwitchButton, Calendar, Stamp, List, OfficeBuilding, Monitor, ArrowDown, PriceTag } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -96,6 +96,10 @@ const breadcrumbs = computed(() => {
                     在线用户
                 </el-menu-item>
             </el-sub-menu>
+            <el-menu-item index="/tag/list">
+                <el-icon><PriceTag /></el-icon>
+                标签管理
+            </el-menu-item>
         </el-menu>
         
         <!-- 用户简要信息 -->

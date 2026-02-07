@@ -56,6 +56,12 @@ const router = createRouter({
           name: 'UserPassword',
           component: () => import('../views/system/profile/password.vue'),
           meta: { title: '修改密码' }
+        },
+        {
+          path: '/tag/list',
+          name: 'TagManagement',
+          component: () => import('../views/tag/index.vue'),
+          meta: { title: '标签管理' }
         }
       ]
     }

@@ -9,8 +9,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-import static com.ifc.decigro.buskernel.entity.table.SysLoginLogTableDef.SYS_LOGIN_LOG;
-
 /**
  * 在线用户管理控制器
  */
@@ -28,10 +26,8 @@ public class OnlineUserController {
     @GetMapping("/list")
     public Result<List<SysLoginLog>> list() {
         List<SysLoginLog> onlineUsers = loginLogMapper.selectListByQuery(QueryWrapper.create()
-                .select()
-                .from(SYS_LOGIN_LOG)
-                .where(SYS_LOGIN_LOG.IS_ENABLED.eq(true))
-                .orderBy(SYS_LOGIN_LOG.LOGIN_TIME.desc()));
+                .where("is_enabled = ?", true)
+                .orderBy("login_time", false));
         return Result.success(onlineUsers);
     }
 
