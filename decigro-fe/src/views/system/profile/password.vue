@@ -24,7 +24,7 @@ const handleSubmit = async () => {
 
     loading.value = true
     try {
-        await request.put('/sys/user/password', {
+        await request.put('/user/password', {
             oldPassword: form.value.oldPassword,
             newPassword: form.value.newPassword
         })

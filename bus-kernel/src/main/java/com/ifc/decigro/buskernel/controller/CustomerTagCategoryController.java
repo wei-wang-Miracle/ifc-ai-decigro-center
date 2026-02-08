@@ -13,7 +13,7 @@ import java.util.List;
  * 功能: 提供分类树的增删改查API
  */
 @RestController
-@RequestMapping("/api/tag-categories")
+@RequestMapping("/tag/category")
 public class CustomerTagCategoryController {
 
     @Autowired
@@ -32,7 +32,7 @@ public class CustomerTagCategoryController {
      * 获取分类扁平列表
      * 用于下拉选择等场景
      */
-    @GetMapping
+    @GetMapping("/list")
     public Result<List<CustomerTagCategory>> list() {
         return Result.success(categoryService.list());
     }
@@ -40,7 +40,7 @@ public class CustomerTagCategoryController {
     /**
      * 新增或更新分类
      */
-    @PostMapping
+    @PostMapping("/save")
     public Result<Void> save(@RequestBody CustomerTagCategory category) {
         categoryService.saveOrUpdate(category);
         return Result.success();
@@ -50,7 +50,7 @@ public class CustomerTagCategoryController {
      * 删除分类
      * 如存在子分类或关联标签，返回错误信息
      */
-    @DeleteMapping("/{id}")
+    @DeleteMapping("/remove/{id}")
     public Result<Void> delete(@PathVariable Long id) {
         try {
             categoryService.deleteById(id);

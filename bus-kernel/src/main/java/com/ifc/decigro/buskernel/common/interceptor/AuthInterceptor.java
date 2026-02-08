@@ -31,7 +31,7 @@ public class AuthInterceptor implements HandlerInterceptor {
 
         // Allow public endpoints (Simple implementation, ideally use security config or
         // annotations)
-        if (request.getRequestURI().startsWith("/api/auth/login")) {
+        if (request.getRequestURI().contains("/auth/login")) {
             return true;
         }
 

@@ -3,7 +3,7 @@ import { useUserStore } from '../stores/user'
 import { ElMessage } from 'element-plus'
 
 const service = axios.create({
-  baseURL: '/api', // Proxy will handle this
+  baseURL: '/api/dg', // Proxy will handle this
   timeout: 5000
 })
 

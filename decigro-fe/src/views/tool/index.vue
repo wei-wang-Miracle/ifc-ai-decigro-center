@@ -151,7 +151,7 @@ const fetchList = async () => {
         if (searchTag.value) {
             params.tag = searchTag.value
         }
-        const res: any = await request.get('/tool-cards', { params })
+        const res: any = await request.get('/tool/page', { params })
         cardList.value = res.records || []
         total.value = res.totalRow || 0
     } catch (e) {
@@ -203,7 +203,7 @@ const handleDelete = (card: ToolCard) => {
         }
     ).then(async () => {
         try {
-            await request.delete(`/tool-cards/${card.id}`)
+            await request.delete(`/tool/remove/${card.id}`)
             ElMessage.success('删除成功')
             fetchList()
         } catch (e) {
@@ -222,7 +222,7 @@ const handleView = (card: ToolCard) => {
 const handleToggleOnline = async (card: ToolCard) => {
     try {
         const action = card.isOnline ? 'offline' : 'online'
-        await request.put(`/tool-cards/${card.id}/${action}`)
+        await request.put(`/tool/${action}/${card.id}`)
         ElMessage.success(card.isOnline ? '已下线' : '已上线')
         fetchList()
     } catch (e) {
@@ -236,7 +236,7 @@ const submitForm = async (formEl: FormInstance | undefined) => {
     await formEl.validate(async (valid) => {
         if (valid) {
             try {
-                await request.post('/tool-cards', form)
+                await request.post('/tool/save', form)
                 ElMessage.success(`${dialogTitle.value}成功`)
                 dialogVisible.value = false
                 fetchList()

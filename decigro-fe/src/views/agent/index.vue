@@ -90,7 +90,7 @@ const fetchList = async () => {
         const params: any = { page: pageNum.value, size: pageSize.value }
         if (searchKeyword.value) params.keyword = searchKeyword.value
         if (searchTag.value) params.tag = searchTag.value
-        const res: any = await request.get('/agent-cards', { params })
+        const res: any = await request.get('/agent/page', { params })
         cardList.value = res.records || []
         total.value = res.totalRow || 0
     } catch (e) {
@@ -107,7 +107,7 @@ const handleSearch = () => {
 
 const fetchAvailableTools = async () => {
     try {
-        const res: any = await request.get('/agent-cards/available-tools')
+        const res: any = await request.get('/agent/available-tools')
         availableTools.value = res || []
     } catch (e) { console.error(e) }
 }
@@ -136,7 +136,7 @@ const handleFlip = (name: string) => {
 
 const handleToggleOnline = async (card: AgentCard) => {
     const action = card.isOnline ? 'offline' : 'online'
-    await request.put(`/agent-cards/${card.agentName}/${action}`)
+    await request.put(`/agent/${action}/${card.agentName}`)
     ElMessage.success(card.isOnline ? '已离线' : '已就绪')
     fetchList()
 }
@@ -145,7 +145,7 @@ const submitForm = async (formEl: FormInstance | undefined) => {
     if (!formEl) return
     await formEl.validate(async (valid) => {
         if (valid) {
-            await request.post('/agent-cards', form)
+            await request.post('/agent/save', form)
             ElMessage.success('保存成功')
             dialogVisible.value = false
             fetchList()

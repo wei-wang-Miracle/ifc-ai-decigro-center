@@ -27,7 +27,7 @@ const rules = reactive<FormRules>({
 const fetchData = async () => {
     loading.value = true
     try {
-        const res: any = await request.get('/sys/tenant')
+        const res: any = await request.get('/tenant/list')
         tableData.value = res
     } catch (e) {
         console.error(e)
@@ -60,7 +60,7 @@ const handleDelete = (row: any) => {
             confirmButtonClass: 'el-button--danger'
         }
     ).then(async () => {
-        await request.delete(`/sys/tenant/${row.tenantCode}`)
+        await request.delete(`/tenant/remove/${row.tenantCode}`)
         ElMessage.success('清退成功')
         fetchData()
     })
@@ -69,7 +69,7 @@ const handleDelete = (row: any) => {
 const handleToggleStatus = async (row: any) => {
     const statusText = row.isEnabled ? '禁用' : '启用'
     try {
-        await request.post('/sys/tenant', {
+        await request.post('/tenant/save', {
             ...row,
             isEnabled: !row.isEnabled
         })
@@ -85,7 +85,7 @@ const submitForm = async (formEl: FormInstance | undefined) => {
     await formEl.validate(async (valid) => {
         if (valid) {
             try {
-                await request.post('/sys/tenant', form)
+                await request.post('/tenant/save', form)
                 ElMessage.success(`${dialogTitle.value}成功`)
                 dialogVisible.value = false
                 fetchData()

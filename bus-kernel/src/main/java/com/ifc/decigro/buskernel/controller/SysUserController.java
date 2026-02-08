@@ -20,7 +20,7 @@ import java.util.Map;
 @Tag(name = "用户管理", description = "系统用户管理接口，包含增删改查及个人信息维护")
 @Slf4j
 @RestController
-@RequestMapping("/api/sys/user")
+@RequestMapping("/user")
 public class SysUserController {
 
     @Autowired
@@ -31,7 +31,7 @@ public class SysUserController {
      * 返回: 统一响应格式包装的用户列表
      */
     @ToolCard(tool_name = "list_sys_users", summary = "查询用户列表", description = "获取系统所有用户的列表信息。用于管理后台展示用户清单及权限核查。")
-    @GetMapping
+    @GetMapping("/list")
     public Result<List<SysUser>> list() {
         return Result.success(userService.list());
     }
@@ -42,7 +42,7 @@ public class SysUserController {
      * 返回: 成功标志
      */
     @ToolCard(tool_name = "save_sys_user", summary = "保存或更新用户", description = "根据传入的用户实体信息，保存新用户或更新现有用户信息。调用前需验证数据完整性。")
-    @PostMapping
+    @PostMapping("/save")
     public Result<Void> save(@RequestBody SysUser user) {
         userService.saveOrUpdate(user);
         return Result.success();
@@ -54,7 +54,7 @@ public class SysUserController {
      * 返回: 成功标志
      */
     @ToolCard(tool_name = "delete_sys_user", summary = "删除用户", description = "根据用户 ID 删除指定的系统用户。注意：此操作不可逆，请谨慎调用。")
-    @DeleteMapping("/{id}")
+    @DeleteMapping("/remove/{id}")
     public Result<Void> delete(@PathVariable Long id) {
         userService.deleteById(id);
         return Result.success();

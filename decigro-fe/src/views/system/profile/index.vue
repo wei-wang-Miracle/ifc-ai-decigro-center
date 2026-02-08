@@ -17,7 +17,7 @@ const form = ref({
 const fetchProfile = async () => {
     loading.value = true
     try {
-        const res = await request.get('/sys/user/profile')
+        const res = await request.get('/user/profile')
         form.value = res as any
     } catch (error) {
         console.error(error)
@@ -29,7 +29,7 @@ const fetchProfile = async () => {
 const handleSubmit = async () => {
     loading.value = true
     try {
-        await request.put('/sys/user/profile', form.value)
+        await request.put('/user/profile', form.value)
         ElMessage.success('保存成功')
     } catch (error) {
         ElMessage.error('保存失败')

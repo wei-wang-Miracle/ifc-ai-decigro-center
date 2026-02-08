@@ -12,7 +12,7 @@ import java.util.List;
  * 租户管理控制器
  */
 @RestController
-@RequestMapping("/api/sys/tenant")
+@RequestMapping("/tenant")
 public class SysTenantController {
 
     @Autowired
@@ -21,7 +21,7 @@ public class SysTenantController {
     /**
      * 获取租户列表
      */
-    @GetMapping
+    @GetMapping("/list")
     public Result<List<SysTenant>> list() {
         return Result.success(tenantService.list());
     }
@@ -29,7 +29,7 @@ public class SysTenantController {
     /**
      * 保存或更新租户
      */
-    @PostMapping
+    @PostMapping("/save")
     public Result<Void> save(@RequestBody SysTenant tenant) {
         tenantService.saveOrUpdate(tenant);
         return Result.success();
@@ -38,7 +38,7 @@ public class SysTenantController {
     /**
      * 删除租户
      */
-    @DeleteMapping("/{id}")
+    @DeleteMapping("/remove/{id}")
     public Result<Void> delete(@PathVariable String id) {
         tenantService.deleteById(id);
         return Result.success();

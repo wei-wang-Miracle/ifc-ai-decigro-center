@@ -13,7 +13,7 @@ import java.util.List;
  * 在线用户管理控制器
  */
 @RestController
-@RequestMapping("/api/sys/online")
+@RequestMapping("/user/online")
 public class OnlineUserController {
 
     @Autowired

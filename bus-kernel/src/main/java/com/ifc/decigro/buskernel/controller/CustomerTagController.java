@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.*;
  * 功能: 提供标签主数据的增删改查API
  */
 @RestController
-@RequestMapping("/api/tags")
+@RequestMapping("/tag")
 public class CustomerTagController {
 
     @Autowired
@@ -27,7 +27,7 @@ public class CustomerTagController {
      * - page: 页码，默认1
      * - size: 每页条数，默认20
      */
-    @GetMapping
+    @GetMapping("/page")
     public Result<Page<CustomerTag>> page(
             @RequestParam(required = false) Long categoryId,
             @RequestParam(required = false) String keyword,
@@ -39,7 +39,7 @@ public class CustomerTagController {
     /**
      * 根据字段名获取标签详情
      */
-    @GetMapping("/{tagField}")
+    @GetMapping("/detail/{tagField}")
     public Result<CustomerTag> getByField(@PathVariable String tagField) {
         return Result.success(tagService.getByField(tagField));
     }
@@ -47,7 +47,7 @@ public class CustomerTagController {
     /**
      * 新增或更新标签
      */
-    @PostMapping
+    @PostMapping("/save")
     public Result<Void> save(@RequestBody CustomerTag tag) {
         tagService.saveOrUpdate(tag);
         return Result.success();
@@ -57,7 +57,7 @@ public class CustomerTagController {
      * 删除标签
      * 会级联删除关联的枚举值
      */
-    @DeleteMapping("/{tagField}")
+    @DeleteMapping("/remove/{tagField}")
     public Result<Void> delete(@PathVariable String tagField) {
         tagService.deleteByField(tagField);
         return Result.success();

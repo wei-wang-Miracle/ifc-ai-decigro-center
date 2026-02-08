@@ -21,7 +21,7 @@ const loading = ref(false)
 const fetchData = async () => {
     loading.value = true
     try {
-        const res: any = await request.get('/sys/online/list')
+        const res: any = await request.get('/user/online/list')
         tableData.value = res
     } catch (e: any) {
         ElMessage.error('获取在线用户失败: ' + (e.message || '未知错误'))
@@ -46,7 +46,7 @@ const handleKickout = (row: OnlineUser) => {
         }
     ).then(async () => {
         try {
-            await request.post(`/sys/online/kickout/${row.tokenSign}`)
+            await request.post(`/user/online/kickout/${row.tokenSign}`)
             ElMessage.success('已强行清理该会话')
             fetchData()
         } catch (e: any) {

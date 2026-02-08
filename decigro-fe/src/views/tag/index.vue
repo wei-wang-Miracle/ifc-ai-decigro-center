@@ -107,11 +107,11 @@ const selectedCategoryName = computed(() => {
 const fetchCategoryTree = async () => {
     categoryLoading.value = true
     try {
-        const res: any = await request.get('/tag-categories/tree')
+        const res: any = await request.get('/tag/category/tree')
         categoryTree.value = res
 
         // 同时获取扁平列表用于下拉选择
-        const flatRes: any = await request.get('/tag-categories')
+        const flatRes: any = await request.get('/tag/category/list')
         flatCategoryList.value = flatRes
     } catch (e) {
         console.error('获取分类树失败', e)
@@ -134,7 +134,7 @@ const fetchTagList = async () => {
         if (searchKeyword.value) {
             params.keyword = searchKeyword.value
         }
-        const res: any = await request.get('/tags', { params })
+        const res: any = await request.get('/tag/page', { params })
         tagTableData.value = res.records || []
         tagTotal.value = res.totalRow || 0
     } catch (e) {
@@ -147,7 +147,7 @@ const fetchTagList = async () => {
 // --- 获取枚举值列表 ---
 const fetchEnumList = async (tagField: string) => {
     try {
-        const res: any = await request.get(`/tag-enums/${tagField}`)
+        const res: any = await request.get(`/tag/enum/list/${tagField}`)
         enumList.value = res || []
     } catch (e) {
         console.error('获取枚举值失败', e)
@@ -204,7 +204,7 @@ const handleDeleteCategory = (data: any) => {
         }
     ).then(async () => {
         try {
-            const res: any = await request.delete(`/tag-categories/${data.id}`)
+            const res: any = await request.delete(`/tag/category/remove/${data.id}`)
             if (res === null || res === undefined) {
                 ElMessage.success('删除成功')
                 fetchCategoryTree()
@@ -221,7 +221,7 @@ const submitCategoryForm = async (formEl: FormInstance | undefined) => {
     await formEl.validate(async (valid) => {
         if (valid) {
             try {
-                await request.post('/tag-categories', categoryForm)
+                await request.post('/tag/category/save', categoryForm)
                 ElMessage.success(`${categoryDialogTitle.value}成功`)
                 categoryDialogVisible.value = false
                 fetchCategoryTree()
@@ -250,7 +250,7 @@ const submitMigrateForm = async (formEl: FormInstance | undefined) => {
                 return
             }
             try {
-                await request.post('/tags/migrate', null, {
+                await request.post('/tag/migrate', null, {
                     params: {
                         sourceId: migrateForm.sourceId,
                         targetId: migrateForm.targetId
@@ -318,7 +318,7 @@ const handleDeleteTag = (row: any) => {
         }
     ).then(async () => {
         try {
-            await request.delete(`/tags/${row.tagField}`)
+            await request.delete(`/tag/remove/${row.tagField}`)
             ElMessage.success('删除成功')
             fetchTagList()
         } catch (e) {
@@ -333,7 +333,7 @@ const submitTagForm = async (formEl: FormInstance | undefined) => {
     await formEl.validate(async (valid) => {
         if (valid) {
             try {
-                await request.post('/tags', tagForm)
+                await request.post('/tag/save', tagForm)
                 ElMessage.success(`${tagDialogTitle.value}成功`)
                 tagDialogVisible.value = false
                 fetchTagList()
@@ -390,7 +390,7 @@ const handleRemoveEnumRow = (index: number) => {
 
 const handleSaveEnums = async () => {
     try {
-        await request.post(`/tag-enums/batch/${enumCurrentTagField.value}`, enumList.value)
+        await request.post(`/tag/enum/batch/${enumCurrentTagField.value}`, enumList.value)
         ElMessage.success('枚举值保存成功')
         enumDrawerVisible.value = false
     } catch (e) {

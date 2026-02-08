@@ -16,14 +16,14 @@ import java.util.List;
  * MAS 智能体卡片管理控制器 (V2)
  */
 @RestController
-@RequestMapping("/api/agent-cards")
+@RequestMapping("/agent")
 @Tag(name = "智能体管理", description = "MAS 智能体注册中心 API")
 public class AgentCardController {
 
     @Autowired
     private AgentCardService agentCardService;
 
-    @GetMapping
+    @GetMapping("/page")
     @Operation(summary = "分页查询智能体列表")
     public Result<Page<AgentCard>> page(
             @RequestParam(required = false) String keyword,
@@ -33,34 +33,34 @@ public class AgentCardController {
         return Result.success(agentCardService.page(keyword, tag, page, size));
     }
 
-    @GetMapping("/{agentName}")
+    @GetMapping("/detail/{agentName}")
     @Operation(summary = "获取智能体详情")
     public Result<AgentCard> getByName(@PathVariable String agentName) {
         return Result.success(agentCardService.getByName(agentName));
     }
 
-    @PostMapping
+    @PostMapping("/save")
     @Operation(summary = "新增/更新智能体")
     public Result<Void> save(@RequestBody AgentCard agentCard) {
         agentCardService.saveOrUpdate(agentCard);
         return Result.success();
     }
 
-    @DeleteMapping("/{agentName}")
+    @DeleteMapping("/remove/{agentName}")
     @Operation(summary = "删除智能体")
     public Result<Void> delete(@PathVariable String agentName) {
         agentCardService.deleteByName(agentName);
         return Result.success();
     }
 
-    @PutMapping("/{agentName}/online")
+    @PutMapping("/online/{agentName}")
     @Operation(summary = "智能体上线")
     public Result<Void> online(@PathVariable String agentName) {
         agentCardService.updateOnlineStatus(agentName, true);
         return Result.success();
     }
 
-    @PutMapping("/{agentName}/offline")
+    @PutMapping("/offline/{agentName}")
     @Operation(summary = "智能体下线")
     public Result<Void> offline(@PathVariable String agentName) {
         agentCardService.updateOnlineStatus(agentName, false);

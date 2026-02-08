@@ -29,11 +29,11 @@ const fetchData = async () => {
     loading.value = true
     try {
         // 使用树状接口获取数据
-        const res: any = await request.get('/sys/dept/tree')
+        const res: any = await request.get('/dept/tree')
         tableData.value = res
         
         // 构建扁平化的部门列表用于下拉选择
-        const flatRes: any = await request.get('/sys/dept')
+        const flatRes: any = await request.get('/dept/list')
         deptTreeOptions.value = [{ deptId: 0, deptName: '无（顶级部门）' }, ...flatRes]
     } catch (e) {
         console.error(e)
@@ -69,7 +69,7 @@ const handleDelete = (row: any) => {
             confirmButtonClass: 'el-button--danger'
         }
     ).then(async () => {
-        await request.delete(`/sys/dept/${row.deptId}`)
+        await request.delete(`/dept/remove/${row.deptId}`)
         ElMessage.success('删除成功')
         fetchData()
     })
@@ -80,7 +80,7 @@ const submitForm = async (formEl: FormInstance | undefined) => {
     await formEl.validate(async (valid) => {
         if (valid) {
             try {
-                await request.post('/sys/dept', form)
+                await request.post('/dept/save', form)
                 ElMessage.success(`${dialogTitle.value}成功`)
                 dialogVisible.value = false
                 fetchData()

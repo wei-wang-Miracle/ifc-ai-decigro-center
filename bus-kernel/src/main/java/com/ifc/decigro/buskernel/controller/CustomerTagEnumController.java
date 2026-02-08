@@ -13,7 +13,7 @@ import java.util.List;
  * 功能: 提供枚举值的增删改查API
  */
 @RestController
-@RequestMapping("/api/tag-enums")
+@RequestMapping("/tag/enum")
 public class CustomerTagEnumController {
 
     @Autowired
@@ -22,7 +22,7 @@ public class CustomerTagEnumController {
     /**
      * 获取指定标签的枚举值列表
      */
-    @GetMapping("/{tagField}")
+    @GetMapping("/list/{tagField}")
     public Result<List<CustomerTagEnum>> list(@PathVariable String tagField) {
         return Result.success(enumService.listByTagField(tagField));
     }
@@ -30,7 +30,7 @@ public class CustomerTagEnumController {
     /**
      * 新增或更新单个枚举值
      */
-    @PostMapping
+    @PostMapping("/save")
     public Result<Void> save(@RequestBody CustomerTagEnum enumItem) {
         enumService.saveOrUpdate(enumItem);
         return Result.success();
@@ -51,7 +51,7 @@ public class CustomerTagEnumController {
     /**
      * 删除单个枚举值
      */
-    @DeleteMapping("/{id}")
+    @DeleteMapping("/remove/{id}")
     public Result<Void> delete(@PathVariable Long id) {
         enumService.deleteById(id);
         return Result.success();

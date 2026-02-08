@@ -12,7 +12,7 @@ import java.util.List;
  * 角色管理控制器
  */
 @RestController
-@RequestMapping("/api/sys/role")
+@RequestMapping("/role")
 public class SysRoleController {
 
     @Autowired
@@ -21,7 +21,7 @@ public class SysRoleController {
     /**
      * 获取角色列表
      */
-    @GetMapping
+    @GetMapping("/list")
     public Result<List<SysRole>> list() {
         return Result.success(roleService.list());
     }
@@ -29,7 +29,7 @@ public class SysRoleController {
     /**
      * 保存或更新角色
      */
-    @PostMapping
+    @PostMapping("/save")
     public Result<Void> save(@RequestBody SysRole role) {
         roleService.saveOrUpdate(role);
         return Result.success();
@@ -38,7 +38,7 @@ public class SysRoleController {
     /**
      * 删除角色
      */
-    @DeleteMapping("/{id}")
+    @DeleteMapping("/remove/{id}")
     public Result<Void> delete(@PathVariable Long id) {
         roleService.deleteById(id);
         return Result.success();

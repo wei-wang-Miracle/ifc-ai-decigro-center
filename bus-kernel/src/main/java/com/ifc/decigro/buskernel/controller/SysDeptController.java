@@ -12,7 +12,7 @@ import java.util.List;
  * 部门管理控制器
  */
 @RestController
-@RequestMapping("/api/sys/dept")
+@RequestMapping("/dept")
 public class SysDeptController {
 
     @Autowired
@@ -21,7 +21,7 @@ public class SysDeptController {
     /**
      * 获取部门列表
      */
-    @GetMapping
+    @GetMapping("/list")
     public Result<List<SysDept>> list() {
         return Result.success(deptService.list());
     }
@@ -29,7 +29,7 @@ public class SysDeptController {
     /**
      * 保存或更新部门
      */
-    @PostMapping
+    @PostMapping("/save")
     public Result<Void> save(@RequestBody SysDept dept) {
         deptService.saveOrUpdate(dept);
         return Result.success();
@@ -38,7 +38,7 @@ public class SysDeptController {
     /**
      * 删除部门
      */
-    @DeleteMapping("/{id}")
+    @DeleteMapping("/remove/{id}")
     public Result<Void> delete(@PathVariable Long id) {
         deptService.deleteById(id);
         return Result.success();
