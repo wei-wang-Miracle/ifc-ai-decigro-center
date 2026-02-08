@@ -88,10 +88,9 @@ COMMENT ON COLUMN customer_tag_enum.update_time IS '最后更新时间';
 -- Table structure for tool_cards
 -- ----------------------------
 CREATE TABLE tool_cards (
-    id BIGINT NOT NULL,
     -- 1. Identity & Intent (身份与意图)
     tool_name VARCHAR(128) NOT NULL,
-    -- 唯一标识，建议 snake_case，如 'get_weather_data'
+    -- 主键，唯一标识，建议 snake_case，如 'get_weather_data'
     tool_description TEXT NOT NULL,
     -- 核心 Prompt：包含 Action, Trigger, Constraint。
     -- Ex: "Retrieves weather. Use when user asks for temperature. Input strictly city name."
@@ -129,7 +128,7 @@ CREATE TABLE tool_cards (
     manager_by VARCHAR(64),
     -- 创建人 ID 或 Name
     -- 约束
-    CONSTRAINT uq_tool_name UNIQUE (tool_name)
+    CONSTRAINT pk_tool_cards PRIMARY KEY (tool_name)
 );
 -- ----------------------------
 -- Comments (AI 辅助理解数据库结构)
@@ -138,3 +137,41 @@ COMMENT ON TABLE tool_cards IS 'MAS 工具注册表，存储 Tool Card 定义';
 COMMENT ON COLUMN tool_cards.tool_parameters IS '参数列表数组，每个元素包含 name, type, description, required, example';
 COMMENT ON COLUMN tool_cards.input_examples IS 'Few-Shot Input: 用于告诉 Agent 用户可能会怎么问';
 COMMENT ON COLUMN tool_cards.output_examples IS 'Few-Shot Output: 用于告诉 Agent 工具会怎么回';
+-- 启用必要的扩展（如果需要更复杂的文本搜索，可选）
+-- CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE TABLE agent_cards (
+    -- 1. 身份与注册中心 (Identity & Registry)
+    -- 这是一个语义化的 ID，作为主键，方便代码中直接引用 (e.g. agent_cards['data_cleaner'])
+    agent_name VARCHAR(100) PRIMARY KEY,
+    -- 核心路由描述，给 Manager/Planner 做语义匹配用
+    agent_description TEXT NOT NULL,
+    -- 标签：使用 PostgreSQL 原生数组类型，支持 GIN 索引加速检索
+    -- 对应需求: ['finance', 'external_api']
+    agent_tags TEXT [] DEFAULT '{}',
+    -- 2. 内核配置 (Core Configuration)
+    -- System Prompt: Agent 的灵魂
+    system_prompt TEXT NOT NULL,
+    -- Negative Prompt: 行为边界
+    negative_prompt TEXT,
+    -- 工具绑定：
+    -- NULL: 表示默认继承用户当前会话可用的所有工具 (All Access)
+    -- Empty Array '{}': 表示不使用任何工具 (Pure Chat)
+    -- Array ['tool_a']: 仅允许使用指定工具 (Allowlist)
+    bound_tools TEXT [],
+    -- 推理框架：NULL 则使用系统默认 (e.g. Direct/CoT)，否则指定如 'ReAct'
+    reasoning_framework VARCHAR(50),
+    -- 3. 元数据 (Meta Information)
+    -- 生命周期与管理字段
+    agent_version VARCHAR(20) DEFAULT '1.0.0',
+    is_online BOOLEAN DEFAULT true,
+    -- 上下线状态，方便灰度发布或熔断
+    manager_by VARCHAR(100),
+    -- 责任人/团队
+    create_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+-- 添加字段注释 (Data Dictionary)
+COMMENT ON TABLE agent_cards IS 'Agent 注册与配置表';
+COMMENT ON COLUMN agent_cards.agent_name IS '唯一标识 (ID)，建议 snake_case';
+COMMENT ON COLUMN agent_cards.agent_description IS '给 Planner 看的路由描述';
+COMMENT ON COLUMN agent_cards.bound_tools IS 'NULL=全部工具, {}=无工具, [names]=指定工具';

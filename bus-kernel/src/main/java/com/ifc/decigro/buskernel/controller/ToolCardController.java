@@ -42,22 +42,20 @@ public class ToolCardController {
     }
 
     /**
-     * 根据 ID 获取工具详情
+     * 根据名称获取工具详情
      */
-    @GetMapping("/detail/{id}")
-    @Operation(summary = "获取工具详情", description = "根据 ID 查询单个工具的完整信息")
+    @GetMapping("/detail/{toolName}")
+    @Operation(summary = "获取工具详情", description = "根据名称查询单个工具的完整信息")
     public Result<ToolCard> getById(
-            @Parameter(description = "工具ID") @PathVariable Long id) {
-        return Result.success(toolCardService.getById(id));
+            @Parameter(description = "工具名称") @PathVariable String toolName) {
+        return Result.success(toolCardService.getById(toolName));
     }
 
     /**
      * 新增或更新工具
-     * - 当 id 为空时执行新增
-     * - 当 id 有值时执行更新
      */
     @PostMapping("/save")
-    @Operation(summary = "新增/更新工具", description = "ID 为空时新增，有值时更新。会校验 tool_name 唯一性")
+    @Operation(summary = "新增/更新工具", description = "根据 toolName 自动判断新增或更新")
     public Result<Void> save(@RequestBody ToolCard toolCard) {
         toolCardService.saveOrUpdate(toolCard);
         return Result.success();
@@ -66,11 +64,11 @@ public class ToolCardController {
     /**
      * 删除工具
      */
-    @DeleteMapping("/remove/{id}")
-    @Operation(summary = "删除工具", description = "根据 ID 删除工具")
+    @DeleteMapping("/remove/{toolName}")
+    @Operation(summary = "删除工具", description = "根据名称删除工具")
     public Result<Void> delete(
-            @Parameter(description = "工具ID") @PathVariable Long id) {
-        toolCardService.deleteById(id);
+            @Parameter(description = "工具名称") @PathVariable String toolName) {
+        toolCardService.deleteById(toolName);
         return Result.success();
     }
 
@@ -78,11 +76,11 @@ public class ToolCardController {
      * 工具上线
      * 将工具状态设置为 is_online = true
      */
-    @PutMapping("/online/{id}")
+    @PutMapping("/online/{toolName}")
     @Operation(summary = "工具上线", description = "将工具标记为上线状态，对 Agent 可见")
     public Result<Void> online(
-            @Parameter(description = "工具ID") @PathVariable Long id) {
-        toolCardService.updateOnlineStatus(id, true);
+            @Parameter(description = "工具名称") @PathVariable String toolName) {
+        toolCardService.updateOnlineStatus(toolName, true);
         return Result.success();
     }
 
@@ -90,11 +88,11 @@ public class ToolCardController {
      * 工具下线
      * 将工具状态设置为 is_online = false
      */
-    @PutMapping("/offline/{id}")
+    @PutMapping("/offline/{toolName}")
     @Operation(summary = "工具下线", description = "将工具标记为下线状态，Agent 不可见")
     public Result<Void> offline(
-            @Parameter(description = "工具ID") @PathVariable Long id) {
-        toolCardService.updateOnlineStatus(id, false);
+            @Parameter(description = "工具名称") @PathVariable String toolName) {
+        toolCardService.updateOnlineStatus(toolName, false);
         return Result.success();
     }
 
@@ -105,9 +103,8 @@ public class ToolCardController {
     @GetMapping("/check-name")
     @Operation(summary = "检查工具名称可用性", description = "检查 tool_name 是否已被使用")
     public Result<Boolean> checkName(
-            @Parameter(description = "工具名称") @RequestParam String toolName,
-            @Parameter(description = "排除的ID（编辑时传入当前工具ID）") @RequestParam(required = false) Long excludeId) {
-        boolean exists = toolCardService.existsByToolName(toolName, excludeId);
+            @Parameter(description = "工具名称") @RequestParam String toolName) {
+        boolean exists = toolCardService.existsByToolName(toolName);
         return Result.success(!exists); // 返回 true 表示可用
     }
 }

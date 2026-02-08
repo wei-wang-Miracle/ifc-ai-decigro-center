@@ -3,7 +3,6 @@ package com.ifc.decigro.buskernel.entity;
 import com.ifc.decigro.buskernel.common.handler.Fastjson2TypeHandler;
 import com.mybatisflex.annotation.Column;
 import com.mybatisflex.annotation.Id;
-import com.mybatisflex.annotation.KeyType;
 import com.mybatisflex.annotation.Table;
 import lombok.Data;
 
@@ -26,17 +25,11 @@ import java.util.Map;
 public class ToolCard implements Serializable {
 
     /**
-     * 主键 ID
-     * 使用雪花算法自动生成
-     */
-    @Id(keyType = KeyType.Generator, value = "snowFlakeId")
-    private Long id;
-
-    /**
-     * 工具唯一标识
+     * 工具唯一标识（主键）
      * 必须符合 snake_case 格式，如 'get_weather_data'
-     * 创建后不可修改（作为唯一约束）
+     * 创建后不可修改
      */
+    @Id
     private String toolName;
 
     /**

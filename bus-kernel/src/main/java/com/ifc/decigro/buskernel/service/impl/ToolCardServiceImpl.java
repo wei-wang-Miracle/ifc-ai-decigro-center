@@ -50,30 +50,26 @@ public class ToolCardServiceImpl implements ToolCardService {
     }
 
     /**
-     * 根据 ID 查询工具详情
+     * 根据名称查询工具详情
      */
     @Override
-    public ToolCard getById(Long id) {
-        return toolCardMapper.selectOneById(id);
+    public ToolCard getById(String toolName) {
+        return toolCardMapper.selectOneById(toolName);
     }
 
     /**
      * 新增或更新工具
-     * 包含工具名称唯一性校验
      */
     @Override
     public void saveOrUpdate(ToolCard toolCard) {
-        // 第一步：校验 toolName 唯一性
-        if (existsByToolName(toolCard.getToolName(), toolCard.getId())) {
-            throw new RuntimeException("工具名称 '" + toolCard.getToolName() + "' 已存在");
-        }
-
-        // 第二步：判断新增还是更新
-        if (toolCard.getId() == null) {
+        // 使用 toolName 作为主键
+        ToolCard existing = getById(toolCard.getToolName());
+        if (existing == null) {
             // 新增操作
             toolCardMapper.insert(toolCard);
         } else {
             // 更新操作
+            // 由于 toolName 是主键也是更新标识，直接 update
             toolCardMapper.update(toolCard);
         }
     }
@@ -82,19 +78,19 @@ public class ToolCardServiceImpl implements ToolCardService {
      * 删除工具
      */
     @Override
-    public void deleteById(Long id) {
-        toolCardMapper.deleteById(id);
+    public void deleteById(String toolName) {
+        toolCardMapper.deleteById(toolName);
     }
 
     /**
      * 更新工具上线状态
      */
     @Override
-    public void updateOnlineStatus(Long id, boolean isOnline) {
+    public void updateOnlineStatus(String toolName, boolean isOnline) {
         // 第一步：获取现有记录
-        ToolCard toolCard = toolCardMapper.selectOneById(id);
+        ToolCard toolCard = toolCardMapper.selectOneById(toolName);
         if (toolCard == null) {
-            throw new RuntimeException("工具不存在: " + id);
+            throw new RuntimeException("工具不存在: " + toolName);
         }
 
         // 第二步：更新状态
@@ -106,15 +102,7 @@ public class ToolCardServiceImpl implements ToolCardService {
      * 检查工具名称是否已存在
      */
     @Override
-    public boolean existsByToolName(String toolName, Long excludeId) {
-        QueryWrapper queryWrapper = QueryWrapper.create()
-                .where(TOOL_CARD.TOOL_NAME.eq(toolName));
-
-        // 编辑时排除自身
-        if (excludeId != null) {
-            queryWrapper.and(TOOL_CARD.ID.ne(excludeId));
-        }
-
-        return toolCardMapper.selectCountByQuery(queryWrapper) > 0;
+    public boolean existsByToolName(String toolName) {
+        return toolCardMapper.selectOneById(toolName) != null;
     }
 }

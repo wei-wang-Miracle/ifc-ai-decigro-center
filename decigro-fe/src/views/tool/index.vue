@@ -19,7 +19,6 @@ interface ToolParameter {
 }
 
 interface ToolCard {
-    id: number | null
     toolName: string
     toolDescription: string
     toolTags: string[]
@@ -50,9 +49,9 @@ const searchTag = ref('')
 // --- 表单相关 ---
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
+const isEdit = ref(false)
 const formRef = ref<FormInstance>()
 const form = reactive<ToolCard>({
-    id: null,
     toolName: '',
     toolDescription: '',
     toolTags: [],
@@ -173,13 +172,15 @@ const handleSearch = () => {
 
 // --- 新增工具 ---
 const handleAdd = () => {
-    dialogTitle.value = '新增工具'
+    isEdit.value = false
+    dialogTitle.value = '注册工具'
     resetForm()
     dialogVisible.value = true
 }
 
 // --- 编辑工具 ---
 const handleEdit = (card: ToolCard) => {
+    isEdit.value = true
     dialogTitle.value = '编辑工具'
     Object.assign(form, JSON.parse(JSON.stringify(card)))
     // 确保字段存在
@@ -203,7 +204,7 @@ const handleDelete = (card: ToolCard) => {
         }
     ).then(async () => {
         try {
-            await request.delete(`/tool/remove/${card.id}`)
+            await request.delete(`/tool/remove/${card.toolName}`)
             ElMessage.success('删除成功')
             fetchList()
         } catch (e) {
@@ -222,7 +223,7 @@ const handleView = (card: ToolCard) => {
 const handleToggleOnline = async (card: ToolCard) => {
     try {
         const action = card.isOnline ? 'offline' : 'online'
-        await request.put(`/tool/${action}/${card.id}`)
+        await request.put(`/tool/${action}/${card.toolName}`)
         ElMessage.success(card.isOnline ? '已下线' : '已上线')
         fetchList()
     } catch (e) {
@@ -249,7 +250,6 @@ const submitForm = async (formEl: FormInstance | undefined) => {
 
 const resetForm = () => {
     Object.assign(form, {
-        id: null,
         toolName: '',
         toolDescription: '',
         toolTags: [],
@@ -376,7 +376,7 @@ onMounted(() => {
     <div class="card-grid" v-loading="loading">
         <div 
             v-for="(card, index) in cardList" 
-            :key="card.id ?? `temp-${index}`" 
+            :key="card.toolName ?? `temp-${index}`" 
             class="tool-card"
             :class="{ 'is-online': card.isOnline }"
             @click="handleView(card)">
@@ -463,7 +463,7 @@ onMounted(() => {
                             <el-input 
                                 v-model="form.toolName" 
                                 placeholder="snake_case 格式"
-                                :disabled="form.id !== null"
+                                :disabled="isEdit"
                                 class="mono-input" />
                         </el-form-item>
                     </el-col>
