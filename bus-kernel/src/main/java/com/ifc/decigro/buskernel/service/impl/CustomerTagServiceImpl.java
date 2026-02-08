@@ -16,7 +16,11 @@ import cn.hutool.core.util.StrUtil;
 
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.stream.Collectors;
+import com.ifc.decigro.buskernel.dto.CustomerTagDto;
+import com.ifc.decigro.buskernel.entity.CustomerTagEnum;
+import com.ifc.decigro.buskernel.mapper.CustomerTagEnumMapper;
 
 /**
  * 客户标签服务实现类
@@ -36,6 +40,90 @@ public class CustomerTagServiceImpl implements CustomerTagService {
 
     @Autowired
     private CustomerTagEnumService enumService;
+
+    @Autowired
+    private CustomerTagEnumMapper enumMapper;
+
+    /**
+     * 分页查询标签
+     * 支持按分类过滤（包含子分类）和关键字搜索
+     */
+    /**
+     * 查询所有标签 (AI Tool 专用)
+     */
+    @Override
+    public List<CustomerTagDto> listAllForTool() {
+        // 1. 查询所有基础数据 (一次性查出避免 N+1)
+        List<CustomerTag> tags = tagMapper.selectAll();
+        List<CustomerTagCategory> categories = categoryMapper.selectAll();
+        List<CustomerTagEnum> enums = enumMapper.selectAll();
+
+        // 2. 构建数据映射
+        Map<Long, CustomerTagCategory> categoryMap = categories.stream()
+                .collect(Collectors.toMap(CustomerTagCategory::getId, c -> c));
+
+        Map<String, List<CustomerTagEnum>> enumsMap = enums.stream()
+                .collect(Collectors.groupingBy(CustomerTagEnum::getTagField));
+
+        // 3. 转换为 DTO
+        return tags.stream().map(tag -> convertToDto(tag, categoryMap, enumsMap))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * 转换为 DTO 并填充扩展信息
+     */
+    private CustomerTagDto convertToDto(CustomerTag tag,
+            Map<Long, CustomerTagCategory> categoryMap,
+            Map<String, List<CustomerTagEnum>> enumsMap) {
+        CustomerTagDto dto = new CustomerTagDto();
+        dto.setTagField(tag.getTagField());
+        dto.setTagTable(tag.getTagTable());
+        dto.setTagName(tag.getTagName());
+        dto.setTagDesc(tag.getTagDesc());
+        dto.setValueType(tag.getValueType());
+
+        // 解析一级分类名称
+        String rootCategoryName = findRootCategoryName(tag.getCategoryId(), categoryMap);
+        dto.setCategoryName(rootCategoryName);
+
+        // 如果是枚举类型，填充枚举值
+        if ("enum".equalsIgnoreCase(tag.getValueType())) {
+            List<CustomerTagEnum> tagEnums = enumsMap.get(tag.getTagField());
+            if (tagEnums != null && !tagEnums.isEmpty()) {
+                List<Map<String, String>> enumList = tagEnums.stream().map(e -> {
+                    Map<String, String> m = new HashMap<>();
+                    m.put("enum_code", e.getEnumCode());
+                    m.put("enum_name", e.getEnumName());
+                    return m;
+                }).collect(Collectors.toList());
+                dto.setTagEnums(enumList);
+            }
+        }
+        return dto;
+    }
+
+    /**
+     * 递归查找一级分类名称
+     */
+    private String findRootCategoryName(Long categoryId, Map<Long, CustomerTagCategory> map) {
+        if (categoryId == null || !map.containsKey(categoryId)) {
+            return "未分类";
+        }
+
+        CustomerTagCategory current = map.get(categoryId);
+        int safetyCounter = 0; // 防止数据异常导致死循环
+
+        // 向上溯源直到 parentId 为 0 (根节点) 或 null
+        while (current.getParentId() != null && current.getParentId() != 0 && safetyCounter++ < 20) {
+            CustomerTagCategory parent = map.get(current.getParentId());
+            if (parent == null)
+                break;
+            current = parent;
+        }
+
+        return current.getName();
+    }
 
     /**
      * 分页查询标签

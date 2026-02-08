@@ -4,7 +4,7 @@ import com.ifc.decigro.buskernel.common.api.Result;
 import com.ifc.decigro.buskernel.common.context.UserContext;
 import com.ifc.decigro.buskernel.entity.SysUser;
 import com.ifc.decigro.buskernel.service.SysUserService;
-import com.ifc.decigro.buskernel.common.annotation.ToolCard;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,7 +30,7 @@ public class SysUserController {
      * 查询用户列表
      * 返回: 统一响应格式包装的用户列表
      */
-    @ToolCard(tool_name = "list_sys_users", summary = "查询用户列表", description = "获取系统所有用户的列表信息。用于管理后台展示用户清单及权限核查。")
+    @Operation(summary = "查询用户列表", description = "获取系统所有用户的列表信息。用于管理后台展示用户清单及权限核查。")
     @GetMapping("/list")
     public Result<List<SysUser>> list() {
         return Result.success(userService.list());
@@ -41,7 +41,7 @@ public class SysUserController {
      * 参数: 用户实体信息
      * 返回: 成功标志
      */
-    @ToolCard(tool_name = "save_sys_user", summary = "保存或更新用户", description = "根据传入的用户实体信息，保存新用户或更新现有用户信息。调用前需验证数据完整性。")
+    @Operation(summary = "保存或更新用户", description = "根据传入的用户实体信息，保存新用户或更新现有用户信息。调用前需验证数据完整性。")
     @PostMapping("/save")
     public Result<Void> save(@RequestBody SysUser user) {
         userService.saveOrUpdate(user);
@@ -53,7 +53,7 @@ public class SysUserController {
      * 参数: 用户 ID
      * 返回: 成功标志
      */
-    @ToolCard(tool_name = "delete_sys_user", summary = "删除用户", description = "根据用户 ID 删除指定的系统用户。注意：此操作不可逆，请谨慎调用。")
+    @Operation(summary = "删除用户", description = "根据用户 ID 删除指定的系统用户。注意：此操作不可逆，请谨慎调用。")
     @DeleteMapping("/remove/{id}")
     public Result<Void> delete(@PathVariable Long id) {
         userService.deleteById(id);
@@ -64,7 +64,7 @@ public class SysUserController {
      * 获取当前登录用户信息
      * 返回: 当前用户实体对象包装类
      */
-    @ToolCard(tool_name = "get_user_profile", summary = "获取当前登录用户信息", description = "根据当前会话 Token 获取用户的详细个人资料，包括昵称、邮箱等。")
+    @Operation(summary = "获取当前登录用户信息", description = "根据当前会话 Token 获取用户的详细个人资料，包括昵称、邮箱等。")
     @GetMapping("/profile")
     public Result<SysUser> profile() {
         String username = UserContext.getUserName();
@@ -76,7 +76,7 @@ public class SysUserController {
      * 参数: 待更新的用户信息
      * 返回: 成功标志
      */
-    @ToolCard(tool_name = "update_user_profile", summary = "更新当前登录用户信息", description = "修改当前登录用户的个人基本资料。仅允许修改昵称、性别、展示邮箱及电话字段。")
+    @Operation(summary = "更新当前登录用户信息", description = "修改当前登录用户的个人基本资料。仅允许修改昵称、性别、展示邮箱及电话字段。")
     @PutMapping("/profile")
     public Result<Void> updateProfile(@RequestBody SysUser user) {
         String username = UserContext.getUserName();
@@ -97,7 +97,7 @@ public class SysUserController {
      * 参数: 包含 oldPassword 和 newPassword 的 Map
      * 返回: 成功标志
      */
-    @ToolCard(tool_name = "update_user_password", summary = "修改当前登录用户密码", description = "通过验证旧密码来设置新密码。当用户怀疑账户安全或定期更正时调用。")
+    @Operation(summary = "修改当前登录用户密码", description = "通过验证旧密码来设置新密码。当用户怀疑账户安全或定期更正时调用。")
     @PutMapping("/password")
     public Result<Void> updatePassword(@RequestBody Map<String, String> params) {
         String username = UserContext.getUserName();

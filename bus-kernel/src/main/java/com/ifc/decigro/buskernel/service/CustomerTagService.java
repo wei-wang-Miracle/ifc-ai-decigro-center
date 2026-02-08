@@ -18,6 +18,21 @@ public interface CustomerTagService {
      * 参数: pageSize 每页条数
      * 返回: 分页结果
      */
+    /**
+     * 查询所有标签 (AI Tool 专用)
+     * 返回: 包含完整元数据定义的标签 DTO 列表
+     */
+    java.util.List<com.ifc.decigro.buskernel.dto.CustomerTagDto> listAllForTool();
+
+    /**
+     * 分页查询标签列表
+     * 
+     * 参数: categoryId 分类ID（可选），传入时查询该分类及子分类下的标签
+     * 参数: keyword 关键字（可选），模糊匹配标签名称或字段名
+     * 参数: pageNum 页码，从1开始
+     * 参数: pageSize 每页条数
+     * 返回: 分页结果
+     */
     Page<CustomerTag> page(Long categoryId, String keyword, int pageNum, int pageSize);
 
     /**

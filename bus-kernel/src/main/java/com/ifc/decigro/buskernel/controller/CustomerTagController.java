@@ -7,6 +7,10 @@ import com.mybatisflex.core.paginate.Page;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import com.ifc.decigro.buskernel.dto.CustomerTagDto;
+import com.ifc.decigro.buskernel.common.annotation.ToolCard;
+import java.util.List;
+
 /**
  * 客户标签管理控制器
  * 功能: 提供标签主数据的增删改查API
@@ -17,6 +21,16 @@ public class CustomerTagController {
 
     @Autowired
     private CustomerTagService tagService;
+
+    /**
+     * 获取所有标签列表
+     * 返回: 包含所有客户标签的完整列表
+     */
+    @ToolCard(tool_name = "get_all_customer_tags", summary = "获取所有客户标签", description = "获取系统中定义的所有客户标签列表。通常用于提取标签元数据或进行标签匹配。返回结果包含标签字段名、名称及所属分类。")
+    @GetMapping("/get_all_customer_tags")
+    public Result<List<CustomerTagDto>> get_all_customer_tags() {
+        return Result.success(tagService.listAllForTool());
+    }
 
     /**
      * 分页查询标签
