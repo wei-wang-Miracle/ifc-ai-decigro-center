@@ -42,6 +42,43 @@ public @interface ToolCard {
     String description() default "";
 
     /**
+     * 工具标签 (tags)
+     * 用于分类检索，如 "user", "admin"
+     */
+    String[] tags() default {};
+
+    /**
+     * 工具版本号 (version)
+     * 默认 "1.0.0"
+     */
+    String version() default "1.0.0";
+
+    /**
+     * 权限级别 (privileges)
+     * 枚举值：public（公开可用）、protected（需授权）
+     * 默认 protected
+     */
+    String privileges() default "protected";
+
+    /**
+     * 输入示例 (input_examples)
+     * 提供 Few-Shot Prompt 的输入示例
+     */
+    String input_examples() default "";
+
+    /**
+     * 输出示例 (output_examples)
+     * 提供 Few-Shot Prompt 的输出示例
+     */
+    String output_examples() default "";
+
+    /**
+     * 管理人 (manager)
+     * 默认 system
+     */
+    String manager() default "system";
+
+    /**
      * 是否启用审计记录
      *
      * @return 是否审计

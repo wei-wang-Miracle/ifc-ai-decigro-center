@@ -34,4 +34,10 @@ public @interface ToolOutput {
      * 详细说明该字段的含义、取值范围或用途。
      */
     String param_description() default "";
+
+    /**
+     * 是否必须 (param_required)
+     * 默认 true
+     */
+    boolean param_required() default true;
 }
