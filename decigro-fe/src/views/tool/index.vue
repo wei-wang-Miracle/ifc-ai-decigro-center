@@ -131,6 +131,23 @@ const schemaPreview = computed(() => {
     }
 })
 
+// 转换为 Output Schema 格式预览
+const outputSchemaPreview = computed(() => {
+    const properties: any = {}
+    
+    form.outputSchema.forEach(param => {
+        properties[param.param_name] = {
+            type: param.param_type,
+            description: param.param_description
+        }
+    })
+    
+    return {
+        type: 'object',
+        properties
+    }
+})
+
 
 // ============================================
 // 第三部分：接口调用
@@ -605,11 +622,6 @@ onMounted(() => {
                             <el-input v-model="scope.row.param_description" size="small" />
                         </template>
                     </el-table-column>
-                    <el-table-column label="必填" width="60" align="center">
-                        <template #default="scope">
-                            <el-checkbox v-model="scope.row.param_required" />
-                        </template>
-                    </el-table-column>
                     <el-table-column label="示例" width="120">
                         <template #default="scope">
                             <el-input v-model="scope.row.param_example" size="small" class="mono-input" />
@@ -656,10 +668,16 @@ onMounted(() => {
                 </el-collapse-item>
             </el-collapse>
             
-            <!-- JSON Schema 预览 -->
+            <!-- Schema 预览 -->
             <div class="form-section">
-                <div class="section-title">▸ OpenAI Schema 预览</div>
-                <pre class="schema-preview">{{ JSON.stringify(schemaPreview, null, 2) }}</pre>
+                <el-tabs type="border-card" class="schema-tabs">
+                    <el-tab-pane label="OpenAI Function Schema (Input)">
+                        <pre class="schema-preview">{{ JSON.stringify(schemaPreview, null, 2) }}</pre>
+                    </el-tab-pane>
+                    <el-tab-pane label="Output Schema (Return)">
+                        <pre class="schema-preview">{{ JSON.stringify(outputSchemaPreview, null, 2) }}</pre>
+                    </el-tab-pane>
+                </el-tabs>
             </div>
         </el-form>
         <template #footer>
@@ -669,39 +687,89 @@ onMounted(() => {
     </el-dialog>
 
     <!-- 详情抽屉 -->
-    <el-drawer v-model="previewVisible" title="工具详情" size="500px">
+    <el-drawer v-model="previewVisible" title="工具详情" size="640px" class="detail-drawer">
         <template v-if="previewData">
-            <div class="preview-section">
-                <div class="preview-header">
+            <div class="preview-header-box">
+                <div class="preview-title-row">
                     <span class="preview-name">{{ previewData.toolName }}</span>
-                    <el-tag :type="previewData.isOnline ? 'success' : 'info'" size="small">
+                    <el-tag :type="previewData.isOnline ? 'success' : 'info'" effect="dark" size="small" class="mono-tag">
                         {{ previewData.isOnline ? 'ONLINE' : 'DRAFT' }}
                     </el-tag>
+                    <span class="preview-version">v{{ previewData.toolVersion }}</span>
                 </div>
-                <p class="preview-desc">{{ previewData.toolDescription }}</p>
-            </div>
-            
-            <div class="preview-section">
-                <div class="preview-label">协议</div>
-                <div class="preview-value mono">
-                    {{ previewData.toolProtocol.toUpperCase() }} 
-                    {{ previewData.toolProtocol === 'http' ? previewData.urlPath : previewData.referenceTarget }}
+                <div class="preview-desc-row">{{ previewData.toolDescription }}</div>
+                <div class="preview-tags-row" v-if="previewData.toolTags && previewData.toolTags.length">
+                    <el-tag v-for="tag in previewData.toolTags" :key="tag" type="info" size="small" class="tag-item">{{ tag }}</el-tag>
                 </div>
             </div>
             
-            <div class="preview-section" v-if="previewData.toolParameters?.length">
-                <div class="preview-label">参数定义</div>
-                <pre class="preview-json">{{ JSON.stringify(previewData.toolParameters, null, 2) }}</pre>
-            </div>
-            
-            <div class="preview-section" v-if="previewData.inputExamples?.length">
-                <div class="preview-label">输入示例</div>
-                <pre class="preview-json">{{ JSON.stringify(previewData.inputExamples, null, 2) }}</pre>
-            </div>
-            
-            <div class="preview-section" v-if="previewData.outputExamples?.length">
-                <div class="preview-label">输出示例</div>
-                <pre class="preview-json">{{ JSON.stringify(previewData.outputExamples, null, 2) }}</pre>
+            <div class="preview-content">
+                <div class="info-grid">
+                    <div class="info-item">
+                        <div class="label">协议类型</div>
+                        <div class="value mono">{{ previewData.toolProtocol.toUpperCase() }}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="label">权限级别</div>
+                        <div class="value">{{ previewData.toolPrivileges === 'public' ? '公开' : '受保护' }}</div>
+                    </div>
+                    <div class="info-item full">
+                        <div class="label">{{ previewData.toolProtocol === 'http' ? 'URL Path' : '引用目标' }}</div>
+                        <div class="value mono">{{ previewData.toolProtocol === 'http' ? previewData.urlPath : previewData.referenceTarget }}</div>
+                    </div>
+                </div>
+
+                <!-- 这是一个分割线 -->
+                <div class="divider"></div>
+
+                <!-- 入参定义 -->
+                <div class="section-block">
+                    <div class="block-title">▸ 参数定义 (Parameters)</div>
+                    <el-table 
+                        v-if="previewData.toolParameters?.length"
+                        :data="previewData.toolParameters" 
+                        border 
+                        size="small" 
+                        class="preview-table">
+                        <el-table-column prop="param_name" label="参数名" width="140" />
+                        <el-table-column prop="param_type" label="类型" width="80" />
+                        <el-table-column prop="param_required" label="必填" width="60" align="center">
+                            <template #default="{ row }">
+                                <span v-if="row.param_required" style="color:#f56c6c">•</span>
+                            </template>
+                        </el-table-column>
+                        <el-table-column prop="param_description" label="描述" />
+                    </el-table>
+                    <div v-else class="empty-text">无入参定义</div>
+                </div>
+
+                <!-- 出参定义 -->
+                <div class="section-block">
+                    <div class="block-title">▸ 出参定义 (Output Schema)</div>
+                    <el-table 
+                        v-if="previewData.outputSchema?.length"
+                        :data="previewData.outputSchema" 
+                        border 
+                        size="small" 
+                        class="preview-table">
+                        <el-table-column prop="param_name" label="字段名" width="140" />
+                        <el-table-column prop="param_type" label="类型" width="80" />
+                        <el-table-column prop="param_description" label="描述" />
+                    </el-table>
+                    <div v-else class="empty-text">无出参定义</div>
+                </div>
+
+                <!-- 示例 -->
+                <div class="section-block" v-if="previewData.inputExamples || previewData.outputExamples">
+                    <el-tabs type="card" class="example-tabs">
+                        <el-tab-pane label="输入示例" v-if="previewData.inputExamples">
+                            <pre class="code-block">{{ previewData.inputExamples }}</pre>
+                        </el-tab-pane>
+                        <el-tab-pane label="输出示例" v-if="previewData.outputExamples">
+                            <pre class="code-block">{{ previewData.outputExamples }}</pre>
+                        </el-tab-pane>
+                    </el-tabs>
+                </div>
             </div>
         </template>
     </el-drawer>
@@ -1068,13 +1136,19 @@ onMounted(() => {
 }
 
 /* --- 详情抽屉 --- */
-.preview-section {
-    margin-bottom: 20px;
-    padding-bottom: 16px;
-    border-bottom: 1px dashed #e5e7eb;
+.detail-drawer :deep(.el-drawer__body) {
+    padding: 0;
+    display: flex;
+    flex-direction: column;
 }
 
-.preview-header {
+.preview-header-box {
+    padding: 24px;
+    background: #fafafa;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.preview-title-row {
     display: flex;
     align-items: center;
     gap: 12px;
@@ -1082,47 +1156,144 @@ onMounted(() => {
 }
 
 .preview-name {
-    font-size: 18px;
+    font-size: 20px;
     font-weight: 700;
-    font-family: 'JetBrains Mono', monospace;
+    font-family: 'Inter', sans-serif;
     color: #1a1a1a;
 }
 
-.preview-desc {
-    font-size: 14px;
-    color: #6b7280;
-    line-height: 1.6;
-}
-
-.preview-label {
+.preview-version {
     font-size: 12px;
-    font-weight: 600;
-    color: #9ca3af;
-    margin-bottom: 8px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.preview-value {
-    font-size: 14px;
-    color: #374151;
-}
-
-.preview-value.mono {
     font-family: 'JetBrains Mono', monospace;
+    color: #9ca3af;
 }
 
-.preview-json {
-    background: #f3f4f6;
-    padding: 12px;
+.mono-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    border-radius: 2px;
+}
+
+.preview-desc-row {
+    font-size: 14px;
+    color: #4b5563;
+    line-height: 1.6;
+    margin-bottom: 12px;
+}
+
+.preview-tags-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.tag-item {
     border-radius: 2px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    line-height: 1.5;
-    overflow-x: auto;
-    color: #374151;
-    border: 1px solid #e5e7eb;
+    color: #4b5563;
 }
+
+.preview-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+}
+
+.info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.info-item .label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #9ca3af;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+
+.info-item .value {
+    font-size: 13px;
+    color: #1a1a1a;
+    font-weight: 500;
+}
+
+.info-item .value.mono {
+    font-family: 'JetBrains Mono', monospace;
+    background: #f3f4f6;
+    padding: 2px 6px;
+    border-radius: 2px;
+    display: inline-block;
+}
+
+.info-item.full {
+    grid-column: 1 / -1;
+}
+
+.divider {
+    height: 1px;
+    background: repeating-linear-gradient(to right, #e5e7eb 0, #e5e7eb 4px, transparent 4px, transparent 8px);
+    margin: 0 0 24px;
+}
+
+.section-block {
+    margin-bottom: 32px;
+}
+
+.block-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #374151;
+    margin-bottom: 12px;
+    font-family: 'Inter', sans-serif;
+}
+
+.preview-table {
+    width: 100%;
+    margin-bottom: 8px;
+}
+
+.preview-table :deep(th) {
+    background-color: #f9fafb !important;
+    font-size: 12px;
+    color: #6b7280;
+    font-weight: 600;
+}
+
+.empty-text {
+    font-size: 12px;
+    color: #9ca3af;
+    font-style: italic;
+    background: #f9fafb;
+    padding: 12px;
+    text-align: center;
+    border-radius: 2px;
+}
+
+.code-block {
+    background: #1a1a1a;
+    color: #e5e7eb;
+    padding: 16px;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    margin: 0;
+    overflow-x: auto;
+    white-space: pre-wrap;
+}
+
+.schema-tabs {
+    margin-top: 8px;
+}
+
+.schema-tabs :deep(.el-tabs__content) {
+    padding: 0;
+    background: #1a1a1a;
+}
+
 
 /* --- 弹窗样式覆盖 --- */
 .tool-dialog :deep(.el-dialog) {

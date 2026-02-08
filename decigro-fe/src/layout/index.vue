@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '../stores/user'
 import { ArrowRight, User, Lock, SwitchButton, Calendar, Stamp, List, OfficeBuilding, Monitor, ArrowDown, PriceTag, Box, Cpu } from '@element-plus/icons-vue'
+import AIChat from '../components/AIChat.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -108,6 +109,10 @@ const breadcrumbs = computed(() => {
                 <el-icon><Cpu /></el-icon>
                 智能体管理
             </el-menu-item>
+            <el-menu-item index="/chat/index">
+                <el-icon><Promotion /></el-icon>
+                AI 智能对话
+            </el-menu-item>
         </el-menu>
         
         <!-- 用户简要信息 -->
@@ -124,8 +129,10 @@ const breadcrumbs = computed(() => {
         </div>
     </div>
 
-    <!-- 主体区 -->
     <div class="flex-1 flex flex-col bg-slate-50 relative overflow-hidden">
+        <!-- AI 助手挂件 -->
+        <AIChat />
+        
         <!-- 头部: 带实时时钟和用户中心 -->
         <header class="h-16 bg-white/80 backdrop-blur-md border-b border-gray-100 flex items-center justify-between px-6 z-10">
             <!-- 左侧: 面包屑 -->

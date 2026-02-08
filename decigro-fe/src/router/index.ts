@@ -74,6 +74,12 @@ const router = createRouter({
           name: 'AgentManagement',
           component: () => import('../views/agent/index.vue'),
           meta: { title: '智能体管理' }
+        },
+        {
+          path: '/chat/index',
+          name: 'AIChat',
+          component: () => import('../views/chat/index.vue'),
+          meta: { title: 'AI 智能对话' }
         }
       ]
     }
