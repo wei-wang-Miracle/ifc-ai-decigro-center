@@ -86,9 +86,9 @@ def dispatcher_node(state: AgentState) -> Command:
     功能: 调度中心节点 - 负责路由决策和 Agent 选择
     """
     # 1. 路由决策逻辑 (原 _get_next_route)
-    intent = state.get("intent")
-    plan = state.get("plan")
-    require_review = state.get("require_review", False)
+    intent = state.intent
+    plan = state.plan
+    require_review = state.require_review
     
     next_route = "intent"  # 默认返回意图识别
     
@@ -101,7 +101,7 @@ def dispatcher_node(state: AgentState) -> Command:
     elif plan is None or len(plan) == 0:
         next_route = "planner"
     else:
-        current_index = state.get("current_step_index", 0)
+        current_index = state.current_step_index
         if current_index >= len(plan):
             next_route = "__end__"
         else:
@@ -112,20 +112,29 @@ def dispatcher_node(state: AgentState) -> Command:
     # 2. 如果是跳转到执行器，选择具体的 Agent
     selected_agent = None
     if next_route == "executor":
-        plan = state.get("plan", [])
-        current_index = state.get("current_step_index", 0)
+        plan = state.plan or []
+        current_index = state.current_step_index
         
         if plan and current_index < len(plan):
             current_step = plan[current_index]
-            token = state.get("token")
+            token = state.token
             selected_agent = _select_agent_for_step(current_step, token)
             print(f"[Dispatcher] 选择 Agent: {selected_agent} 执行步骤: {current_step.description}")
 
     # 3. 使用 Command 返回
-    return Command(
-        update={
-            "selected_agent": selected_agent,
-            "messages": [AIMessage(content=f"[Dispatcher] 路由到: {next_route}")],
-        },
-        goto=next_route
-    )
+    if next_route == "__end__":
+        return Command(
+            update={
+                "selected_agent": None,
+                "messages": [AIMessage(content="[Dispatcher] 任务计划执行完毕，正在通过汇总节点生成响应...")],
+            },
+            goto="responder"
+        )
+    else:
+        return Command(
+            update={
+                "selected_agent": selected_agent,
+                "messages": [AIMessage(content=f"[Dispatcher] 路由到: {next_route}")],
+            },
+            goto=next_route
+        )

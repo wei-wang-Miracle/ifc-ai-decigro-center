@@ -6,6 +6,7 @@ from .planner import planner_node
 from .executor import plan_task_execute_node
 from .review import human_review_node
 from .feedback import feedback_handler_node
+from .responder import responder_node
 
 __all__ = [
     "intent_recognition_node",
@@ -14,4 +15,5 @@ __all__ = [
     "plan_task_execute_node",
     "human_review_node",
     "feedback_handler_node",
+    "responder_node",
 ]

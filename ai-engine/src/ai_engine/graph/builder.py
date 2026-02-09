@@ -17,6 +17,7 @@ from .nodes import (
     plan_task_execute_node,
     human_review_node,
     feedback_handler_node,
+    responder_node,
 )
 
 
@@ -42,9 +43,9 @@ def create_workflow_graph(checkpointer=None):
     workflow.add_node("intent_recognition", intent_recognition_node)
     workflow.add_node("dispatcher", dispatcher_node)
     workflow.add_node("planner", planner_node)
-    workflow.add_node("executor", plan_task_execute_node)
     workflow.add_node("review", human_review_node)
     workflow.add_node("feedback", feedback_handler_node)
+    workflow.add_node("responder", responder_node)
     
     # 2. 设置入口点
     workflow.set_entry_point("intent_recognition")

@@ -191,10 +191,10 @@ def plan_task_execute_node(state: AgentState) -> dict[str, Any]:
     4. 检查是否需要人工审核
     5. 更新执行结果和步骤索引
     """
-    plan = state.get("plan", [])
-    current_index = state.get("current_step_index", 0)
-    query = state.get("query", "")
-    selected_agent = state.get("selected_agent", "default")
+    plan = state.plan or []
+    current_index = state.current_step_index
+    query = state.query
+    selected_agent = state.selected_agent or "default"
     
     # 检查是否有待执行的步骤
     if not plan or current_index >= len(plan):
@@ -207,14 +207,14 @@ def plan_task_execute_node(state: AgentState) -> dict[str, Any]:
     
     # 获取当前步骤
     current_step = plan[current_index]
-    token = state.get("token")
+    token = state.token
     print(f"[Executor] 执行步骤 {current_step.step_id} (Token: {token[:10] if token else 'None'}...): {current_step.description}")
     
     # 更新步骤状态
     current_step.status = StepStatus.IN_PROGRESS
     
     # 执行步骤
-    token = state.get("token")
+    token = state.token
     result = _execute_step_with_agent(
         step=current_step,
         agent_name=selected_agent or "default",
@@ -228,7 +228,7 @@ def plan_task_execute_node(state: AgentState) -> dict[str, Any]:
         current_step.status = StepStatus.NEEDS_REVIEW
     
     # 收集执行结果
-    step_results = list(state.get("step_results", []))
+    step_results = list(state.step_results)
     step_results.append(result)
     
     # 如果需要审核，设置标记但不推进索引

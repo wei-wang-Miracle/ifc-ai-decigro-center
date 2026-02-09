@@ -24,8 +24,8 @@ def feedback_handler_node(state: AgentState) -> dict[str, Any]:
     3. 决定是重新规划还是调整当前步骤
     4. 更新状态以便后续处理
     """
-    review_feedback = state.get("review_feedback", "")
-    review_status = state.get("review_status")
+    review_feedback = state.review_feedback or ""
+    review_status = state.review_status
     
     # 只在驳回状态下处理
     if review_status != ReviewStatus.REJECTED:

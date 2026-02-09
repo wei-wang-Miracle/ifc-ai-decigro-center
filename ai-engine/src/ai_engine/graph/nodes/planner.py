@@ -63,7 +63,7 @@ def _build_context(state: AgentState) -> str:
     context_parts = []
     
     # 添加之前的执行结果
-    step_results = state.get("step_results", [])
+    step_results = state.step_results
     if step_results:
         results_text = "\n".join([
             f"- 步骤 {r.step_id}: {'成功' if r.success else '失败'} - {r.output or r.error}"
@@ -72,7 +72,7 @@ def _build_context(state: AgentState) -> str:
         context_parts.append(f"## 之前的执行结果\n{results_text}")
     
     # 添加审核反馈
-    review_feedback = state.get("review_feedback")
+    review_feedback = state.review_feedback
     if review_feedback:
         context_parts.append(f"## 人工审核反馈\n{review_feedback}")
     
@@ -91,8 +91,8 @@ def planner_node(state: AgentState) -> dict[str, Any]:
     3. 调用 LLM 生成执行计划
     4. 返回计划步骤列表
     """
-    query = state.get("query", "")
-    token = state.get("token")
+    query = state.query
+    token = state.token
     
     # 获取工具和 Agent 描述
     tool_registry = get_tool_registry()

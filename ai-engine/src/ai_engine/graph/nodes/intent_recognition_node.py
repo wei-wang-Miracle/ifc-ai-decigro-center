@@ -59,17 +59,7 @@ def intent_recognition_node(state: AgentState) -> dict[str, Any]:
     3. 提取关键实体信息
     4. 返回结构化意图对象
     """
-    query = state.get("query", "")
-    
-    if not query:
-        return {
-            "intent": IntentObject(
-                intent_type=IntentType.INVALID,
-                confidence=1.0,
-            ),
-            "error": "用户输入为空",
-        }
-    
+    query = state.query
     # 构建 Prompt
     prompt = INTENT_RECOGNITION_PROMPT.format(query=query)
     

@@ -25,9 +25,9 @@ def human_review_node(state: AgentState) -> dict[str, Any]:
     注意: 此节点使用 LangGraph 的 interrupt_before 机制
     实际的审核操作通过 API 完成
     """
-    step_results = state.get("step_results", [])
-    plan = state.get("plan", [])
-    current_index = state.get("current_step_index", 0)
+    step_results = state.step_results
+    plan = state.plan or []
+    current_index = state.current_step_index
     
     # 获取最近需要审核的步骤结果
     pending_result = None
@@ -39,7 +39,7 @@ def human_review_node(state: AgentState) -> dict[str, Any]:
     
     # 构建审核上下文
     review_context = {
-        "query": state.get("query", ""),
+        "query": state.query,
         "current_step": plan[current_index].description if plan and current_index < len(plan) else "",
         "tools_called": pending_result.tools_called if pending_result else [],
         "output": pending_result.output if pending_result else "",
@@ -74,8 +74,8 @@ def handle_review_decision(
     """
     if action.lower() == "approve":
         # 审核通过，继续执行
-        current_index = state.get("current_step_index", 0)
-        
+        current_index = state.current_step_index
+    
         return {
             "require_review": False,
             "review_status": ReviewStatus.APPROVED,
