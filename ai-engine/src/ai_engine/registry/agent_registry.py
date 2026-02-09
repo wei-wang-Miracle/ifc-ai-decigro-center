@@ -85,6 +85,11 @@ class AgentConfig:
     def get_tools(self, token: str) -> list[StructuredTool]:
         """
         获取该 Agent 可用的工具列表 (触发工具详情加载)
+        
+        工具绑定规则:
+        - bound_tools = None: 使用所有可用工具（通用 Agent）
+        - bound_tools = []: 不使用任何工具（纯对话模式）
+        - bound_tools = ["tool_a", ...]: 仅使用指定工具（专项 Agent）
         """
         if self._bound_tools_loaded:
             return self._tools
@@ -93,13 +98,9 @@ class AgentConfig:
         raw_bound = self.raw_bound_tools
         
         if raw_bound is None:
-            # 如果是 default agent，允许访问所有可用工具
-            if self.name == "default":
-                all_tool_names = tool_registry.get_tool_names(token)
-                self._tools = tool_registry.get_tools_by_names(all_tool_names, token)
-            else:
-                # 默认使用所有公开工具
-                self._tools = tool_registry.get_public_tools(token)
+            # None 表示使用所有可用工具（通用 Agent）
+            all_tool_names = tool_registry.get_tool_names(token)
+            self._tools = tool_registry.get_tools_by_names(all_tool_names, token)
         elif len(raw_bound) == 0:
             self._tools = []
         else:
@@ -166,15 +167,7 @@ class AgentRegistry:
                 user_agents[name] = AgentConfig(summary)
         
         self._user_agents[token] = user_agents
-        
-        # 确保 default agent 存在
-        if "default" not in user_agents:
-            user_agents["default"] = AgentConfig({
-                "agent_name": "default",
-                "agent_description": "系统默认助手，用于处理通用任务和闲聊",
-                "agent_tags": ["general", "system"],
-            })
-            
+         
         print(f"[AgentRegistry] 成功为 Token[{token[:10]}...] 加载 {len(user_agents)} 个 Agent 摘要")
     
     def get_agent(self, agent_name: str, token: str) -> AgentConfig | None:
@@ -185,33 +178,8 @@ class AgentRegistry:
         self.load(token)
         user_agents = self._user_agents.get(token, {})
         agent = user_agents.get(agent_name)
-        
-        if not agent:
-            # 如果请求的是 default 但摘要中没有，尝试动态创建并返回
-            if agent_name == "default":
-                agent = AgentConfig({
-                    "agent_name": "default",
-                    "agent_description": "系统默认助手，用于处理通用任务和闲聊",
-                    "agent_tags": ["general", "system"],
-                })
-                user_agents["default"] = agent
-            else:
-                return None
-
         # 加载完整详情 (POST /agent/detail)
         if not agent._detail:
-            # 特殊处理系统内置 default agent，不请求后端
-            if agent_name == "default":
-                print(f"[AgentRegistry] 使用本地回退配置: {agent_name}")
-                detail = {
-                    "agent_alias": "默认助手",
-                    "system_prompt": "你是一个全能型AI调度助理和任务执行专家。你可以处理任何通用需求，并利用系统中所有可用的工具来满足用户。对于闲聊，请保持专业且友好的态度。",
-                    "negative_prompt": "",
-                    "bound_tools": None 
-                }
-                agent.set_detail(detail)
-                return agent
-
             print(f"[AgentRegistry] 正在加载 Agent 详情: {agent_name}")
             detail_data = self._client.get_agent_detail(agent_name, token)
             if detail_data:

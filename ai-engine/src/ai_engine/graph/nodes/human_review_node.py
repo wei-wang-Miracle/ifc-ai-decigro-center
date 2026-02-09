@@ -74,13 +74,13 @@ def handle_review_decision(
     """
     if action.lower() == "approve":
         # 审核通过，继续执行
-        current_index = state.current_step_index
+        # 注意: 不推进 current_step_index，让调度器路由到 executor 执行当前步骤
+        # 对于 requires_review 场景：执行完当前步骤后，executor 会自动推进索引
     
         return {
             "require_review": False,
             "review_status": ReviewStatus.APPROVED,
             "review_feedback": None,
-            "current_step_index": current_index + 1,  # 推进到下一步
             "messages": [AIMessage(content="[HumanReview] 审核通过，继续执行")],
         }
     else:

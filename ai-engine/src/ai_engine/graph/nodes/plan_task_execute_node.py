@@ -254,13 +254,23 @@ def plan_task_execute_node(state: AgentState) -> dict[str, Any]:
     plan = state.plan or []
     current_index = state.current_step_index
     query = state.query
-    selected_agent = state.selected_agent or "default"
+    selected_agent = state.selected_agent
     
     # 检查是否有待执行的步骤
     if not plan or current_index >= len(plan):
         return Command(
             update={
                 "messages": [AIMessage(content="[Executor] 没有待执行的步骤")],
+            },
+            goto="dispatcher"
+        )
+    
+    # 检查是否有可用的 Agent
+    if not selected_agent:
+        return Command(
+            update={
+                "error": "没有可用的 Agent 执行此步骤",
+                "messages": [AIMessage(content="[Executor] 错误: 没有可用的 Agent")],
             },
             goto="dispatcher"
         )
@@ -277,7 +287,7 @@ def plan_task_execute_node(state: AgentState) -> dict[str, Any]:
     token = state.token
     result = _execute_step_with_agent(
         step=current_step,
-        agent_name=selected_agent or "default",
+        agent_name=selected_agent,
         query=query,
         token=token,
     )
@@ -303,12 +313,13 @@ def plan_task_execute_node(state: AgentState) -> dict[str, Any]:
             goto="dispatcher"
         )
     
-    # 推进到下一步
+    # 推进到下一步，并重置 review_status 以便下一个需要审核的步骤能正确触发
     return Command(
         update={
             "step_results": step_results,
             "current_step_index": current_index + 1,
             "plan": plan,
+            "review_status": None,  # 重置审核状态，为下一个可能需要审核的步骤做准备
             "messages": [AIMessage(content=result.output or f"[Executor] 步骤 {current_step.step_id} 执行完成")],
         },
         goto="dispatcher"

@@ -71,6 +71,12 @@ class PlanStep(BaseModel):
         validation_alias=AliasChoices("dependencies", "depends_on"),
         description="该步骤依赖的其他步骤 ID 列表"
     )
+    
+    # --- 人机协同字段 ---
+    requires_review: bool = Field(
+        default=False,
+        description="是否需要人工审核确认。True 表示任务执行后需等待用户批准才能推进到下一步（用于关键决策节点）"
+    )
 
     @field_validator("dependencies", mode="before")
     @classmethod

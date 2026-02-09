@@ -44,6 +44,7 @@ PLANNER_PROMPT = """你是一个任务规划专家。
 2. 步骤之间的依赖关系要明确
 3. 每个步骤尽量只做一件事
 4. 考虑失败情况的处理
+5. **人机协同判断**：对于涉及敏感操作（如删除数据、修改配置、资金操作等）或需要用户确认的关键决策节点，请将 requires_review 设为 true
 
 ## 执行计划 (JSON 输出要求)
 每个步骤必须包含:
@@ -52,6 +53,7 @@ PLANNER_PROMPT = """你是一个任务规划专家。
 - assigned_agent: 指定执行的 Agent (可选)
 - expected_tools: 预计需要的工具列表 (可选)
 - dependencies: 依赖的步骤 ID 列表 (如 ["1"])
+- requires_review: 是否需要人工审核确认 (布尔值，默认 false，对于关键决策节点设为 true)
 """
 
 

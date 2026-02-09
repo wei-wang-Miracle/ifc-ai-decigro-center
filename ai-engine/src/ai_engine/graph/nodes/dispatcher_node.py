@@ -9,7 +9,7 @@ from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
 from langgraph.types import Command
 
-from ..state import AgentState, IntentType, PlanStep, StepStatus
+from ..state import AgentState, IntentType, PlanStep, ReviewStatus, StepStatus
 from ...config import get_settings
 from ...registry import get_agent_registry
 
@@ -19,8 +19,8 @@ AGENT_SELECTION_PROMPT = """你是一个智能调度专家。根据当前任务�
 
 ## 调度原则
 1. **优先匹配专项 Agent**：如果任务属于某个 Agent 的专业领域，优先分配给该 Agent。
-2. **通用需求回退**：如果任务属于通用交流、闲聊、或没有合适的专项 Agent 能够处理，请选择 "default" 智能体。
-3. **default 智能体能力**：default 智能体拥有系统中所有可用的工具，适合处理综合性、通用性或跨领域的任务。
+2. **通用需求回退**：如果任务属于通用交流、闲聊、或没有合适的专项 Agent 能够处理，请选择列表中标记为"通用"或"默认"的智能体。
+3. **通用智能体能力**：通用智能体拥有系统中所有可用的工具，适合处理综合性、通用性或跨领域的任务。
 
 ## 可用 Agent 列表
 {agent_descriptions}
@@ -35,13 +35,25 @@ AGENT_SELECTION_PROMPT = """你是一个智能调度专家。根据当前任务�
 """
 
 
-def _select_agent_for_step(step: PlanStep, token: str) -> str:
+def _get_fallback_agent(agent_names: list[str]) -> str | None:
+    """
+    功能: 获取回退 Agent（优先选择通用/默认 Agent）
+    参数: agent_names - 可用的 Agent 名称列表
+    返回: Agent 名称，如果没有可用 Agent 则返回 None
+    """
+    if not agent_names:
+        return None
+    # 优先返回第一个可用的 Agent（期望 Agent Card 已正确配置优先级）
+    return agent_names[0]
+
+
+def _select_agent_for_step(step: PlanStep, token: str) -> str | None:
     """
     功能: 为任务步骤选择最合适的 Agent
     参数: 
         step - 当前计划步骤
         token - 用户 Token
-    返回: Agent 名称
+    返回: Agent 名称，如果没有可用 Agent 则返回 None
     """
     # 如果步骤已经指定了 Agent，直接使用
     if step.assigned_agent:
@@ -49,9 +61,11 @@ def _select_agent_for_step(step: PlanStep, token: str) -> str:
     
     agent_registry = get_agent_registry()
     descriptions = agent_registry.get_agent_descriptions(token)
+    agent_names = list(descriptions.keys())
     
     if not descriptions:
-        return "default"
+        print("[Dispatcher] 警告: 没有可用的 Agent")
+        return _get_fallback_agent(agent_names)
     
     # 构建 Agent 描述文本
     agent_desc_text = "\n".join([
@@ -80,10 +94,11 @@ def _select_agent_for_step(step: PlanStep, token: str) -> str:
         # 验证返回的 Agent 是否存在
         if agent_name in descriptions:
             return agent_name
-        return "default"
+        # 回退到第一个可用 Agent
+        return _get_fallback_agent(agent_names)
     except Exception as e:
         print(f"[Dispatcher] Agent 选择失败: {e}")
-        return "default"
+        return _get_fallback_agent(agent_names)
 
 
 def dispatcher_node(state: AgentState) -> Command:
@@ -110,7 +125,14 @@ def dispatcher_node(state: AgentState) -> Command:
         if current_index >= len(plan):
             next_route = "__end__"
         else:
-            next_route = "executor"
+            # 检查当前步骤是否需要人机协同审核
+            current_step = plan[current_index]
+            if current_step.requires_review and state.review_status != ReviewStatus.APPROVED:
+                # 需要人工审核确认，路由到 review 节点
+                next_route = "review"
+                print(f"[Dispatcher] 步骤 {current_step.step_id} 需要人工审核确认")
+            else:
+                next_route = "executor"
 
     print(f"[Dispatcher] 路由决策: {next_route}")
     
@@ -124,10 +146,10 @@ def dispatcher_node(state: AgentState) -> Command:
             current_step = plan[current_index]
             token = state.token
             selected_agent = _select_agent_for_step(current_step, token)
-            # 如果没有选择出 Agent，或者选择了不存在的 Agent，统一回退到 default
             if not selected_agent or selected_agent == "None":
-                selected_agent = "default"
-            print(f"[Dispatcher] 选择 Agent: {selected_agent} 执行步骤: {current_step.description}")
+                print(f"[Dispatcher] 警告: 无法为步骤 {current_step.step_id} 选择 Agent")
+            else:
+                print(f"[Dispatcher] 选择 Agent: {selected_agent} 执行步骤: {current_step.description}")
 
     # 3. 使用 Command 返回
     if next_route == "__end__":
