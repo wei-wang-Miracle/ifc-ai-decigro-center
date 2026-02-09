@@ -6,7 +6,7 @@
 import json
 from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 
 from langgraph.types import Command
@@ -14,6 +14,75 @@ from langgraph.types import Command
 from ..state import AgentState, PlanStep, StepResult, StepStatus
 from ...config import get_settings
 from ...registry import get_tool_registry, get_agent_registry
+
+
+def _execute_with_tool_loop(
+    llm_with_tools: Any,
+    messages: list[Any],
+    tool_registry: Any,
+    token: str,
+    max_iterations: int = 5
+) -> tuple[str, list[str], bool]:
+    """
+    功能: 通用的工具调用循环
+    返回: (最终输出, 调用的工具列表, 是否需要审核)
+    """
+    tools_called = []
+    require_review = False
+    final_output = ""
+    
+    for _ in range(max_iterations):
+        response = llm_with_tools.invoke(messages)
+        messages.append(response)
+        
+        # 检查是否有工具调用
+        if not (hasattr(response, "tool_calls") and response.tool_calls):
+            final_output = response.content
+            break
+            
+        # 处理工具调用
+        for tool_call in response.tool_calls:
+            tool_name = tool_call.get("name", "")
+            tools_called.append(tool_name)
+            
+            # 1. 检查是否为受保护工具
+            if tool_registry.is_protected(tool_name, token):
+                require_review = True
+                print(f"[Executor] 触发受保护工具 '{tool_name}'，需要人工审核")
+            
+            # 2. 从注册中心获取工具
+            tool = tool_registry.get_tool(tool_name, token)
+            if tool:
+                try:
+                    tool_args = tool_call.get("args", {})
+                    tool_result = tool.invoke(tool_args)
+                    print(f"[Executor] 工具 '{tool_name}' 执行成功")
+                    
+                    messages.append(ToolMessage(
+                        tool_call_id=tool_call["id"],
+                        content=str(tool_result) if tool_result is not None else "执行成功"
+                    ))
+                except Exception as e:
+                    print(f"[Executor] 工具 '{tool_name}' 执行失败: {e}")
+                    messages.append(ToolMessage(
+                        tool_call_id=tool_call["id"],
+                        content=f"错误: {str(e)}"
+                    ))
+            else:
+                messages.append(ToolMessage(
+                    tool_call_id=tool_call["id"],
+                    content=f"错误: 找不到工具 {tool_name}"
+                ))
+        
+        # 如果触发了受保护工具，且当前逻辑是不允许自动执行这类工具
+        # 在这里我们可以选择中止循环并返回当前的 LLM 响应
+        if require_review:
+            final_output = response.content or "触发受保护操作，需要人工确认"
+            break
+    else:
+        final_output = messages[-1].content if messages else "执行超时"
+
+    return final_output, tools_called, require_review
 
 
 def _execute_step_with_agent(
@@ -73,42 +142,24 @@ def _execute_step_with_agent(
 """
     
     try:
-        # 调用 LLM (可能会触发工具调用)
+        # 初始消息列表
         messages = [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": execution_prompt},
+            SystemMessage(content=system_message),
+            HumanMessage(content=execution_prompt),
         ]
         
-        response = llm_with_tools.invoke(messages)
-        
-        # 检查是否有工具调用
-        tools_called = []
-        require_review = False
-        
-        if hasattr(response, "tool_calls") and response.tool_calls:
-            for tool_call in response.tool_calls:
-                tool_name = tool_call.get("name", "")
-                tools_called.append(tool_name)
-                
-                # 检查是否为受保护工具
-                if tool_registry.is_protected(tool_name, token):
-                    require_review = True
-                    print(f"[Executor] 触发受保护工具 '{tool_name}'，需要人工审核")
-                
-                # 执行工具调用
-                tool = tool_registry.get_tool(tool_name, token)
-                if tool:
-                    try:
-                        tool_args = tool_call.get("args", {})
-                        tool_result = tool.invoke(tool_args)
-                        print(f"[Executor] 工具 '{tool_name}' 执行结果: {tool_result[:200]}...")
-                    except Exception as e:
-                        print(f"[Executor] 工具 '{tool_name}' 执行失败: {e}")
+        # 进入工具循环
+        output, tools_called, require_review = _execute_with_tool_loop(
+            llm_with_tools=llm_with_tools,
+            messages=messages,
+            tool_registry=tool_registry,
+            token=token
+        )
         
         return StepResult(
             step_id=step.step_id,
             success=True,
-            output=response.content or "步骤执行完成",
+            output=output or "步骤执行完成",
             tools_called=tools_called,
             require_review=require_review,
         )
@@ -157,17 +208,25 @@ def _execute_step_default(step: PlanStep, query: str, token: str) -> StepResult:
 """
     
     try:
-        response = llm_with_tools.invoke(execution_prompt)
+        # 初始消息列表
+        messages = [
+            HumanMessage(content=execution_prompt),
+        ]
         
-        tools_called = []
-        if hasattr(response, "tool_calls") and response.tool_calls:
-            tools_called = [tc.get("name", "") for tc in response.tool_calls]
+        # 默认模式也进入工具循环
+        output, tools_called, require_review = _execute_with_tool_loop(
+            llm_with_tools=llm_with_tools,
+            messages=messages,
+            tool_registry=tool_registry,
+            token=token
+        )
         
         return StepResult(
             step_id=step.step_id,
             success=True,
-            output=response.content or "执行完成",
+            output=output or "执行完成",
             tools_called=tools_called,
+            require_review=require_review,
         )
     
     except Exception as e:
@@ -176,6 +235,7 @@ def _execute_step_default(step: PlanStep, query: str, token: str) -> StepResult:
             success=False,
             error=str(e),
         )
+
 
 
 def plan_task_execute_node(state: AgentState) -> dict[str, Any]:
