@@ -93,8 +93,13 @@ class AgentConfig:
         raw_bound = self.raw_bound_tools
         
         if raw_bound is None:
-            # 默认使用所有公共工具
-            self._tools = tool_registry.get_public_tools(token) 
+            # 如果是 default agent，允许访问所有可用工具
+            if self.name == "default":
+                all_tool_names = tool_registry.get_tool_names(token)
+                self._tools = tool_registry.get_tools_by_names(all_tool_names, token)
+            else:
+                # 默认使用所有公开工具
+                self._tools = tool_registry.get_public_tools(token)
         elif len(raw_bound) == 0:
             self._tools = []
         else:
@@ -182,7 +187,16 @@ class AgentRegistry:
         agent = user_agents.get(agent_name)
         
         if not agent:
-            return None
+            # 如果请求的是 default 但摘要中没有，尝试动态创建并返回
+            if agent_name == "default":
+                agent = AgentConfig({
+                    "agent_name": "default",
+                    "agent_description": "系统默认助手，用于处理通用任务和闲聊",
+                    "agent_tags": ["general", "system"],
+                })
+                user_agents["default"] = agent
+            else:
+                return None
 
         # 加载完整详情 (POST /agent/detail)
         if not agent._detail:
@@ -191,7 +205,7 @@ class AgentRegistry:
                 print(f"[AgentRegistry] 使用本地回退配置: {agent_name}")
                 detail = {
                     "agent_alias": "默认助手",
-                    "system_prompt": "你是一个乐于助人的AI助手。对于用户的闲聊（如'你好'），请热情回复并引导用户使用系统功能。",
+                    "system_prompt": "你是一个全能型AI调度助理和任务执行专家。你可以处理任何通用需求，并利用系统中所有可用的工具来满足用户。对于闲聊，请保持专业且友好的态度。",
                     "negative_prompt": "",
                     "bound_tools": None 
                 }

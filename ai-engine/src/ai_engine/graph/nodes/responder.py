@@ -5,7 +5,7 @@
 
 from langchain_core.messages import AIMessage
 from langgraph.types import Command
-from ..state import AgentState
+from ..state import AgentState, IntentType
 
 
 def responder_node(state: AgentState) -> Command:
@@ -17,8 +17,12 @@ def responder_node(state: AgentState) -> Command:
     3. 清理调试信息
     """
     step_results = state.step_results
+    intent = state.intent
     
-    if not step_results:
+    # 优先处理不支持的情况
+    if intent and intent.intent_type == IntentType.UNSUPPORTED:
+        summary = "抱歉，根据我目前拥有的 Tool Card 和 Agent Card 权限，我暂时无法直接处理您的这项请求。您可以尝试换一种方式提问，或者查看我支持的功能列表（如：查询、分析等）。"
+    elif not step_results:
         summary = "抱歉，我未能成功执行您的请求。"
     else:
         # 如果只有一个成功的步骤结果，直接取其输出作为回复基础

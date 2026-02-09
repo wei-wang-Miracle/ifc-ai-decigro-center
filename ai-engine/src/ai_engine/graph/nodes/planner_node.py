@@ -18,6 +18,7 @@ class PlanOutput(BaseModel):
     """
     功能: 规划输出容器
     """
+    reasoning: str = Field(description="规划思路：简要分析用户需求，解释为什么采用这种任务组合和顺序")
     steps: list[PlanStep] = Field(description="有序的任务执行步骤列表")
 
 from ...config import get_settings
@@ -25,8 +26,8 @@ from ...registry import get_tool_registry, get_agent_registry
 
 
 # 任务规划 Prompt 模板
-PLANNER_PROMPT = """你是一个任务规划专家。请将用户的需求拆解为清晰、有序的执行步骤。
-
+PLANNER_PROMPT = """你是一个任务规划专家。
+你需要运用 Chain-of-Thought (思维链) 方法，请将用户的需求拆解为清晰、有序的执行步骤，你的核心价值在于"谋定而后动"，通过逻辑推演确保方案的专业性和可行性。
 ## 可用工具
 {tool_descriptions}
 

@@ -6,6 +6,7 @@
 from typing import Any, Literal
 
 from langchain_core.messages import AIMessage
+from langchain_openai import ChatOpenAI
 from langgraph.types import Command
 
 from ..state import AgentState, IntentType, PlanStep, StepStatus
@@ -16,15 +17,19 @@ from ...registry import get_agent_registry
 # Agent 选择 Prompt 模板
 AGENT_SELECTION_PROMPT = """你是一个智能调度专家。根据当前任务步骤，从可用的 Agent 列表中选择最合适的执行者。
 
-## 可用 Agent
+## 调度原则
+1. **优先匹配专项 Agent**：如果任务属于某个 Agent 的专业领域，优先分配给该 Agent。
+2. **通用需求回退**：如果任务属于通用交流、闲聊、或没有合适的专项 Agent 能够处理，请选择 "default" 智能体。
+3. **default 智能体能力**：default 智能体拥有系统中所有可用的工具，适合处理综合性、通用性或跨领域的任务。
+
+## 可用 Agent 列表
 {agent_descriptions}
 
-## 当前任务步骤
+## 当前待执行任务步骤
 {step_description}
 
 ## 输出要求
-请直接返回最合适的 Agent 名称（agent_name），不要返回其他内容。
-如果没有合适的 Agent，返回 "default"。
+请直接返回选中的 Agent 名称（agent_name），严禁输出任何解释性文字。
 
 ## 选择结果
 """
@@ -119,6 +124,9 @@ def dispatcher_node(state: AgentState) -> Command:
             current_step = plan[current_index]
             token = state.token
             selected_agent = _select_agent_for_step(current_step, token)
+            # 如果没有选择出 Agent，或者选择了不存在的 Agent，统一回退到 default
+            if not selected_agent or selected_agent == "None":
+                selected_agent = "default"
             print(f"[Dispatcher] 选择 Agent: {selected_agent} 执行步骤: {current_step.description}")
 
     # 3. 使用 Command 返回

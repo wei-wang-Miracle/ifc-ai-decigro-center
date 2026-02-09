@@ -1,9 +1,9 @@
 """节点模块初始化"""
 
-from .intent import intent_recognition_node
-from .dispatcher import dispatcher_node
-from .planner import planner_node
-from .executor import plan_task_execute_node
+from .intent_recognition_node import intent_recognition_node
+from .dispatcher_node import dispatcher_node
+from .planner_node import planner_node
+from .plan_task_execute_node import plan_task_execute_node
 from .review import human_review_node
 from .feedback import feedback_handler_node
 from .responder import responder_node

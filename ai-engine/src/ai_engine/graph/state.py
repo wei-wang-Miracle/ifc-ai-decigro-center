@@ -19,6 +19,7 @@ class IntentType(str, Enum):
     CHAT = "chat"            # 闲聊
     INVALID = "invalid"      # 无效输入
     END = "end"              # 结束对话
+    UNSUPPORTED = "unsupported" # 无法支持（无可用工具或 Agent）
 
 
 class ReviewStatus(str, Enum):
@@ -58,7 +59,7 @@ class PlanStep(BaseModel):
     功能: 任务计划步骤 (Pydantic 模型)
     """
     step_id: str = Field(
-        validation_alias=AliasChoices("step_id", "id", "step", "step_number", "step_num"),
+        validation_alias=AliasChoices("step_id", "id", "step", "step_number", "step_num","step_order"),
         description="步骤的唯一标识符"
     )
     description: str = Field(description="步骤的具体描述")
