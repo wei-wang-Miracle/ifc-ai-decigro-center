@@ -9,8 +9,17 @@ from typing import Any
 
 from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
+from langgraph.types import Command
 
 from ..state import AgentState, PlanStep, StepStatus
+from pydantic import BaseModel, Field
+
+class PlanOutput(BaseModel):
+    """
+    功能: 规划输出容器
+    """
+    steps: list[PlanStep] = Field(description="有序的任务执行步骤列表")
+
 from ...config import get_settings
 from ...registry import get_tool_registry, get_agent_registry
 
@@ -28,26 +37,6 @@ PLANNER_PROMPT = """你是一个任务规划专家。请将用户的需求拆解
 {user_query}
 
 {context}
-
-## 输出格式
-请以 JSON 数组格式返回计划步骤，每个步骤包含：
-- step_id: 步骤唯一 ID (如 "step_1")
-- description: 步骤描述（清晰说明要做什么）
-- assigned_agent: 建议执行的 Agent 名称（可选，留空由系统自动分配）
-- expected_tools: 预期使用的工具名称列表（可选）
-- dependencies: 依赖的前置步骤 ID 列表（可选）
-
-```json
-[
-    {{
-        "step_id": "step_1",
-        "description": "第一步要做的事情",
-        "assigned_agent": null,
-        "expected_tools": ["tool_name"],
-        "dependencies": []
-    }}
-]
-```
 
 ## 注意事项
 1. 步骤应该足够具体，可以直接执行
@@ -82,50 +71,6 @@ def _build_context(state: AgentState) -> str:
         context_parts.append(f"## 人工审核反馈\n{review_feedback}")
     
     return "\n\n".join(context_parts) if context_parts else ""
-
-
-def _parse_plan_response(response_text: str) -> list[PlanStep]:
-    """
-    功能: 解析 LLM 返回的规划结果
-    参数: response_text - LLM 响应文本
-    返回: PlanStep 列表
-    """
-    try:
-        # 尝试从响应中提取 JSON
-        text = response_text.strip()
-        if text.startswith("```json"):
-            text = text[7:]
-        if text.startswith("```"):
-            text = text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-        
-        data = json.loads(text.strip())
-        
-        steps = []
-        for item in data:
-            step = PlanStep(
-                step_id=item.get("step_id", f"step_{uuid.uuid4().hex[:8]}"),
-                description=item.get("description", ""),
-                assigned_agent=item.get("assigned_agent"),
-                expected_tools=item.get("expected_tools", []),
-                status=StepStatus.PENDING,
-                dependencies=item.get("dependencies", []),
-            )
-            steps.append(step)
-        
-        return steps
-    
-    except (json.JSONDecodeError, ValueError, KeyError) as e:
-        print(f"[Planner] 规划解析失败: {e}")
-        # 返回一个默认步骤
-        return [
-            PlanStep(
-                step_id="step_1",
-                description="执行用户请求的任务",
-                status=StepStatus.PENDING,
-            )
-        ]
 
 
 def planner_node(state: AgentState) -> dict[str, Any]:
@@ -181,24 +126,31 @@ def planner_node(state: AgentState) -> dict[str, Any]:
             temperature=settings.llm_temperature,
         )
         
-        response = llm.invoke(prompt)
+        # 使用 structured_output
+        structured_llm = llm.with_structured_output(PlanOutput)
+        response = structured_llm.invoke(prompt)
         
-        # 解析计划
-        plan = _parse_plan_response(response.content)
+        plan = response.steps
         
         print(f"[Planner] 生成计划: {len(plan)} 个步骤")
         for step in plan:
             print(f"  - {step.step_id}: {step.description}")
         
-        return {
-            "plan": plan,
-            "current_step_index": 0,
-            "messages": [AIMessage(content=f"[Planner] 已生成 {len(plan)} 步计划")],
-        }
+        return Command(
+            update={
+                "plan": plan,
+                "current_step_index": 0,
+                "messages": [AIMessage(content=f"[Planner] 已生成 {len(plan)} 步计划")],
+            },
+            goto="dispatcher"
+        )
     
     except Exception as e:
         print(f"[Planner] 规划失败: {e}")
-        return {
-            "plan": [],
-            "error": f"任务规划失败: {str(e)}",
-        }
+        return Command(
+            update={
+                "plan": [],
+                "error": f"任务规划失败: {str(e)}",
+            },
+            goto="dispatcher"
+        )

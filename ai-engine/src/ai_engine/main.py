@@ -32,7 +32,6 @@ async def lifespan(app: FastAPI):
     print("[AI Engine] 正在启动...")
     
     settings = get_settings()
-    print(f"[AI Engine] LLM Provider: {settings.llm_provider}")
     print(f"[AI Engine] LLM Model: {settings.llm_model}")
     
     # 预加载注册中心（可选，延迟加载也可以）

@@ -7,6 +7,8 @@ from typing import Any
 
 from langchain_core.messages import AIMessage
 
+from langgraph.types import Command
+
 from ..state import AgentState, ReviewStatus
 
 
@@ -27,32 +29,39 @@ def feedback_handler_node(state: AgentState) -> dict[str, Any]:
     
     # 只在驳回状态下处理
     if review_status != ReviewStatus.REJECTED:
-        return {
-            "messages": [AIMessage(content="[FeedbackHandler] 非驳回状态，无需处理")],
-        }
+        return Command(
+            update={
+                "messages": [AIMessage(content="[FeedbackHandler] 非驳回状态，无需处理")],
+            },
+            goto="dispatcher"
+        )
     
     print(f"[FeedbackHandler] 处理反馈: {review_feedback}")
     
     # 分析反馈类型
-    # 如果反馈包含"重新规划"、"换个方案"等关键词，清空计划重新开始
     replan_keywords = ["重新规划", "换个方案", "重做", "from scratch", "start over"]
     should_replan = any(keyword in review_feedback.lower() for keyword in replan_keywords)
     
     if should_replan:
         # 清空计划，让 Dispatcher 路由到 Planner 重新规划
         print("[FeedbackHandler] 需要重新规划")
-        return {
-            "plan": None,
-            "current_step_index": 0,
-            "review_status": None,
-            "review_feedback": review_feedback,  # 保留反馈给 Planner 参考
-            "messages": [AIMessage(content=f"[FeedbackHandler] 根据反馈重新规划: {review_feedback}")],
-        }
+        return Command(
+            update={
+                "plan": None,
+                "current_step_index": 0,
+                "review_status": None,
+                "review_feedback": review_feedback,  # 保留反馈给 Planner 参考
+                "messages": [AIMessage(content=f"[FeedbackHandler] 根据反馈重新规划: {review_feedback}")],
+            },
+            goto="dispatcher"
+        )
     else:
         # 保留计划，让 Agent 根据反馈调整当前步骤的执行方式
-        # 反馈会被传递给执行节点
         print("[FeedbackHandler] 调整当前步骤执行方式")
-        return {
-            "review_status": None,
-            "messages": [AIMessage(content=f"[FeedbackHandler] 根据反馈调整: {review_feedback}")],
-        }
+        return Command(
+            update={
+                "review_status": None,
+                "messages": [AIMessage(content=f"[FeedbackHandler] 根据反馈调整: {review_feedback}")],
+            },
+            goto="dispatcher"
+        )

@@ -5,6 +5,10 @@ import java.util.List;
 
 public interface SysRoleService {
     List<SysRole> list();
+
+    SysRole getById(Long id);
+
     void saveOrUpdate(SysRole role);
+
     void deleteById(Long id);
 }

@@ -6,6 +6,7 @@ StateGraph 构建器
 from typing import Literal
 
 from langgraph.graph import StateGraph, END
+from langgraph.types import Command
 from langgraph.checkpoint.memory import MemorySaver
 
 from .state import AgentState, IntentType, ReviewStatus
@@ -17,60 +18,27 @@ from .nodes import (
     human_review_node,
     feedback_handler_node,
 )
-from .nodes.dispatcher import dispatcher_route_decision
 
-
-def _should_continue_after_intent(state: AgentState) -> Literal["dispatcher", "end"]:
-    """
-    功能: 意图识别后的路由决策
-    参数: state - 当前状态
-    返回: 下一个节点名称
-    """
-    intent = state.get("intent")
-    
-    if intent is None:
-        return "end"
-    
-    # 无效或结束意图直接结束
-    if intent.intent_type in [IntentType.INVALID, IntentType.END]:
-        return "end"
-    
-    return "dispatcher"
-
-
-def _should_continue_after_review(state: AgentState) -> Literal["dispatcher", "feedback"]:
-    """
-    功能: 审核后的路由决策
-    参数: state - 当前状态
-    返回: 下一个节点名称
-    """
-    review_status = state.get("review_status")
-    
-    if review_status == ReviewStatus.REJECTED:
-        return "feedback"
-    
-    return "dispatcher"
 
 
 def create_workflow_graph(checkpointer=None):
     """
-    功能: 创建完整的工作流程图
-    参数: checkpointer - 可选的检查点保存器（用于状态持久化）
+    功能: 创建完整的工作流程图 (LangGraph 1.0 架构)
+    参数: checkpointer - 可选的检查点保存器
     返回: 编译后的 StateGraph 实例
     
     流程图结构:
-    START -> intent_recognition -> dispatcher -> {planner, executor, review, end}
-           -> planner -> dispatcher
-           -> executor -> dispatcher (或 review)
-           -> review -> dispatcher (或 feedback)
-           -> feedback -> dispatcher
+    START -> intent_recognition (内部路由) -> {dispatcher, __end__}
+    dispatcher (内部路由) -> {planner, executor, review, __end__}
+    planner -> dispatcher
+    executor -> dispatcher
+    review -> dispatcher (或被 interrupt)
+    feedback -> dispatcher
     """
     # 创建 StateGraph
     workflow = StateGraph(AgentState)
     
-    # ========================================
-    # 添加节点
-    # ========================================
+    # 1. 添加节点
     workflow.add_node("intent_recognition", intent_recognition_node)
     workflow.add_node("dispatcher", dispatcher_node)
     workflow.add_node("planner", planner_node)
@@ -78,67 +46,22 @@ def create_workflow_graph(checkpointer=None):
     workflow.add_node("review", human_review_node)
     workflow.add_node("feedback", feedback_handler_node)
     
-    # ========================================
-    # 设置入口点
-    # ========================================
+    # 2. 设置入口点
     workflow.set_entry_point("intent_recognition")
     
-    # ========================================
-    # 添加边和条件边
-    # ========================================
+    # 3. 添加固定边 (大部分路由已移动到节点内部的 Command 中)
+    # 虽然 Command handled 很多，但明确的 node 间跳转依然可以用 add_edge
+    # 注意：在 LangGraph 1.0 中，如果节点返回 Command(goto=...)，则不需要显式的边缘定义。
+    # 为了保持图的清晰性，我们保留节点声明。
     
-    # 意图识别 -> 调度中心或结束
-    workflow.add_conditional_edges(
-        "intent_recognition",
-        _should_continue_after_intent,
-        {
-            "dispatcher": "dispatcher",
-            "end": END,
-        }
-    )
-    
-    # 调度中心 -> 基于决策路由
-    workflow.add_conditional_edges(
-        "dispatcher",
-        dispatcher_route_decision,
-        {
-            "planner": "planner",
-            "executor": "executor",
-            "review": "review",
-            "intent": "intent_recognition",
-            "end": END,
-        }
-    )
-    
-    # 规划节点 -> 调度中心
-    workflow.add_edge("planner", "dispatcher")
-    
-    # 执行节点 -> 调度中心
-    workflow.add_edge("executor", "dispatcher")
-    
-    # 审核节点 -> 调度中心或反馈处理
-    workflow.add_conditional_edges(
-        "review",
-        _should_continue_after_review,
-        {
-            "dispatcher": "dispatcher",
-            "feedback": "feedback",
-        }
-    )
-    
-    # 反馈处理 -> 调度中心
-    workflow.add_edge("feedback", "dispatcher")
-    
-    # ========================================
-    # 编译工作流
-    # ========================================
+    # 4. 编译工作流
     if checkpointer is None:
         checkpointer = MemorySaver()
     
     # 配置中断点（人工审核时暂停）
     compiled = workflow.compile(
         checkpointer=checkpointer,
-        interrupt_before=["review"],  # 在审核节点前中断
+        interrupt_before=["review"],
     )
     
     return compiled

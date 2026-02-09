@@ -20,6 +20,11 @@ public class SysRoleServiceImpl implements SysRoleService {
     }
 
     @Override
+    public SysRole getById(Long id) {
+        return roleMapper.selectOneById(id);
+    }
+
+    @Override
     public void saveOrUpdate(SysRole role) {
         if (role.getRoleId() == null) {
             roleMapper.insert(role);

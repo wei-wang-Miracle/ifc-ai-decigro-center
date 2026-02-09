@@ -52,6 +52,27 @@ public interface ToolCardService {
     void updateOnlineStatus(String toolName, boolean isOnline);
 
     /**
+     * 获取当前用户所有的可用工具
+     * 过滤规则:
+     * 1. ToolCard.isOnline = true
+     * 2. toolPrivileges = 'public' OR 用户角色的 toolList OR 用户自身的 toolList
+     *
+     * @param username 当前登录用户名
+     * @return 符合条件的工具简要信息列表
+     */
+    java.util.List<com.ifc.decigro.buskernel.entity.vo.ToolCardSummaryVO> getAvailableTools(String username);
+
+    /**
+     * 获取单个工具的详情
+     * 包含权限检查，确保用户有权访问该工具
+     *
+     * @param toolName 工具名称
+     * @param username 当前登录用户名
+     * @return 工具完整信息
+     */
+    ToolCard getToolDetail(String toolName, String username);
+
+    /**
      * 检查工具名称是否已存在
      * 
      * 参数: toolName 工具名称

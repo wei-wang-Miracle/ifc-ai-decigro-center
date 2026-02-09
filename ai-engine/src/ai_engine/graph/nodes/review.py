@@ -6,6 +6,7 @@
 from typing import Any
 
 from langchain_core.messages import AIMessage
+from langgraph.types import Command
 
 from ..state import AgentState, ReviewStatus
 
@@ -47,10 +48,13 @@ def human_review_node(state: AgentState) -> dict[str, Any]:
     print(f"[HumanReview] 等待人工审核...")
     print(f"[HumanReview] 上下文: {review_context}")
     
-    return {
-        "review_status": ReviewStatus.PENDING,
-        "messages": [AIMessage(content=f"[HumanReview] 需要人工审核，已暂停执行")],
-    }
+    return Command(
+        update={
+            "review_status": ReviewStatus.PENDING,
+            "messages": [AIMessage(content=f"[HumanReview] 需要人工审核，已暂停执行")],
+        },
+        goto="dispatcher"
+    )
 
 
 def handle_review_decision(

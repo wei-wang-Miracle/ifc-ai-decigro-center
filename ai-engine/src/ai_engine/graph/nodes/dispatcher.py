@@ -6,7 +6,7 @@
 from typing import Any, Literal
 
 from langchain_core.messages import AIMessage
-from langchain_openai import ChatOpenAI
+from langgraph.types import Command
 
 from ..state import AgentState, IntentType, PlanStep, StepStatus
 from ...config import get_settings
@@ -28,45 +28,6 @@ AGENT_SELECTION_PROMPT = """你是一个智能调度专家。根据当前任务�
 
 ## 选择结果
 """
-
-
-def _get_next_route(state: AgentState) -> Literal["planner", "executor", "review", "end", "intent"]:
-    """
-    功能: 根据当前状态决定下一步路由
-    参数: state - 当前状态
-    返回: 路由目标节点名称
-    """
-    intent = state.get("intent")
-    plan = state.get("plan")
-    require_review = state.get("require_review", False)
-    
-    # 如果需要人工审核
-    if require_review:
-        return "review"
-    
-    # 意图检查
-    if intent is None:
-        return "intent"
-    
-    # 如果是结束意图
-    if intent.intent_type == IntentType.END:
-        return "end"
-    
-    # 如果是无效意图
-    if intent.intent_type == IntentType.INVALID:
-        return "end"
-    
-    # 如果没有计划，需要规划
-    if plan is None or len(plan) == 0:
-        return "planner"
-    
-    # 检查是否所有步骤都已完成
-    current_index = state.get("current_step_index", 0)
-    if current_index >= len(plan):
-        return "end"
-    
-    # 否则执行当前步骤
-    return "executor"
 
 
 def _select_agent_for_step(step: PlanStep) -> str:
@@ -118,23 +79,35 @@ def _select_agent_for_step(step: PlanStep) -> str:
         return "default"
 
 
-def dispatcher_node(state: AgentState) -> dict[str, Any]:
+def dispatcher_node(state: AgentState) -> Command:
     """
-    功能: 调度中心节点 - LangGraph 节点函数
-    参数: state - 当前状态
-    返回: 状态更新字典
-    
-    职责:
-    1. 根据当前状态决定路由（Planner / Executor / END）
-    2. 如果需要执行任务，选择合适的 Agent
-    3. 更新状态中的路由信息
+    功能: 调度中心节点 - 负责路由决策和 Agent 选择
     """
-    # 获取下一步路由
-    next_route = _get_next_route(state)
+    # 1. 路由决策逻辑 (原 _get_next_route)
+    intent = state.get("intent")
+    plan = state.get("plan")
+    require_review = state.get("require_review", False)
     
+    next_route = "intent"  # 默认返回意图识别
+    
+    if require_review:
+        next_route = "review"
+    elif intent is None:
+        next_route = "intent"
+    elif intent.intent_type == IntentType.END or intent.intent_type == IntentType.INVALID:
+        next_route = "__end__"
+    elif plan is None or len(plan) == 0:
+        next_route = "planner"
+    else:
+        current_index = state.get("current_step_index", 0)
+        if current_index >= len(plan):
+            next_route = "__end__"
+        else:
+            next_route = "executor"
+
     print(f"[Dispatcher] 路由决策: {next_route}")
     
-    # 如果是执行路由，需要选择 Agent
+    # 2. 如果是跳转到执行器，选择具体的 Agent
     selected_agent = None
     if next_route == "executor":
         plan = state.get("plan", [])
@@ -144,17 +117,12 @@ def dispatcher_node(state: AgentState) -> dict[str, Any]:
             current_step = plan[current_index]
             selected_agent = _select_agent_for_step(current_step)
             print(f"[Dispatcher] 选择 Agent: {selected_agent} 执行步骤: {current_step.description}")
-    
-    return {
-        "selected_agent": selected_agent,
-        "messages": [AIMessage(content=f"[Dispatcher] 路由到: {next_route}")],
-    }
 
-
-def dispatcher_route_decision(state: AgentState) -> Literal["planner", "executor", "review", "end", "intent"]:
-    """
-    功能: 调度路由决策函数 - 用于 LangGraph conditional_edges
-    参数: state - 当前状态
-    返回: 目标节点名称
-    """
-    return _get_next_route(state)
+    # 3. 使用 Command 返回
+    return Command(
+        update={
+            "selected_agent": selected_agent,
+            "messages": [AIMessage(content=f"[Dispatcher] 路由到: {next_route}")],
+        },
+        goto=next_route
+    )

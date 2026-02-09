@@ -25,16 +25,10 @@ class Settings(BaseSettings):
     # ========================================
     # LLM 配置
     # ========================================
-    llm_provider: Literal["openai", "azure"] = "openai"
-    openai_api_key: str = ""
-    openai_api_base: str = "https://api.openai.com/v1"
-    llm_model: str = "gpt-4o-mini"
-    llm_temperature: float = 0.7
-    
-    # Azure OpenAI 专用配置
-    azure_openai_endpoint: str = ""
-    azure_openai_api_version: str = "2024-02-15-preview"
-    azure_openai_deployment: str = ""
+    openai_api_key: str = "sk-pymikPWePlXQaHmMQXJwWCk6s2N5HxpVniegkrm9n46DnDF5"
+    openai_api_base: str = "https://api.moonshot.cn/v1"
+    llm_model: str = "kimi-k2.5"
+    llm_temperature: float = 0.5
     
     # ========================================
     # Bus Kernel 配置

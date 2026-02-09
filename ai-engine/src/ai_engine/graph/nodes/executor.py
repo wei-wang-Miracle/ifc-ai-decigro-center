@@ -9,6 +9,8 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 
+from langgraph.types import Command
+
 from ..state import AgentState, PlanStep, StepResult, StepStatus
 from ...config import get_settings
 from ...registry import get_tool_registry, get_agent_registry
@@ -194,9 +196,12 @@ def plan_task_execute_node(state: AgentState) -> dict[str, Any]:
     
     # 检查是否有待执行的步骤
     if not plan or current_index >= len(plan):
-        return {
-            "messages": [AIMessage(content="[Executor] 没有待执行的步骤")],
-        }
+        return Command(
+            update={
+                "messages": [AIMessage(content="[Executor] 没有待执行的步骤")],
+            },
+            goto="dispatcher"
+        )
     
     # 获取当前步骤
     current_step = plan[current_index]
@@ -223,17 +228,23 @@ def plan_task_execute_node(state: AgentState) -> dict[str, Any]:
     
     # 如果需要审核，设置标记但不推进索引
     if result.require_review:
-        return {
-            "step_results": step_results,
-            "require_review": True,
-            "plan": plan,
-            "messages": [AIMessage(content=f"[Executor] 步骤 {current_step.step_id} 需要人工审核")],
-        }
+        return Command(
+            update={
+                "step_results": step_results,
+                "require_review": True,
+                "plan": plan,
+                "messages": [AIMessage(content=f"[Executor] 步骤 {current_step.step_id} 需要人工审核")],
+            },
+            goto="dispatcher"
+        )
     
     # 推进到下一步
-    return {
-        "step_results": step_results,
-        "current_step_index": current_index + 1,
-        "plan": plan,
-        "messages": [AIMessage(content=result.output or f"[Executor] 步骤 {current_step.step_id} 执行完成")],
-    }
+    return Command(
+        update={
+            "step_results": step_results,
+            "current_step_index": current_index + 1,
+            "plan": plan,
+            "messages": [AIMessage(content=result.output or f"[Executor] 步骤 {current_step.step_id} 执行完成")],
+        },
+        goto="dispatcher"
+    )

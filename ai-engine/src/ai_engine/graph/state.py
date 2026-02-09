@@ -37,60 +37,51 @@ class StepStatus(str, Enum):
     NEEDS_REVIEW = "needs_review"  # 需要审核
 
 
-@dataclass
-class IntentObject:
+from pydantic import BaseModel, Field, AliasChoices, field_validator
+
+
+class IntentObject(BaseModel):
     """
-    功能: 意图识别结果对象
-    参数:
-        intent_type - 意图类型
-        confidence - 置信度 (0-1)
-        entities - 提取的实体信息
-        clarification_needed - 是否需要澄清
+    功能: 意图识别结果对象 (Pydantic 模型)
     """
     intent_type: IntentType
-    confidence: float = 0.0
-    entities: dict[str, Any] = field(default_factory=dict)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    entities: dict[str, Any] = Field(default_factory=dict)
     clarification_needed: bool = False
     clarification_question: str = ""
 
 
-@dataclass
-class PlanStep:
+
+
+class PlanStep(BaseModel):
     """
-    功能: 任务计划步骤
-    参数:
-        step_id - 步骤唯一标识
-        description - 步骤描述
-        assigned_agent - 分配的 Agent 名称
-        expected_tools - 预期使用的工具列表
-        status - 步骤状态
-        dependencies - 依赖的前置步骤 ID 列表
+    功能: 任务计划步骤 (Pydantic 模型)
     """
-    step_id: str
+    step_id: str = Field(validation_alias=AliasChoices("step_id", "id", "step", "step_number"))
     description: str
-    assigned_agent: str | None = None
-    expected_tools: list[str] = field(default_factory=list)
+    assigned_agent: Optional[str] = None
+    expected_tools: list[str] = Field(default_factory=list)
     status: StepStatus = StepStatus.PENDING
-    dependencies: list[str] = field(default_factory=list)
+    dependencies: list[str] = Field(default_factory=list, validation_alias=AliasChoices("dependencies", "depends_on"))
+
+    @field_validator("step_id", mode="before")
+    @classmethod
+    def ensure_str(cls, v: Any) -> str:
+        """确保 step_id 始终为字符串"""
+        if isinstance(v, (int, float)):
+            return str(v)
+        return v
 
 
-@dataclass
-class StepResult:
+class StepResult(BaseModel):
     """
-    功能: 步骤执行结果
-    参数:
-        step_id - 对应的步骤 ID
-        success - 是否成功
-        output - 输出内容
-        error - 错误信息（如果失败）
-        tools_called - 实际调用的工具列表
-        require_review - 是否触发审核
+    功能: 步骤执行结果 (Pydantic 模型)
     """
     step_id: str
     success: bool = True
     output: str = ""
     error: str = ""
-    tools_called: list[str] = field(default_factory=list)
+    tools_called: list[str] = Field(default_factory=list)
     require_review: bool = False
 
 

@@ -1,7 +1,10 @@
 package com.ifc.decigro.buskernel.controller;
 
 import com.ifc.decigro.buskernel.common.api.Result;
+import com.ifc.decigro.buskernel.common.context.UserContext;
 import com.ifc.decigro.buskernel.entity.ToolCard;
+import com.ifc.decigro.buskernel.entity.dto.ToolDetailRequest;
+import com.ifc.decigro.buskernel.entity.vo.ToolCardSummaryVO;
 import com.ifc.decigro.buskernel.service.ToolCardService;
 import com.mybatisflex.core.paginate.Page;
 import io.swagger.v3.oas.annotations.Operation;
@@ -9,6 +12,8 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 /**
  * MAS 工具卡片管理控制器
@@ -106,5 +111,27 @@ public class ToolCardController {
             @Parameter(description = "工具名称") @RequestParam String toolName) {
         boolean exists = toolCardService.existsByToolName(toolName);
         return Result.success(!exists); // 返回 true 表示可用
+    }
+
+    /**
+     * 获取当前用户所有的可用工具（AI 引擎加载阶段）
+     * 过滤规则：isOnline = true AND (public OR 用户角色授权 OR 用户个人授权)
+     */
+    @PostMapping("/available")
+    @Operation(summary = "获取可用工具列表", description = "用于 AI 引擎加载阶段，获取工具介绍，符合渐进式加载思想")
+    public Result<List<ToolCardSummaryVO>> getAvailableTools() {
+        String username = UserContext.getUserName();
+        return Result.success(toolCardService.getAvailableTools(username));
+    }
+
+    /**
+     * 获取单个工具的详情（AI 引擎调用阶段）
+     * 包含权限检查
+     */
+    @PostMapping("/detail")
+    @Operation(summary = "获取工具详情", description = "用于 AI 引擎调用阶段，获取工具使用详情，包含参数定义等")
+    public Result<ToolCard> getToolDetail(@RequestBody ToolDetailRequest request) {
+        String username = UserContext.getUserName();
+        return Result.success(toolCardService.getToolDetail(request.getToolName(), username));
     }
 }

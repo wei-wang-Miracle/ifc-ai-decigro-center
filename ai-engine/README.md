@@ -17,11 +17,12 @@
 | ----------------- | ------ | ---------------- |
 | **Python**        | 3.12+  | 编程语言         |
 | **FastAPI**       | 0.115+ | Web 框架         |
-| **LangChain**     | 0.3+   | LLM 应用框架     |
-| **LangGraph**     | 0.2+   | Agent 工作流编排 |
-| **psycopg**       | 3.2+   | PostgreSQL 驱动  |
-| **Pydantic**      | 2.9+   | 数据验证         |
-| **python-dotenv** | 1.0+   | 环境变量管理     |
+| **LangChain**     | 1.2.0  | LLM 应用框架     |
+| **LangGraph**     | 1.0.0  | Agent 工作流编排 |
+| **psycopg**       | 3.2.1  | PostgreSQL 驱动  |
+| **Pydantic**      | 2.10.3 | 数据验证         |
+| **python-dotenv** | 1.2.1  | 环境变量管理     |
+| **uv**            | 0.10.1 | 包管理工具       |
 
 ## 系统架构
 

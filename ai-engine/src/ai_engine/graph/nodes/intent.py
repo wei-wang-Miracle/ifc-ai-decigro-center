@@ -6,8 +6,9 @@
 import json
 from typing import Any
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
+from langgraph.types import Command
 
 from ..state import AgentState, IntentObject, IntentType
 from ...config import get_settings
@@ -24,21 +25,6 @@ INTENT_RECOGNITION_PROMPT = """你是一个意图识别专家。请分析用户�
 - **invalid**: 输入无效或无法理解
 - **end**: 用户明确表示结束对话（如：谢谢、再见、不需要了等）
 
-## 输出格式
-请以 JSON 格式返回，包含以下字段：
-```json
-{{
-    "intent_type": "task|question|clarify|invalid|end",
-    "confidence": 0.0-1.0,
-    "entities": {{
-        "key1": "value1",
-        "key2": "value2"
-    }},
-    "clarification_needed": true|false,
-    "clarification_question": "如果需要澄清，这里填写要问用户的问题"
-}}
-```
-
 ## 用户输入
 {query}
 
@@ -48,68 +34,17 @@ INTENT_RECOGNITION_PROMPT = """你是一个意图识别专家。请分析用户�
 
 def _get_llm() -> ChatOpenAI:
     """
-    功能: 获取 LLM 实例
-    参数: 无
-    返回: ChatOpenAI 实例
+    功能: 获取 LLM 实例 (按当前统一配置)
     """
     settings = get_settings()
-    
-    if settings.llm_provider == "azure":
-        from langchain_openai import AzureChatOpenAI
-        return AzureChatOpenAI(
-            azure_endpoint=settings.azure_openai_endpoint,
-            api_version=settings.azure_openai_api_version,
-            deployment_name=settings.azure_openai_deployment,
-            api_key=settings.openai_api_key,
-            temperature=settings.llm_temperature,
-        )
-    else:
-        return ChatOpenAI(
-            model=settings.llm_model,
-            api_key=settings.openai_api_key,
-            base_url=settings.openai_api_base,
-            temperature=settings.llm_temperature,
-        )
+    return ChatOpenAI(
+        model=settings.llm_model,
+        api_key=settings.openai_api_key,
+        base_url=settings.openai_api_base,
+        temperature=settings.llm_temperature,
+    )
 
 
-def _parse_intent_response(response_text: str) -> IntentObject:
-    """
-    功能: 解析 LLM 返回的意图识别结果
-    参数: response_text - LLM 响应文本
-    返回: IntentObject 实例
-    """
-    try:
-        # 尝试从响应中提取 JSON
-        # 处理可能被 markdown 代码块包裹的情况
-        text = response_text.strip()
-        if text.startswith("```json"):
-            text = text[7:]
-        if text.startswith("```"):
-            text = text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-        
-        data = json.loads(text.strip())
-        
-        intent_type_str = data.get("intent_type", "invalid").lower()
-        intent_type = IntentType(intent_type_str) if intent_type_str in [e.value for e in IntentType] else IntentType.INVALID
-        
-        return IntentObject(
-            intent_type=intent_type,
-            confidence=float(data.get("confidence", 0.5)),
-            entities=data.get("entities", {}),
-            clarification_needed=data.get("clarification_needed", False),
-            clarification_question=data.get("clarification_question", ""),
-        )
-    except (json.JSONDecodeError, ValueError, KeyError) as e:
-        # 解析失败，返回默认意图
-        print(f"[IntentNode] 意图解析失败: {e}")
-        return IntentObject(
-            intent_type=IntentType.TASK,
-            confidence=0.5,
-            entities={},
-            clarification_needed=False,
-        )
 
 
 def intent_recognition_node(state: AgentState) -> dict[str, Any]:
@@ -139,27 +74,41 @@ def intent_recognition_node(state: AgentState) -> dict[str, Any]:
     prompt = INTENT_RECOGNITION_PROMPT.format(query=query)
     
     try:
-        # 调用 LLM
+        # 调用 LLM，使用 structured_output
         llm = _get_llm()
-        response = llm.invoke([HumanMessage(content=prompt)])
+        structured_llm = llm.with_structured_output(IntentObject)
         
-        # 解析响应
-        intent = _parse_intent_response(response.content)
+        # 获得结构化意图对象
+        intent = structured_llm.invoke([HumanMessage(content=prompt)])
         
         print(f"[IntentNode] 识别结果: type={intent.intent_type.value}, confidence={intent.confidence}")
         
-        # 返回状态更新
-        return {
-            "intent": intent,
-            "messages": [HumanMessage(content=query)],
-        }
+        # 决定下一个路由
+        goto = "dispatcher"
+        if intent.intent_type in [IntentType.END, IntentType.INVALID]:
+            goto = "__end__"
+        elif intent.intent_type == IntentType.CLARIFY:
+            # 简单处理：如果是澄清，也先到 dispatcher 处理或者直接结束
+            goto = "dispatcher"
+            
+        # 使用 LangGraph 1.0 的 Command 进行状态更新和跳转
+        return Command(
+            update={
+                "intent": intent,
+                "messages": [HumanMessage(content=query)],
+            },
+            goto=goto
+        )
     
     except Exception as e:
         print(f"[IntentNode] 意图识别异常: {e}")
-        return {
-            "intent": IntentObject(
-                intent_type=IntentType.INVALID,
-                confidence=0.0,
-            ),
-            "error": f"意图识别失败: {str(e)}",
-        }
+        return Command(
+            update={
+                "intent": IntentObject(
+                    intent_type=IntentType.INVALID,
+                    confidence=0.0,
+                ),
+                "error": f"意图识别失败: {str(e)}",
+            },
+            goto="__end__"
+        )
