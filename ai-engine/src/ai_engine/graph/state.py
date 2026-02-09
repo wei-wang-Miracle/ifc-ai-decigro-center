@@ -148,12 +148,16 @@ class AgentState(TypedDict):
     # 错误信息
     error: Optional[str]
 
+    # 用户认证 Token (用于动态注册权限校验)
+    token: Optional[str]
+
 
 def create_initial_state(
     query: str,
     user_id: str,
     session_id: str,
-    thread_id: str = ""
+    thread_id: str = "",
+    token: Optional[str] = None
 ) -> AgentState:
     """
     功能: 创建初始状态
@@ -162,6 +166,7 @@ def create_initial_state(
         user_id - 用户标识
         session_id - 会话标识
         thread_id - 线程标识（可选）
+        token - 用户认证 Token（可选）
     返回: 初始化的 AgentState
     """
     return AgentState(
@@ -179,4 +184,5 @@ def create_initial_state(
         review_feedback=None,
         selected_agent=None,
         error=None,
+        token=token,
     )

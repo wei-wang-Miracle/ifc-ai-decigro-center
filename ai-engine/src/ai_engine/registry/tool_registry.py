@@ -23,80 +23,86 @@ class ToolRegistry:
         功能: 初始化工具注册中心
         """
         self._client = get_bus_kernel_client()
-        # 存储摘要: {tool_name: {tool_name, tool_description}}
-        self._tool_summaries: dict[str, dict[str, Any]] = {}
-        # 存储已构建的完整工具: {tool_name: StructuredTool}
-        self._tools: dict[str, StructuredTool] = {}
-        # 存储完整的卡片数据: {tool_name: tool_card}
+        # 存储摘要: {token: {tool_name: summary}}
+        self._user_tool_summaries: dict[str, dict[str, dict[str, Any]]] = {}
+        # 存储已构建的完整工具: {token: {tool_name: StructuredTool}}
+        self._user_tools: dict[str, dict[str, StructuredTool]] = {}
+        # 存储完整的卡片数据: {tool_name: tool_card} (详情全局缓存即可，反正有权限校验)
         self._tool_cards: dict[str, dict[str, Any]] = {}
-        self._loaded = False
     
-    def load(self, force: bool = False) -> None:
+    def load(self, token: str, force: bool = False) -> None:
         """
-        功能: AI 加载阶段 - 仅加载工具摘要 (name, description, privileges)
-        参数: force - 是否强制重新加载
-        返回: None
+        功能: AI 加载阶段 - 仅加载当前用户可用的工具摘要
+        参数: 
+            token - 用户身份 Token
+            force - 是否强制重新加载
         """
-        if self._loaded and not force:
+        if token in self._user_tool_summaries and not force:
             return
         
-        # 通过 API 获取工具列表摘要
-        records = self._client.get_tool_page(page=1, size=100)
+        # 通过 API 获取当前用户可用的工具列表摘要 (POST /tool/available)
+        records = self._client.get_available_tools(token)
         
-        self._tool_summaries = {}
+        user_summaries = {}
         for record in records:
             name = record.get("toolName")
             if name:
-                self._tool_summaries[name] = {
+                user_summaries[name] = {
                     "tool_name": name,
                     "tool_description": record.get("toolDescription"),
-                    "tool_privileges": record.get("toolPrivileges", "public"),
+                    "tool_tags": record.get("toolTags"),
                 }
         
-        self._loaded = True
-        print(f"[ToolRegistry] 成功加载 {len(self._tool_summaries)} 个工具摘要")
+        self._user_tool_summaries[token] = user_summaries
+        if token not in self._user_tools:
+            self._user_tools[token] = {}
+            
+        print(f"[ToolRegistry] 成功为 Token[{token[:10]}...] 加载 {len(user_summaries)} 个工具摘要")
     
-    def get_tool(self, tool_name: str) -> StructuredTool | None:
+    def get_tool(self, tool_name: str, token: str) -> StructuredTool | None:
         """
         功能: AI 使用阶段 - 获取完整工具，如果未加载则从 API 获取详情并构建
-        参数: tool_name - 工具唯一标识
-        返回: StructuredTool 实例，如果不存在则返回 None
+        参数: 
+            tool_name - 工具唯一标识
+            token - 用户身份 Token
+        返回: StructuredTool 实例
         """
-        self.load()
+        self.load(token)
         
-        # 检查是否已经构建过
-        if tool_name in self._tools:
-            return self._tools[tool_name]
+        # 1. 权限预检：检查摘要中是否存在该工具
+        user_summaries = self._user_tool_summaries.get(token, {})
+        if tool_name not in user_summaries:
+            print(f"[ToolRegistry] 用户无权访问或工具不存在: {tool_name}")
+            return None
+
+        # 2. 检查会话缓存
+        if tool_name in self._user_tools[token]:
+            return self._user_tools[token][tool_name]
         
-        # 如果只有摘要没有详情，则从 API 获取详情
-        if tool_name in self._tool_summaries:
-            print(f"[ToolRegistry] 正在加载工具详情: {tool_name}")
-            detail = self._client.get_tool_detail(tool_name)
-            if detail:
-                # 转换 Java CamelCase 到 Python snake_case (如果需要)
-                # 目前 factory 里的 create_dynamic_tool 使用了与数据库列名一致的 key
-                # 我们需要确保映射一致
-                tool_card = {
-                    "tool_name": detail.get("toolName"),
-                    "tool_description": detail.get("toolDescription"),
-                    "tool_protocol": detail.get("toolProtocol"),
-                    "url_path": detail.get("urlPath"),
-                    "tool_parameters": detail.get("toolParameters"),
-                    "tool_privileges": detail.get("toolPrivileges"),
-                    "reference_target": detail.get("referenceTarget"),
-                }
-                
-                try:
-                    tool = create_dynamic_tool(tool_card)
-                    self._tools[tool_name] = tool
-                    self._tool_cards[tool_name] = tool_card
-                    return tool
-                except Exception as e:
-                    print(f"[ToolRegistry] 构建工具 {tool_name} 失败: {e}")
+        # 3. 从 API 获取详情 (POST /tool/detail)
+        print(f"[ToolRegistry] 正在加载工具详情: {tool_name}")
+        detail = self._client.get_tool_detail(tool_name, token)
+        if detail:
+            tool_card = {
+                "tool_name": detail.get("toolName"),
+                "tool_description": detail.get("toolDescription"),
+                "tool_protocol": detail.get("toolProtocol"),
+                "url_path": detail.get("urlPath"),
+                "tool_parameters": detail.get("toolParameters"),
+                "reference_target": detail.get("referenceTarget"),
+            }
+            
+            try:
+                tool = create_dynamic_tool(tool_card)
+                self._user_tools[token][tool_name] = tool
+                self._tool_cards[tool_name] = tool_card
+                return tool
+            except Exception as e:
+                print(f"[ToolRegistry] 构建工具 {tool_name} 失败: {e}")
         
         return None
     
-    def get_tools_by_names(self, tool_names: list[str]) -> list[StructuredTool]:
+    def get_tools_by_names(self, tool_names: list[str], token: str) -> list[StructuredTool]:
         """
         功能: 根据名称列表获取多个工具（触发详情加载）
         参数: tool_names - 工具名称列表
@@ -104,66 +110,71 @@ class ToolRegistry:
         """
         tools = []
         for name in tool_names:
-            tool = self.get_tool(name)
+            tool = self.get_tool(name, token)
             if tool:
                 tools.append(tool)
         return tools
     
-    def get_all_tool_summaries(self) -> list[dict[str, Any]]:
+    def get_all_tool_summaries(self, token: str) -> list[dict[str, Any]]:
         """
         功能: 获取所有可用工具的摘要信息
         返回: 摘要列表
         """
-        self.load()
-        return list(self._tool_summaries.values())
+        self.load(token)
+        user_summaries = self._user_tool_summaries.get(token, {})
+        return list(user_summaries.values())
     
-    def get_tool_names(self) -> list[str]:
+    def get_tool_names(self, token: str) -> list[str]:
         """
         功能: 获取所有工具名称列表
         """
-        self.load()
-        return list(self._tool_summaries.keys())
+        self.load(token)
+        user_summaries = self._user_tool_summaries.get(token, {})
+        return list(user_summaries.keys())
     
-    def get_tool_card(self, tool_name: str) -> dict[str, Any] | None:
+    def get_tool_card(self, tool_name: str, token: str) -> dict[str, Any] | None:
         """
         功能: 获取工具原始详情卡片
         """
-        self.get_tool(tool_name) # 确保已加载
+        self.get_tool(tool_name, token) # 确保已加载
         return self._tool_cards.get(tool_name)
 
-    def get_public_tools(self) -> list[StructuredTool]:
+    def get_public_tools(self, token: str) -> list[StructuredTool]:
         """
         获取所有公开工具（触发所有公开工具的详情加载）
         """
-        self.load()
+        self.load(token)
+        user_summaries = self._user_tool_summaries.get(token, {})
         public_names = [
-            name for name, summary in self._tool_summaries.items()
+            name for name, summary in user_summaries.items()
             if summary.get("tool_privileges") == "public"
         ]
-        return self.get_tools_by_names(public_names)
-
-    def is_protected(self, tool_name: str) -> bool:
+        return self.get_tools_by_names(public_names, token)
+    
+    def is_protected(self, tool_name: str, token: str) -> bool:
         """
         判断是否为受保护工具
         """
-        self.load()
+        self.load(token)
+        user_summaries = self._user_tool_summaries.get(token, {})
         # 优先通过摘要判断
-        summary = self._tool_summaries.get(tool_name)
+        summary = user_summaries.get(tool_name)
         if summary:
             return summary.get("tool_privileges") == "protected"
         
         # 如果摘要没有（新工具？），检查完整卡片
-        card = self.get_tool_card(tool_name)
+        card = self.get_tool_card(tool_name, token)
         if card:
             return card.get("tool_privileges", "public") == "protected"
         return False
 
-    def reload(self) -> None:
+    def reload(self, token: str) -> None:
         """热更新"""
-        self._loaded = False
-        self._tools = {}
-        self._tool_cards = {}
-        self.load(force=True)
+        if token in self._user_tool_summaries:
+            del self._user_tool_summaries[token]
+        if token in self._user_tools:
+            del self._user_tools[token]
+        self.load(token, force=True)
 
 
 # 全局单例

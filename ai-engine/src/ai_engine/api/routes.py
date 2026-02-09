@@ -6,7 +6,7 @@ FastAPI 路由定义
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Header
 from pydantic import BaseModel, Field
 
 # from ..graph import create_workflow_graph, create_initial_state, AgentState
@@ -89,7 +89,7 @@ _active_workflows: dict[str, dict] = {}
 # ========================================
 
 @router.post("/chat", response_model=ChatResponse)
-async def start_workflow(request: ChatRequest):
+async def start_workflow(request: ChatRequest, x_auth_token: Optional[str] = Header(None, alias="X-Auth-Token")):
     """
     功能: 发起新的工作流任务
     参数: request - 包含用户查询、用户ID、会话ID
@@ -97,7 +97,7 @@ async def start_workflow(request: ChatRequest):
     
     流程:
     1. 创建新的工作流实例
-    2. 初始化状态
+    2. 初始化状态 (携带 X-Auth-Token)
     3. 运行工作流直到完成或需要审核
     4. 返回结果
     """
@@ -116,6 +116,7 @@ async def start_workflow(request: ChatRequest):
             user_id=request.user_id,
             session_id=request.session_id,
             thread_id=thread_id,
+            token=x_auth_token,  # 传递 Token
         )
         
         # 配置

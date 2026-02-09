@@ -44,4 +44,20 @@ public interface AgentCardService {
      * 获取所有可绑定的工具列表
      */
     List<String> getAvailableTools();
+
+    /**
+     * 获取当前用户所有的可用智能体
+     * 过滤规则: AgentCard.isOnline = true
+     *
+     * @return 符合条件的智能体简要信息列表
+     */
+    List<com.ifc.decigro.buskernel.entity.vo.AgentCardSummaryVO> getAvailableAgents();
+
+    /**
+     * 获取单个智能体的详情
+     *
+     * @param agentName 智能体名称
+     * @return 智能体完整信息
+     */
+    AgentCard getAgentDetail(String agentName);
 }

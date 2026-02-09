@@ -3,7 +3,6 @@ package com.ifc.decigro.buskernel.controller;
 import com.ifc.decigro.buskernel.common.api.Result;
 import com.ifc.decigro.buskernel.entity.dto.LoginRequest;
 import com.ifc.decigro.buskernel.service.SysUserService;
-import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -38,16 +37,8 @@ public class AuthController {
         log.info("用户登录请求: {}", request.getUsername());
         Map<String, Object> loginResult = userService.login(request, httpRequest);
         String token = (String) loginResult.get("token");
-
-        // 设置 Cookie
-        Cookie cookie = new Cookie("token", token);
-        cookie.setPath("/");
-        cookie.setHttpOnly(true);
-        response.addCookie(cookie);
-
         // 设置自定义 Header，供前端请求拦截器使用
         response.setHeader("X-Auth-Token", token);
-
         return Result.success(loginResult);
     }
 

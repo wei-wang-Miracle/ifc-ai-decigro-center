@@ -20,6 +20,7 @@ def _execute_step_with_agent(
     step: PlanStep,
     agent_name: str,
     query: str,
+    token: str,
 ) -> StepResult:
     """
     功能: 使用指定 Agent 执行步骤
@@ -34,7 +35,7 @@ def _execute_step_with_agent(
     settings = get_settings()
     
     # 获取 Agent 配置
-    agent_config = agent_registry.get_agent(agent_name)
+    agent_config = agent_registry.get_agent(agent_name, token)
     
     if agent_config is None:
         # 如果指定的 Agent 不存在，使用默认方式执行
@@ -90,12 +91,12 @@ def _execute_step_with_agent(
                 tools_called.append(tool_name)
                 
                 # 检查是否为受保护工具
-                if tool_registry.is_protected(tool_name):
+                if tool_registry.is_protected(tool_name, token):
                     require_review = True
                     print(f"[Executor] 触发受保护工具 '{tool_name}'，需要人工审核")
                 
                 # 执行工具调用
-                tool = tool_registry.get_tool(tool_name)
+                tool = tool_registry.get_tool(tool_name, token)
                 if tool:
                     try:
                         tool_args = tool_call.get("args", {})
@@ -121,19 +122,20 @@ def _execute_step_with_agent(
         )
 
 
-def _execute_step_default(step: PlanStep, query: str) -> StepResult:
+def _execute_step_default(step: PlanStep, query: str, token: str) -> StepResult:
     """
     功能: 使用默认方式执行步骤（无特定 Agent）
     参数:
         step - 当前计划步骤
         query - 用户原始查询
+        token - 用户身份 Token
     返回: StepResult 执行结果
     """
     settings = get_settings()
     tool_registry = get_tool_registry()
     
     # 获取所有公开工具
-    tools = tool_registry.get_public_tools()
+    tools = tool_registry.get_public_tools(token)
     
     # 创建 LLM
     llm = ChatOpenAI(
@@ -211,10 +213,12 @@ def plan_task_execute_node(state: AgentState) -> dict[str, Any]:
     current_step.status = StepStatus.IN_PROGRESS
     
     # 执行步骤
+    token = state.get("token")
     result = _execute_step_with_agent(
         step=current_step,
         agent_name=selected_agent or "default",
         query=query,
+        token=token,
     )
     
     # 更新步骤状态

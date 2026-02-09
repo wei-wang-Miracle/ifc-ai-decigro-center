@@ -43,14 +43,14 @@ AI DeciGro Center 是一个基于 Multi-Agent 的决策增长平台。系统由 
 - **示例**：
   `sk_v1_ifc001_299_u8829_1740012345`
 - **生成规则**：
-- 由 Bus Kernel 使用 `System_Secret` 进行 HMAC-SHA256 签名对原始信息加密之后返回，放置到Cookie里。
+- 由 Bus Kernel 使用 `System_Secret` 进行 HMAC-SHA256 签名对原始信息加密之后返回，放置到header里。
 - 支持外部系统通过算法自行生成（如果有 Secret），实现无缝集成。
 
 ### 3.2 交互流程 (The Flow)
 
 1. **登录/切换身份**：
 
-- 用户登录 -> 前端加密传输请求Bus Kernel -> Bus Kernel 解密之后验证账号密码（密码在数据库内加密保存，支持解密） -> 读取 `sys_user` 当前的 `相关用户信息` -> **生成携带部门信息的 Token** -> 放置到Cookie里，并返回前端。
+- 用户登录 -> 前端加密传输请求Bus Kernel -> Bus Kernel 解密之后验证账号密码（密码在数据库内加密保存，支持解密） -> 读取 `sys_user` 当前的 `相关用户信息` -> **生成携带部门信息的 Token** -> 放置到Header里，并返回前端。
 
 2. **AI 对话 (认知层)**：
 

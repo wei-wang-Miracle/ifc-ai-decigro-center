@@ -30,10 +30,12 @@ AGENT_SELECTION_PROMPT = """你是一个智能调度专家。根据当前任务�
 """
 
 
-def _select_agent_for_step(step: PlanStep) -> str:
+def _select_agent_for_step(step: PlanStep, token: str) -> str:
     """
     功能: 为任务步骤选择最合适的 Agent
-    参数: step - 当前计划步骤
+    参数: 
+        step - 当前计划步骤
+        token - 用户 Token
     返回: Agent 名称
     """
     # 如果步骤已经指定了 Agent，直接使用
@@ -41,7 +43,7 @@ def _select_agent_for_step(step: PlanStep) -> str:
         return step.assigned_agent
     
     agent_registry = get_agent_registry()
-    descriptions = agent_registry.get_agent_descriptions()
+    descriptions = agent_registry.get_agent_descriptions(token)
     
     if not descriptions:
         return "default"
@@ -115,7 +117,8 @@ def dispatcher_node(state: AgentState) -> Command:
         
         if plan and current_index < len(plan):
             current_step = plan[current_index]
-            selected_agent = _select_agent_for_step(current_step)
+            token = state.get("token")
+            selected_agent = _select_agent_for_step(current_step, token)
             print(f"[Dispatcher] 选择 Agent: {selected_agent} 执行步骤: {current_step.description}")
 
     # 3. 使用 Command 返回

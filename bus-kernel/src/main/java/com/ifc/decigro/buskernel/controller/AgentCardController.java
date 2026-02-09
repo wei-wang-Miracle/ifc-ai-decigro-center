@@ -2,6 +2,8 @@ package com.ifc.decigro.buskernel.controller;
 
 import com.ifc.decigro.buskernel.common.api.Result;
 import com.ifc.decigro.buskernel.entity.AgentCard;
+import com.ifc.decigro.buskernel.entity.dto.AgentCardDetailRequest;
+import com.ifc.decigro.buskernel.entity.vo.AgentCardSummaryVO;
 import com.ifc.decigro.buskernel.service.AgentCardService;
 import com.mybatisflex.core.paginate.Page;
 import io.swagger.v3.oas.annotations.Operation;
@@ -78,5 +80,25 @@ public class AgentCardController {
     @Operation(summary = "获取可绑定工具列表")
     public Result<List<String>> getAvailableTools() {
         return Result.success(agentCardService.getAvailableTools());
+    }
+
+    /**
+     * 获取当前用户所有的可用智能体（AI 引擎加载阶段）
+     * 过滤规则：isOnline = true
+     */
+    @PostMapping("/available")
+    @Operation(summary = "获取可用智能体列表", description = "用于 AI 引擎加载阶段，获取智能体介绍，符合渐进式加载思想")
+    public Result<List<AgentCardSummaryVO>> getAvailableAgents() {
+        return Result.success(agentCardService.getAvailableAgents());
+    }
+
+    /**
+     * 获取单个智能体的详情（AI 引擎调用阶段）
+     * 包含上线状态检查
+     */
+    @PostMapping("/detail")
+    @Operation(summary = "获取智能体详情", description = "用于 AI 引擎调用阶段，获取智能体使用详情，包含提示词、工具列表等")
+    public Result<AgentCard> getAgentDetail(@RequestBody AgentCardDetailRequest request) {
+        return Result.success(agentCardService.getAgentDetail(request.getAgentName()));
     }
 }

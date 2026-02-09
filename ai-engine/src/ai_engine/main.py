@@ -34,20 +34,8 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     print(f"[AI Engine] LLM Model: {settings.llm_model}")
     
-    # 预加载注册中心（可选，延迟加载也可以）
-    try:
-        tool_registry = get_tool_registry()
-        tool_registry.load()
-        print(f"[AI Engine] 工具注册中心已加载")
-    except Exception as e:
-        print(f"[AI Engine] 工具注册中心加载失败: {e}")
-    
-    try:
-        agent_registry = get_agent_registry()
-        agent_registry.load()
-        print(f"[AI Engine] Agent 注册中心已加载")
-    except Exception as e:
-        print(f"[AI Engine] Agent 注册中心加载失败: {e}")
+    # 预加载逻辑已移除，因为现在采用基于 Token 的动态注册
+    print("[AI Engine] 启动完成! (等待首个用户请求触发动态注册)")
     
     print("[AI Engine] 启动完成!")
     

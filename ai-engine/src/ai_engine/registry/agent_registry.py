@@ -82,7 +82,7 @@ class AgentConfig:
         self._detail = detail
         self._bound_tools_loaded = False
 
-    def get_tools(self) -> list[StructuredTool]:
+    def get_tools(self, token: str) -> list[StructuredTool]:
         """
         获取该 Agent 可用的工具列表 (触发工具详情加载)
         """
@@ -94,23 +94,23 @@ class AgentConfig:
         
         if raw_bound is None:
             # 默认使用所有公共工具
-            self._tools = tool_registry.get_public_tools() 
+            self._tools = tool_registry.get_public_tools(token) 
         elif len(raw_bound) == 0:
             self._tools = []
         else:
-            self._tools = tool_registry.get_tools_by_names(raw_bound)
+            self._tools = tool_registry.get_tools_by_names(raw_bound, token)
         
         self._bound_tools_loaded = True
         return self._tools
     
-    def build_system_message(self) -> str:
+    def build_system_message(self, token: str) -> str:
         parts = []
         if self.system_prompt:
             parts.append(self.system_prompt)
         if self.negative_prompt:
             parts.append(f"\n## 禁止事项\n{self.negative_prompt}")
         
-        tools = self.get_tools()
+        tools = self.get_tools(token)
         if tools:
             tool_descriptions = []
             for tool in tools:
@@ -119,8 +119,8 @@ class AgentConfig:
         
         return "\n\n".join(parts)
     
-    def build_prompt_template(self) -> ChatPromptTemplate:
-        system_message = self.build_system_message()
+    def build_prompt_template(self, token: str) -> ChatPromptTemplate:
+        system_message = self.build_system_message(token)
         return ChatPromptTemplate.from_messages([
             ("system", system_message),
             MessagesPlaceholder(variable_name="messages"),
@@ -135,17 +135,21 @@ class AgentRegistry:
     
     def __init__(self):
         self._client = get_bus_kernel_client()
-        self._agents: dict[str, AgentConfig] = {}
-        self._loaded = False
-    
-    def load(self, force: bool = False) -> None:
-        if self._loaded and not force:
+        # 存储摘要: {token: {agent_name: AgentConfig}}
+        self._user_agents: dict[str, dict[str, AgentConfig]] = {}
+
+    def load(self, token: str, force: bool = False) -> None:
+        """
+        功能: AI 加载阶段 - 获取当前用户可用的 Agent 列表
+        参数: token - 用户身份 Token
+        """
+        if token in self._user_agents and not force:
             return
         
-        # AI 加载阶段: 仅读取 agent_name, agent_description, agent_tags
-        records = self._client.get_agent_page(page=1, size=100)
+        # 通过 API 获取当前用户可用的 Agent 简要信息 (POST /agent/available)
+        records = self._client.get_available_agents(token)
         
-        self._agents = {}
+        user_agents = {}
         for record in records:
             name = record.get("agentName")
             if name:
@@ -154,36 +158,39 @@ class AgentRegistry:
                     "agent_description": record.get("agentDescription"),
                     "agent_tags": record.get("agentTags"),
                 }
-                self._agents[name] = AgentConfig(summary)
+                user_agents[name] = AgentConfig(summary)
         
-        self._loaded = True
+        self._user_agents[token] = user_agents
         
         # 确保 default agent 存在
-        if "default" not in self._agents:
-            self._agents["default"] = AgentConfig({
+        if "default" not in user_agents:
+            user_agents["default"] = AgentConfig({
                 "agent_name": "default",
                 "agent_description": "系统默认助手，用于处理通用任务和闲聊",
                 "agent_tags": ["general", "system"],
             })
             
-        print(f"[AgentRegistry] 成功加载 {len(self._agents)} 个 Agent 摘要")
+        print(f"[AgentRegistry] 成功为 Token[{token[:10]}...] 加载 {len(user_agents)} 个 Agent 摘要")
     
-    def get_agent(self, agent_name: str) -> AgentConfig | None:
-        self.load()
-        agent = self._agents.get(agent_name)
+    def get_agent(self, agent_name: str, token: str) -> AgentConfig | None:
+        """
+        功能: AI 使用阶段 - 获取指定 Agent 的完整配置
+        参数: agent_name, token
+        """
+        self.load(token)
+        user_agents = self._user_agents.get(token, {})
+        agent = user_agents.get(agent_name)
         
-        # AI 使用阶段: 加载完整详情
+        # 加载完整详情 (POST /agent/detail)
         if agent and not agent._detail:
             print(f"[AgentRegistry] 正在加载 Agent 详情: {agent_name}")
-            detail_data = self._client.get_agent_detail(agent_name)
+            detail_data = self._client.get_agent_detail(agent_name, token)
             if detail_data:
-                # 转换字段名
                 detail = {
                     "agent_alias": detail_data.get("agentAlias"),
                     "system_prompt": detail_data.get("systemPrompt"),
                     "negative_prompt": detail_data.get("negativePrompt"),
                     "bound_tools": detail_data.get("boundTools"),
-                    "reasoning_framework": detail_data.get("reasoningFramework"),
                     "reasoning_framework": detail_data.get("reasoningFramework"),
                 }
                 agent.set_detail(detail)
@@ -191,41 +198,42 @@ class AgentRegistry:
                 # 为 default agent 提供默认详情
                 detail = {
                     "agent_alias": "默认助手",
-                    "system_prompt": "你是一个乐于助人的AI助手。对于用户的闲聊（如'你好'），请热情回复并引导用户使用系统功能。对于具体任务，请分析需求并调用在这个步骤中分配的工具。",
+                    "system_prompt": "你是一个乐于助人的AI助手。对于用户的闲聊（如'你好'），请热情回复并引导用户使用系统功能。",
                     "negative_prompt": "",
-                    "bound_tools": None  # 将触发 get_public_tools
+                    "bound_tools": None 
                 }
                 agent.set_detail(detail)
 
-        
         return agent
     
-    def get_all_agents(self) -> list[AgentConfig]:
-        self.load()
-        return list(self._agents.values())
+    def get_all_agents(self, token: str) -> list[AgentConfig]:
+        self.load(token)
+        return list(self._user_agents.get(token, {}).values())
     
-    def get_agent_names(self) -> list[str]:
-        self.load()
-        return list(self._agents.keys())
+    def get_agent_names(self, token: str) -> list[str]:
+        self.load(token)
+        return list(self._user_agents.get(token, {}).keys())
     
-    def get_agent_descriptions(self) -> dict[str, str]:
-        self.load()
+    def get_agent_descriptions(self, token: str) -> dict[str, str]:
+        self.load(token)
+        user_agents = self._user_agents.get(token, {})
         return {
             name: config.description
-            for name, config in self._agents.items()
+            for name, config in user_agents.items()
         }
     
-    def find_agent_by_tag(self, tag: str) -> list[AgentConfig]:
-        self.load()
+    def find_agent_by_tag(self, tag: str, token: str) -> list[AgentConfig]:
+        self.load(token)
+        user_agents = self._user_agents.get(token, {})
         return [
-            config for config in self._agents.values()
+            config for config in user_agents.values()
             if tag in config.tags
         ]
     
-    def reload(self) -> None:
-        self._loaded = False
-        self._agents = {}
-        self.load(force=True)
+    def reload(self, token: str) -> None:
+        if token in self._user_agents:
+            del self._user_agents[token]
+        self.load(token, force=True)
 
 
 # 全局单例

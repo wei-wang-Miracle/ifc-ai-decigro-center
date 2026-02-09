@@ -2,6 +2,7 @@ package com.ifc.decigro.buskernel.service.impl;
 
 import com.ifc.decigro.buskernel.entity.AgentCard;
 import com.ifc.decigro.buskernel.entity.ToolCard;
+import com.ifc.decigro.buskernel.entity.vo.AgentCardSummaryVO;
 import com.ifc.decigro.buskernel.mapper.AgentCardMapper;
 import com.ifc.decigro.buskernel.mapper.ToolCardMapper;
 import com.ifc.decigro.buskernel.service.AgentCardService;
@@ -93,5 +94,28 @@ public class AgentCardServiceImpl implements AgentCardService {
 
         List<ToolCard> tools = toolCardMapper.selectListByQuery(queryWrapper);
         return tools.stream().map(ToolCard::getToolName).collect(Collectors.toList());
+    }
+
+    @Override
+    public List<AgentCardSummaryVO> getAvailableAgents() {
+        QueryWrapper queryWrapper = QueryWrapper.create()
+                .select(AGENT_CARD.AGENT_NAME, AGENT_CARD.AGENT_ALIAS, AGENT_CARD.AGENT_DESCRIPTION,
+                        AGENT_CARD.AGENT_TAGS)
+                .from(AGENT_CARD)
+                .where(AGENT_CARD.IS_ONLINE.eq(true));
+
+        return agentCardMapper.selectListByQueryAs(queryWrapper, AgentCardSummaryVO.class);
+    }
+
+    @Override
+    public AgentCard getAgentDetail(String agentName) {
+        AgentCard agentCard = agentCardMapper.selectOneById(agentName);
+        if (agentCard == null) {
+            throw new RuntimeException("智能体不存在: " + agentName);
+        }
+        if (Boolean.FALSE.equals(agentCard.getIsOnline())) {
+            throw new RuntimeException("智能体未上线: " + agentName);
+        }
+        return agentCard;
     }
 }

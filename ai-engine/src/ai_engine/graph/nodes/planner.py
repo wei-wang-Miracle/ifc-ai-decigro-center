@@ -86,20 +86,21 @@ def planner_node(state: AgentState) -> dict[str, Any]:
     4. 返回计划步骤列表
     """
     query = state.get("query", "")
+    token = state.get("token")
     
     # 获取工具和 Agent 描述
     tool_registry = get_tool_registry()
     agent_registry = get_agent_registry()
     
     # 构建工具描述
-    summaries = tool_registry.get_all_tool_summaries()
+    summaries = tool_registry.get_all_tool_summaries(token)
     tool_descriptions = "\n".join([
         f"- **{s['tool_name']}**: {s['tool_description']}"
         for s in summaries
     ]) if summaries else "暂无可用工具"
     
     # 构建 Agent 描述
-    agents = agent_registry.get_agent_descriptions()
+    agents = agent_registry.get_agent_descriptions(token)
     agent_descriptions = "\n".join([
         f"- **{name}**: {desc}"
         for name, desc in agents.items()

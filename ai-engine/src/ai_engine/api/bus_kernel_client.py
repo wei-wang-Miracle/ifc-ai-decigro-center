@@ -19,11 +19,15 @@ class BusKernelClient:
         self.base_url = base_url.rstrip("/")
         self.client = httpx.Client(timeout=10.0)
 
-    def _get(self, path: str, params: Optional[dict] = None) -> Any:
-        """通用 GET 请求处理"""
+    def _post(self, path: str, json_data: Optional[dict] = None, token: Optional[str] = None) -> Any:
+        """通用 POST 请求处理，支持 Token"""
         url = f"{self.base_url}{path}"
+        headers = {}
+        if token:
+            headers["X-Auth-Token"] = token
+            
         try:
-            response = self.client.get(url, params=params)
+            response = self.client.post(url, json=json_data, headers=headers)
             response.raise_for_status()
             data = response.json()
             if data.get("code") == 200:
@@ -35,27 +39,35 @@ class BusKernelClient:
             print(f"[BusKernelClient] 请求异常 {url}: {e}")
             return None
 
-    def get_agent_page(self, page: int = 1, size: int = 100) -> list[dict[str, Any]]:
-        """获取 Agent 分页列表 (用于加载摘要)"""
-        result = self._get("/agent/page", params={"page": page, "size": size})
-        if result and "records" in result:
-            return result["records"]
-        return []
+    def get_available_agents(self, token: str) -> list[dict[str, Any]]:
+        """
+        功能: 获取当前用户可用的 Agent 列表 (AI 加载阶段)
+        参数: token - 用户认证 Token
+        """
+        result = self._post("/agent/available", token=token)
+        return result if result else []
 
-    def get_agent_detail(self, agent_name: str) -> Optional[dict[str, Any]]:
-        """获取 Agent 完整详情"""
-        return self._get(f"/agent/detail/{agent_name}")
+    def get_agent_detail(self, agent_name: str, token: str) -> Optional[dict[str, Any]]:
+        """
+        功能: 获取指定 Agent 详情 (AI 调用阶段)
+        参数: agent_name, token
+        """
+        return self._post("/agent/detail", json_data={"agentName": agent_name}, token=token)
 
-    def get_tool_page(self, page: int = 1, size: int = 100) -> list[dict[str, Any]]:
-        """获取 Tool 分页列表 (用于加载摘要)"""
-        result = self._get("/tool/page", params={"page": page, "size": size})
-        if result and "records" in result:
-            return result["records"]
-        return []
+    def get_available_tools(self, token: str) -> list[dict[str, Any]]:
+        """
+        功能: 获取当前用户可用的工具列表 (AI 加载阶段)
+        参数: token
+        """
+        result = self._post("/tool/available", token=token)
+        return result if result else []
 
-    def get_tool_detail(self, tool_name: str) -> Optional[dict[str, Any]]:
-        """获取 Tool 完整详情"""
-        return self._get(f"/tool/detail/{tool_name}")
+    def get_tool_detail(self, tool_name: str, token: str) -> Optional[dict[str, Any]]:
+        """
+        功能: 获取指定工具详情 (AI 调用阶段)
+        参数: tool_name, token
+        """
+        return self._post("/tool/detail", json_data={"toolName": tool_name}, token=token)
 
     def close(self):
         self.client.close()
