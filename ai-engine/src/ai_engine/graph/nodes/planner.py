@@ -44,7 +44,13 @@ PLANNER_PROMPT = """你是一个任务规划专家。请将用户的需求拆解
 3. 每个步骤尽量只做一件事
 4. 考虑失败情况的处理
 
-## 执行计划
+## 执行计划 (JSON 输出要求)
+每个步骤必须包含:
+- step_id: 必须是字符串 (如 "1", "2")
+- description: 步骤描述
+- assigned_agent: 指定执行的 Agent (可选)
+- expected_tools: 预计需要的工具列表 (可选)
+- dependencies: 依赖的步骤 ID 列表 (如 ["1"])
 """
 
 
@@ -133,9 +139,10 @@ def planner_node(state: AgentState) -> dict[str, Any]:
         
         plan = response.steps
         
-        print(f"[Planner] 生成计划: {len(plan)} 个步骤")
+        print(f"[Planner] LLM 响应内容: {response}")
+        print(f"[Planner] 成功生成计划: {len(plan)} 个步骤")
         for step in plan:
-            print(f"  - {step.step_id}: {step.description}")
+            print(f"  - [{step.step_id}] {step.description} (Agent: {step.assigned_agent}, Tools: {step.expected_tools}, Deps: {step.dependencies})")
         
         return Command(
             update={

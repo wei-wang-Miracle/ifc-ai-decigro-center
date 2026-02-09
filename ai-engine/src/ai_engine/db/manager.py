@@ -10,7 +10,12 @@ from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
-from psycopg_pool import ConnectionPool
+try:
+    from psycopg_pool import ConnectionPool
+    HAS_POOL = True
+except ImportError:
+    ConnectionPool = object
+    HAS_POOL = False
 
 from ..config import get_settings
 
@@ -28,6 +33,11 @@ class DatabaseManager:
         参数: database_url - PostgreSQL 连接字符串
         返回: None
         """
+        if not HAS_POOL:
+            print("[DatabaseManager] 警告: psycopg_pool 模块未安装，数据库直连功能将不可用。")
+            self._pool = None
+            return
+
         self._pool = ConnectionPool(
             conninfo=database_url,
             min_size=2,
@@ -164,7 +174,8 @@ class DatabaseManager:
         参数: 无
         返回: None
         """
-        self._pool.close()
+        if self._pool:
+            self._pool.close()
 
 
 # 全局单例

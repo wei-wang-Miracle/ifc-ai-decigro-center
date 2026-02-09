@@ -181,8 +181,23 @@ class AgentRegistry:
         user_agents = self._user_agents.get(token, {})
         agent = user_agents.get(agent_name)
         
+        if not agent:
+            return None
+
         # 加载完整详情 (POST /agent/detail)
-        if agent and not agent._detail:
+        if not agent._detail:
+            # 特殊处理系统内置 default agent，不请求后端
+            if agent_name == "default":
+                print(f"[AgentRegistry] 使用本地回退配置: {agent_name}")
+                detail = {
+                    "agent_alias": "默认助手",
+                    "system_prompt": "你是一个乐于助人的AI助手。对于用户的闲聊（如'你好'），请热情回复并引导用户使用系统功能。",
+                    "negative_prompt": "",
+                    "bound_tools": None 
+                }
+                agent.set_detail(detail)
+                return agent
+
             print(f"[AgentRegistry] 正在加载 Agent 详情: {agent_name}")
             detail_data = self._client.get_agent_detail(agent_name, token)
             if detail_data:
@@ -194,15 +209,8 @@ class AgentRegistry:
                     "reasoning_framework": detail_data.get("reasoningFramework"),
                 }
                 agent.set_detail(detail)
-            elif agent_name == "default":
-                # 为 default agent 提供默认详情
-                detail = {
-                    "agent_alias": "默认助手",
-                    "system_prompt": "你是一个乐于助人的AI助手。对于用户的闲聊（如'你好'），请热情回复并引导用户使用系统功能。",
-                    "negative_prompt": "",
-                    "bound_tools": None 
-                }
-                agent.set_detail(detail)
+            else:
+                print(f"[AgentRegistry] 无法获取 Agent 详情: {agent_name}")
 
         return agent
     

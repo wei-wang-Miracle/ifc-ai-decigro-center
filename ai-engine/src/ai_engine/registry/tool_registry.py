@@ -93,7 +93,7 @@ class ToolRegistry:
             }
             
             try:
-                tool = create_dynamic_tool(tool_card)
+                tool = create_dynamic_tool(tool_card, token=token)
                 self._user_tools[token][tool_name] = tool
                 self._tool_cards[tool_name] = tool_card
                 return tool

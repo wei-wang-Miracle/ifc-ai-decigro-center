@@ -57,12 +57,20 @@ class PlanStep(BaseModel):
     """
     功能: 任务计划步骤 (Pydantic 模型)
     """
-    step_id: str = Field(validation_alias=AliasChoices("step_id", "id", "step", "step_number"))
+    step_id: str = Field(validation_alias=AliasChoices("step_id", "id", "step", "step_number", "step_num"))
     description: str
     assigned_agent: Optional[str] = None
     expected_tools: list[str] = Field(default_factory=list)
     status: StepStatus = StepStatus.PENDING
     dependencies: list[str] = Field(default_factory=list, validation_alias=AliasChoices("dependencies", "depends_on"))
+
+    @field_validator("dependencies", mode="before")
+    @classmethod
+    def ensure_list_str(cls, v: Any) -> list[str]:
+        """确保 dependencies 始终为字符串列表"""
+        if isinstance(v, list):
+            return [str(item) for item in v]
+        return v
 
     @field_validator("step_id", mode="before")
     @classmethod

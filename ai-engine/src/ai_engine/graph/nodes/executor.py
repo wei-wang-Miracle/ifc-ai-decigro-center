@@ -40,13 +40,13 @@ def _execute_step_with_agent(
     if agent_config is None:
         # 如果指定的 Agent 不存在，使用默认方式执行
         print(f"[Executor] Agent '{agent_name}' 不存在，使用默认执行方式")
-        return _execute_step_default(step, query)
+        return _execute_step_default(step, query, token)
     
     # 获取 Agent 可用的工具
-    tools = agent_config.get_tools()
+    tools = agent_config.get_tools(token)
     
     # 构建系统消息
-    system_message = agent_config.build_system_message()
+    system_message = agent_config.build_system_message(token)
     
     # 创建 LLM
     llm = ChatOpenAI(
@@ -207,7 +207,8 @@ def plan_task_execute_node(state: AgentState) -> dict[str, Any]:
     
     # 获取当前步骤
     current_step = plan[current_index]
-    print(f"[Executor] 执行步骤 {current_step.step_id}: {current_step.description}")
+    token = state.get("token")
+    print(f"[Executor] 执行步骤 {current_step.step_id} (Token: {token[:10] if token else 'None'}...): {current_step.description}")
     
     # 更新步骤状态
     current_step.status = StepStatus.IN_PROGRESS

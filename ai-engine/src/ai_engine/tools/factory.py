@@ -92,7 +92,8 @@ def create_pydantic_model_from_params(
 
 def create_http_executor(
     url_path: str,
-    method: str = "POST"
+    method: str = "POST",
+    token: str = None
 ) -> Callable[..., str]:
     """
     功能: 创建 HTTP 工具执行器
@@ -117,16 +118,20 @@ def create_http_executor(
         参数: kwargs - 传递给工具的参数（将作为请求体发送）
         返回: API 响应的 JSON 字符串
         """
+        headers = {}
+        if token:
+            headers["X-Auth-Token"] = token
+            
         try:
             with httpx.Client(timeout=30.0) as client:
                 if method.upper() == "GET":
-                    response = client.get(full_url, params=kwargs)
+                    response = client.get(full_url, params=kwargs, headers=headers)
                 elif method.upper() == "POST":
-                    response = client.post(full_url, json=kwargs)
+                    response = client.post(full_url, json=kwargs, headers=headers)
                 elif method.upper() == "PUT":
-                    response = client.put(full_url, json=kwargs)
+                    response = client.put(full_url, json=kwargs, headers=headers)
                 elif method.upper() == "DELETE":
-                    response = client.delete(full_url, params=kwargs)
+                    response = client.delete(full_url, params=kwargs, headers=headers)
                 else:
                     return json.dumps({"error": f"不支持的 HTTP 方法: {method}"})
                 
@@ -146,10 +151,12 @@ def create_http_executor(
     return executor
 
 
-def create_dynamic_tool(tool_card: dict[str, Any]) -> StructuredTool:
+def create_dynamic_tool(tool_card: dict[str, Any], token: str = None) -> StructuredTool:
     """
     功能: 根据 tool_card 数据动态创建 LangChain StructuredTool
-    参数: tool_card - 从数据库读取的工具卡片字典
+    参数: 
+        tool_card - 从数据库读取的工具卡片字典
+        token - 用户身份 Token (用于透传)
     返回: LangChain StructuredTool 实例
     
     tool_card 结构示例:
@@ -177,7 +184,7 @@ def create_dynamic_tool(tool_card: dict[str, Any]) -> StructuredTool:
     # 第二步：根据协议创建执行器
     if tool_protocol == "http":
         url_path = tool_card.get("url_path", "")
-        executor = create_http_executor(url_path)
+        executor = create_http_executor(url_path, token=token)
     elif tool_protocol == "reference":
         # Reference 协议：本地引用，暂时返回模拟执行器
         reference_target = tool_card.get("reference_target", "")

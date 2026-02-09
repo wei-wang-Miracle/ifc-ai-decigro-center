@@ -53,14 +53,16 @@ async def lifespan(app: FastAPI):
     except:
         pass
 
-    # 关闭数据库连接池
-    from .db import get_db_manager
+    # 关闭数据库连接池 (API 模式通常不需要直连数据库，此处设为可选)
     try:
-        db = get_db_manager()
-        db.close()
-        print("[AI Engine] 数据库连接已关闭")
-    except:
-        pass
+        from .db.manager import HAS_POOL
+        if HAS_POOL:
+            from .db import get_db_manager
+            db = get_db_manager()
+            db.close()
+            print("[AI Engine] 数据库连接已关闭")
+    except Exception as e:
+        print(f"[AI Engine] 数据库关闭跳过: {e}")
     
     print("[AI Engine] 已关闭")
 
@@ -94,6 +96,23 @@ def create_app() -> FastAPI:
     
     # 注册路由
     app.include_router(workflow_router)
+
+    # 全局异常捕捉
+    import traceback
+    from fastapi import Request
+    from fastapi.responses import JSONResponse
+
+    @app.exception_handler(Exception)
+    async def global_exception_handler(request: Request, exc: Exception):
+        print(f"[GlobalError] {exc}")
+        traceback.print_exc()
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": f"内部服务器错误: {str(exc)}",
+                "traceback": traceback.format_exc()
+            }
+        )
     
     # 根路径
     @app.get("/")
