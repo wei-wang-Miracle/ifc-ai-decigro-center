@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -32,6 +33,7 @@ public class AiChatTraceController {
     @Operation(summary = "审计列表分页查询", description = "使用 PG 索引进行多维度筛选，响应 < 500ms")
     public Result<Page<AiChatTraceIndex>> page(
             @Parameter(description = "Trace ID (精确匹配)") @RequestParam(required = false) String traceId,
+            @Parameter(description = "Task ID (精确匹配)") @RequestParam(required = false) String taskId,
             @Parameter(description = "用户 ID (精确匹配)") @RequestParam(required = false) String userId,
             @Parameter(description = "Agent 名称") @RequestParam(required = false) String agentName,
             @Parameter(description = "执行状态: SUCCESS/FAILED/RUNNING") @RequestParam(required = false) String status,
@@ -43,7 +45,7 @@ public class AiChatTraceController {
             @Parameter(description = "每页条数") @RequestParam(defaultValue = "20") int size) {
 
         return Result.success(traceIndexService.pageQuery(
-                traceId, userId, agentName, status, toolName,
+                traceId, taskId, userId, agentName, status, toolName,
                 userFeedback, startTime, endTime, page, size));
     }
 
@@ -61,6 +63,16 @@ public class AiChatTraceController {
             return Result.fail(404, "未找到该 Trace 的详情记录");
         }
         return Result.success(detail);
+    }
+
+    /**
+     * 按 task_id 聚合查询 — 追踪同一任务的完整执行链路
+     */
+    @GetMapping("/task/{taskId}")
+    @Operation(summary = "task_id 聚合查询", description = "查询同一 task_id 下所有 trace 记录，重建完整执行链路")
+    public Result<List<AiChatTraceIndex>> listByTask(
+            @Parameter(description = "Task ID") @PathVariable String taskId) {
+        return Result.success(traceIndexService.listByTaskId(taskId));
     }
 
     /**

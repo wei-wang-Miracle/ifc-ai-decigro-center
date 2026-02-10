@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.util.List;
 import java.util.Map;
 
 import static com.ifc.decigro.buskernel.entity.table.AiChatTraceIndexTableDef.AI_CHAT_TRACE_INDEX;
@@ -40,7 +41,7 @@ public class AiChatTraceIndexServiceImpl implements AiChatTraceIndexService {
      */
     @Override
     public Page<AiChatTraceIndex> pageQuery(
-            String traceId, String userId, String agentName,
+            String traceId, String taskId, String userId, String agentName,
             String status, String toolName, Short userFeedback,
             String startTime, String endTime,
             int page, int size) {
@@ -51,6 +52,11 @@ public class AiChatTraceIndexServiceImpl implements AiChatTraceIndexService {
         // Trace ID 精确匹配
         if (StringUtils.hasText(traceId)) {
             queryWrapper.and(AI_CHAT_TRACE_INDEX.TRACE_ID.eq(traceId));
+        }
+
+        // Task ID 精确匹配
+        if (StringUtils.hasText(taskId)) {
+            queryWrapper.and(AI_CHAT_TRACE_INDEX.TASK_ID.eq(taskId));
         }
 
         // 用户 ID 精确匹配
@@ -143,5 +149,17 @@ public class AiChatTraceIndexServiceImpl implements AiChatTraceIndexService {
             System.err.println("[Audit] ES 查询失败: " + e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * 按 task_id 查询同一任务下所有 trace 记录
+     * 按创建时间正序排列，便于重建执行链路
+     */
+    @Override
+    public List<AiChatTraceIndex> listByTaskId(String taskId) {
+        QueryWrapper queryWrapper = QueryWrapper.create()
+                .where(AI_CHAT_TRACE_INDEX.TASK_ID.eq(taskId))
+                .orderBy(AI_CHAT_TRACE_INDEX.CREATE_TIME.asc());
+        return traceIndexMapper.selectListByQuery(queryWrapper);
     }
 }

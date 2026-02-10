@@ -1,12 +1,20 @@
 """
-审计模块初始化
-功能: 提供异步审计数据提交入口
-
-使用方式:
-    from ai_engine.audit import submit_trace
-    submit_trace(state, ai_response)  # 异步提交，不阻塞主线程
+审计模块入口
+功能: 统一导出审计相关的公共 API
 """
 
 from .collector import submit_trace
+from .trace_utils import (
+    start_node_trace,
+    finish_node_trace,
+    build_agent_snapshot,
+    build_tool_snapshot,
+)
 
-__all__ = ["submit_trace"]
+__all__ = [
+    "submit_trace",
+    "start_node_trace",
+    "finish_node_trace",
+    "build_agent_snapshot",
+    "build_tool_snapshot",
+]

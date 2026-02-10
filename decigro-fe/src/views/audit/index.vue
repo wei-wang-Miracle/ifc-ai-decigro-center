@@ -45,6 +45,7 @@ const pageSize = ref(20)
 // --- 筛选条件 ---
 const filters = reactive({
   traceId: '',
+  taskId: '',
   userId: '',
   agentName: '',
   status: '',
@@ -87,6 +88,7 @@ const fetchList = async () => {
     }
     // 条件拼装：仅传非空值
     if (filters.traceId) params.traceId = filters.traceId
+    if (filters.taskId) params.taskId = filters.taskId
     if (filters.userId) params.userId = filters.userId
     if (filters.agentName) params.agentName = filters.agentName
     if (filters.status) params.status = filters.status
@@ -118,6 +120,7 @@ const handleSearch = () => {
 
 const handleReset = () => {
   filters.traceId = ''
+  filters.taskId = ''
   filters.userId = ''
   filters.agentName = ''
   filters.status = ''
@@ -130,6 +133,12 @@ const handleReset = () => {
 const handleViewDetail = (traceId: string) => {
   currentTraceId.value = traceId
   drawerVisible.value = true
+}
+
+// 点击 Task ID 快速筛选同一任务的所有 trace
+const handleFilterByTaskId = (taskId: string) => {
+  filters.taskId = taskId
+  handleSearch()
 }
 
 const handlePageChange = (page: number) => {
@@ -201,6 +210,12 @@ onMounted(() => {
           style="width: 180px"
           @keyup.enter="handleSearch" />
         <el-input
+          v-model="filters.taskId"
+          placeholder="Task ID"
+          clearable
+          style="width: 180px"
+          @keyup.enter="handleSearch" />
+        <el-input
           v-model="filters.userId"
           placeholder="用户 ID"
           clearable
@@ -265,6 +280,16 @@ onMounted(() => {
 
         <!-- 用户ID -->
         <el-table-column label="用户" prop="userId" width="100" show-overflow-tooltip />
+
+        <!-- Task ID 聚合查看 -->
+        <el-table-column label="Task ID" width="160" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.taskId" class="mono-text task-link" @click="handleFilterByTaskId(row.taskId)">
+              {{ row.taskId }}
+            </span>
+            <span v-else class="text-muted">—</span>
+          </template>
+        </el-table-column>
 
         <!-- 摘要透视 -->
         <el-table-column label="用户提问" prop="userTraceQuery" min-width="200" show-overflow-tooltip />
@@ -354,7 +379,7 @@ onMounted(() => {
 
     <!-- 详情抽屉 -->
     <DetailDrawer
-      v-model:visible="drawerVisible"
+      v-model="drawerVisible"
       :trace-id="currentTraceId" />
   </div>
 </template>

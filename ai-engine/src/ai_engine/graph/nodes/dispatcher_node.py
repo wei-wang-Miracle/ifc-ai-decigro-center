@@ -12,6 +12,7 @@ from langgraph.types import Command
 from ..state import AgentState, IntentType, PlanStep, ReviewStatus, StepStatus
 from ...config import get_settings
 from ...registry import get_agent_registry
+from ...audit import start_node_trace, finish_node_trace
 
 
 # Agent 选择 Prompt 模板
@@ -105,6 +106,9 @@ def dispatcher_node(state: AgentState) -> Command:
     """
     功能: 调度中心节点 - 负责路由决策和 Agent 选择
     """
+    # 审计埋点
+    nt = start_node_trace("dispatcher")
+
     # 1. 路由决策逻辑 (原 _get_next_route)
     intent = state.intent
     plan = state.plan
@@ -151,12 +155,16 @@ def dispatcher_node(state: AgentState) -> Command:
             else:
                 print(f"[Dispatcher] 选择 Agent: {selected_agent} 执行步骤: {current_step.description}")
 
+    # 审计埋点：记录路由决策
+    finish_node_trace(nt, "SUCCESS")
+
     # 3. 使用 Command 返回
     if next_route == "__end__":
         return Command(
             update={
                 "selected_agent": None,
                 "messages": [AIMessage(content="[Dispatcher] 任务计划执行完毕，正在通过汇总节点生成响应...")],
+                "node_traces": state.node_traces + [nt],
             },
             goto="responder"
         )
@@ -165,6 +173,7 @@ def dispatcher_node(state: AgentState) -> Command:
             update={
                 "selected_agent": selected_agent,
                 "messages": [AIMessage(content=f"[Dispatcher] 路由到: {next_route}")],
+                "node_traces": state.node_traces + [nt],
             },
             goto=next_route
         )

@@ -179,6 +179,12 @@ class AgentState(BaseModel):
     # 用户认证 Token (用于动态注册权限校验)
     token: Optional[str] = Field(default=None, description="用于 API 调用和权限控制的用户认证 Token")
 
+    # 审计追踪：各图节点的执行记录（由各节点自行追加）
+    node_traces: list[dict] = Field(
+        default_factory=list,
+        description="图节点执行追踪记录列表，每个节点完成后追加自身的 trace 数据"
+    )
+
 
 def create_initial_state(
     query: str,
@@ -218,4 +224,5 @@ def create_initial_state(
         selected_agent=None,
         error=None,
         token=token,
+        node_traces=[],
     )

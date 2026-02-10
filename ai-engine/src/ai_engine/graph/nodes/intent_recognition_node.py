@@ -13,6 +13,7 @@ from langgraph.types import Command
 from ..state import AgentState, IntentObject, IntentType
 from ...config import get_settings
 from ...registry import get_tool_registry, get_agent_registry
+from ...audit import start_node_trace, finish_node_trace, build_agent_snapshot
 
 
 # 意图识别 Prompt 模板
@@ -71,6 +72,9 @@ def intent_recognition_node(state: AgentState) -> dict[str, Any]:
     query = state.query
     token = state.token
 
+    # 审计埋点：记录意图识别节点执行
+    nt = start_node_trace("intent_recognition")
+
     # 获取工具和 Agent 描述
     tool_registry = get_tool_registry()
     agent_registry = get_agent_registry()
@@ -117,17 +121,25 @@ def intent_recognition_node(state: AgentState) -> dict[str, Any]:
             # 简单处理：如果是澄清，也先到 dispatcher 处理或者直接结束
             goto = "dispatcher"
             
+        # 审计埋点：记录成功
+        agent_snap = build_agent_snapshot(
+            model_config={"provider": "openai", "model_name": get_settings().llm_model},
+        )
+        finish_node_trace(nt, "SUCCESS", agent_snapshot=agent_snap)
+
         # 使用 LangGraph 1.0 的 Command 进行状态更新和跳转
         return Command(
             update={
                 "intent": intent,
                 "messages": [HumanMessage(content=query)],
+                "node_traces": state.node_traces + [nt],
             },
             goto=goto
         )
     
     except Exception as e:
         print(f"[IntentNode] 意图识别异常: {e}")
+        finish_node_trace(nt, "FAILED")
         return Command(
             update={
                 "intent": IntentObject(
@@ -135,6 +147,7 @@ def intent_recognition_node(state: AgentState) -> dict[str, Any]:
                     confidence=0.0,
                 ),
                 "error": f"意图识别失败: {str(e)}",
+                "node_traces": state.node_traces + [nt],
             },
             goto="__end__"
         )

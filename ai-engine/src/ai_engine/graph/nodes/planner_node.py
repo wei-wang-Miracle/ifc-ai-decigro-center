@@ -13,6 +13,7 @@ from langgraph.types import Command
 
 from ..state import AgentState, PlanStep, StepStatus
 from pydantic import BaseModel, Field
+from ...audit import start_node_trace, finish_node_trace, build_agent_snapshot
 
 class PlanOutput(BaseModel):
     """
@@ -96,6 +97,9 @@ def planner_node(state: AgentState) -> dict[str, Any]:
     """
     query = state.query
     token = state.token
+
+    # 审计埋点
+    nt = start_node_trace("planner")
     
     # 获取工具和 Agent 描述
     tool_registry = get_tool_registry()
@@ -147,21 +151,30 @@ def planner_node(state: AgentState) -> dict[str, Any]:
         for step in plan:
             print(f"  - [{step.step_id}] {step.description} (Agent: {step.assigned_agent}, Tools: {step.expected_tools}, Deps: {step.dependencies})")
         
+        # 审计埋点：记录规划成功
+        agent_snap = build_agent_snapshot(
+            model_config={"provider": "openai", "model_name": settings.llm_model},
+        )
+        finish_node_trace(nt, "SUCCESS", agent_snapshot=agent_snap)
+
         return Command(
             update={
                 "plan": plan,
                 "current_step_index": 0,
                 "messages": [AIMessage(content=f"[Planner] 已生成 {len(plan)} 步计划")],
+                "node_traces": state.node_traces + [nt],
             },
             goto="dispatcher"
         )
     
     except Exception as e:
         print(f"[Planner] 规划失败: {e}")
+        finish_node_trace(nt, "FAILED")
         return Command(
             update={
                 "plan": [],
                 "error": f"任务规划失败: {str(e)}",
+                "node_traces": state.node_traces + [nt],
             },
             goto="dispatcher"
         )

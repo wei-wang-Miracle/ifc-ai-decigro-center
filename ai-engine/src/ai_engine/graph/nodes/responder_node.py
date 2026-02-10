@@ -6,7 +6,7 @@
 from langchain_core.messages import AIMessage
 from langgraph.types import Command
 from ..state import AgentState, IntentType
-from ...audit import submit_trace  # 审计采集（低侵入）
+from ...audit import submit_trace, start_node_trace, finish_node_trace
 
 
 def responder_node(state: AgentState) -> Command:
@@ -15,8 +15,11 @@ def responder_node(state: AgentState) -> Command:
     职责:
     1. 提取所有步骤执行结果
     2. 生成最终汇总响应
-    3. 清理调试信息
+    3. 触发审计数据采集
     """
+    # 审计埋点
+    nt = start_node_trace("responder")
+
     step_results = state.step_results
     intent = state.intent
     
@@ -33,12 +36,20 @@ def responder_node(state: AgentState) -> Command:
         else:
             summary = f"任务执行过程中遇到错误: {last_result.error}"
 
+    # 完成 responder 节点追踪
+    finish_node_trace(nt, "SUCCESS")
+
+    # 合并完整的 node_traces（包含 responder 自身）
+    all_node_traces = state.node_traces + [nt]
+
     # 异步提交审计数据（后台线程，不阻塞主流程）
-    submit_trace(state, summary)
+    submit_trace(state, summary, all_node_traces)
 
     return Command(
         update={
             "messages": [AIMessage(content=summary)],
+            "node_traces": all_node_traces,
         },
         goto="__end__"
     )
+

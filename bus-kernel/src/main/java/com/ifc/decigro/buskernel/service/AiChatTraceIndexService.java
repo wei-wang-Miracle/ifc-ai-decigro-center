@@ -3,6 +3,7 @@ package com.ifc.decigro.buskernel.service;
 import com.ifc.decigro.buskernel.entity.AiChatTraceIndex;
 import com.mybatisflex.core.paginate.Page;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -30,6 +31,7 @@ public interface AiChatTraceIndexService {
      */
     Page<AiChatTraceIndex> pageQuery(
             String traceId,
+            String taskId,
             String userId,
             String agentName,
             String status,
@@ -56,4 +58,12 @@ public interface AiChatTraceIndexService {
      * 返回: ES 文档内容 (JSON Map)，不存在则返回 null
      */
     Map<String, Object> getDetailFromEs(String traceId);
+
+    /**
+     * 按 task_id 查询同一任务下所有 trace 记录
+     *
+     * 参数: taskId - 任务 ID
+     * 返回: 该 task_id 下所有 trace 列表，按创建时间正序
+     */
+    List<AiChatTraceIndex> listByTaskId(String taskId);
 }

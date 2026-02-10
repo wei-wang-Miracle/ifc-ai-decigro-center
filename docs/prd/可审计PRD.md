@@ -107,80 +107,44 @@ ES中需要存储详细信息 index:ai_chat_trace_index_snapshot
 
 ```json
 {
-  // === 基础元数据 (Meta) ===
   "trace_id": "tr_20240210_8888",
   "session_id": "sess_user_007",
   "task_id": "task_1234567890",
   "user_id": "u_zhangsan",
-  "dept_id": "dept_001", // 部门ID，用于权限控制
-  "timestamp": "2024-02-10T10:30:00.000Z",
-
-  // === 1. 环境快照 (Environment Snapshot) ===
-  // 目的：记录“当时的大脑配置”，用于复现 Bug 或审查 AI 人设
-  "env_snapshot": {
-    "agent_name": "FinancialBot",
-    "agent_version": "v2.5.1",
-    "model_config": {
-      "provider": "openai",
-      "model_name": "gpt-4-turbo",
-      "temperature": 0.5,
-      "top_p": 0.9,
-      "max_tokens": 4096
-    },
-    "system_prompt": "你是一个金融助手。在回答股价问题时，必须先使用工具查询实时数据，严禁编造。"
-  },
-
-  // === 2. 对话快照 (Conversation Snapshot) ===
-  // 目的：记录“完整的输入与输出”，含上下文窗口
-  "dialogue_snapshot": {
-    "user_query_full": "帮我查一下特斯拉现在的股价，并计算买100手需要多少人民币（假设汇率7.2）",
-
-    // [重要] 历史上下文窗口：记录 AI 当时看到了之前的哪些对话
-    // 这对于排查“由于上文误导导致 AI 回答错误”至关重要
-    "history_window": [
-      { "role": "user", "content": "你好" },
-      { "role": "assistant", "content": "你好！我是你的金融助手。" }
-    ],
-
-    "ai_response_full": "根据最新数据，特斯拉股价为 $195.50。按汇率 7.2 计算，买入 100 手（10000股）需要人民币 14,076,000 元。",
-    "finish_reason": "stop", // stop, length, content_filter
-    "total_tokens": 1250
-  },
-
-  // === 3. 工具执行快照 (Execution/Tool Snapshot) ===
-  // 目的：核心审计区，记录工具链的每一步细节
-  // 建议在 ES Mapping 中设为 "nested" 类型，否则无法精确查询
-  "tool_snapshots": [
+  "dept_id": "dept_001",
+  "start_time": "2024-02-10T10:30:00.000Z",
+  "graph_nodes": [
     {
-      "tool_name": "stock_api", // 工具名称
-      "tool_type": "HTTP", // 类型：HTTP
-
-      "start_time": "2024-02-10T10:30:01.000Z",
-      "end_time": "2024-02-10T10:30:01.500Z",
-      "latency_ms": 500, // 耗时
-      "status": "SUCCESS", // SUCCESS, FAILED, TIMEOUT
-
-      // 入参：建议存为 JSON String，避免字段爆炸，且方便复制
-      "input_args": "{\"symbol\": \"TSLA\", \"market\": \"US\"}",
-
-      // 出参：通常很大，截留5000字符，建议在 Mapping 中设置 index: false (不索引，只存储)
-      "output_result": "{\"price\": 195.50, \"currency\": \"USD\", \"timestamp\": \"...\"}",
-
-      // 错误堆栈 (如果 status == FAILED)
-      "error_message": null
-    },
-    {
-      "tool_name": "currency_calculator",
-      "tool_type": "FUNCTION",
-
-      "start_time": "2024-02-10T10:30:01.600Z",
-      "end_time": "2024-02-10T10:30:01.610Z",
-      "latency_ms": 10,
+      "node_name": "intent_recognition",
+      "start_time": "2024-02-10T10:30:00.000Z",
       "status": "SUCCESS",
-
-      "input_args": "{\"amount\": 1955000, \"rate\": 7.2}",
-      "output_result": "14076000",
-      "error_message": null
+      "agent_snapshots": [
+        {
+          "agent_name": "FinancialBot",
+          "agent_version": "v2.5.1",
+          "model_config": {
+            "provider": "openai",
+            "model_name": "gpt-4-turbo",
+            "temperature": 0.5,
+            "top_p": 0.9,
+            "max_tokens": 4096
+          },
+          "system_prompt": "你是一个金融助手。在回答股价问题时，必须先使用工具查询实时数据，严禁编造。",
+          "status": "PENDING/IN_PROGRESS/COMPLETED",
+          "latency_ms": 800,
+          "tools_snapshot": [
+            {
+              "tool_name": "stock_api_search",
+              "tool_type": "HTTP",
+              "start_time": "2024-02-10T10:30:01.000Z",
+              "latency_ms": 800,
+              "status": "SUCCESS",
+              "input_args": "{\"symbol\": \"TSLA\"}",
+              "output_result": "{\"price\": 195.50, \"currency\": \"USD\"}"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

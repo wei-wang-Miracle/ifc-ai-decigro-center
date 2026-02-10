@@ -4,6 +4,7 @@
 """
 
 import json
+import time
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -14,6 +15,10 @@ from langgraph.types import Command
 from ..state import AgentState, PlanStep, StepResult, StepStatus
 from ...config import get_settings
 from ...registry import get_tool_registry, get_agent_registry
+from ...audit import (
+    start_node_trace, finish_node_trace,
+    build_agent_snapshot, build_tool_snapshot,
+)
 
 
 def _execute_with_tool_loop(
@@ -28,6 +33,7 @@ def _execute_with_tool_loop(
     返回: (最终输出, 调用的工具列表, 是否需要审核)
     """
     tools_called = []
+    tool_trace_snapshots = []  # 工具调用快照列表（审计用）
     require_review = False
     final_output = ""
     
@@ -44,6 +50,7 @@ def _execute_with_tool_loop(
         for tool_call in response.tool_calls:
             tool_name = tool_call.get("name", "")
             tools_called.append(tool_name)
+            tool_start_ts = time.time()  # 工具调用计时开始
             
             # 1. 检查是否为受保护工具
             if tool_registry.is_protected(tool_name, token):
@@ -62,11 +69,27 @@ def _execute_with_tool_loop(
                         tool_call_id=tool_call["id"],
                         content=str(tool_result) if tool_result is not None else "执行成功"
                     ))
+                    # 审计：记录工具调用成功
+                    tool_trace_snapshots.append(build_tool_snapshot(
+                        tool_name=tool_name,
+                        input_args=tool_args,
+                        output_result=str(tool_result) if tool_result else None,
+                        latency_ms=int((time.time() - tool_start_ts) * 1000),
+                        status="SUCCESS",
+                    ))
                 except Exception as e:
                     print(f"[Executor] 工具 '{tool_name}' 执行失败: {e}")
                     messages.append(ToolMessage(
                         tool_call_id=tool_call["id"],
                         content=f"错误: {str(e)}"
+                    ))
+                    # 审计：记录工具调用失败
+                    tool_trace_snapshots.append(build_tool_snapshot(
+                        tool_name=tool_name,
+                        input_args=tool_call.get("args", {}),
+                        latency_ms=int((time.time() - tool_start_ts) * 1000),
+                        status="FAILED",
+                        error_message=str(e),
                     ))
             else:
                 messages.append(ToolMessage(
@@ -82,7 +105,7 @@ def _execute_with_tool_loop(
     else:
         final_output = messages[-1].content if messages else "执行超时"
 
-    return final_output, tools_called, require_review
+    return final_output, tools_called, require_review, tool_trace_snapshots
 
 
 def _execute_step_with_agent(
@@ -149,7 +172,7 @@ def _execute_step_with_agent(
         ]
         
         # 进入工具循环
-        output, tools_called, require_review = _execute_with_tool_loop(
+        output, tools_called, require_review, tool_trace_snapshots = _execute_with_tool_loop(
             llm_with_tools=llm_with_tools,
             messages=messages,
             tool_registry=tool_registry,
@@ -162,7 +185,7 @@ def _execute_step_with_agent(
             output=output or "步骤执行完成",
             tools_called=tools_called,
             require_review=require_review,
-        )
+        ), tool_trace_snapshots
     
     except Exception as e:
         print(f"[Executor] 步骤执行异常: {e}")
@@ -170,7 +193,7 @@ def _execute_step_with_agent(
             step_id=step.step_id,
             success=False,
             error=str(e),
-        )
+        ), []
 
 
 def _execute_step_default(step: PlanStep, query: str, token: str) -> StepResult:
@@ -214,7 +237,7 @@ def _execute_step_default(step: PlanStep, query: str, token: str) -> StepResult:
         ]
         
         # 默认模式也进入工具循环
-        output, tools_called, require_review = _execute_with_tool_loop(
+        output, tools_called, require_review, tool_trace_snapshots = _execute_with_tool_loop(
             llm_with_tools=llm_with_tools,
             messages=messages,
             tool_registry=tool_registry,
@@ -227,14 +250,14 @@ def _execute_step_default(step: PlanStep, query: str, token: str) -> StepResult:
             output=output or "执行完成",
             tools_called=tools_called,
             require_review=require_review,
-        )
+        ), tool_trace_snapshots
     
     except Exception as e:
         return StepResult(
             step_id=step.step_id,
             success=False,
             error=str(e),
-        )
+        ), []
 
 
 
@@ -283,13 +306,29 @@ def plan_task_execute_node(state: AgentState) -> dict[str, Any]:
     # 更新步骤状态
     current_step.status = StepStatus.IN_PROGRESS
     
+    # 审计埋点
+    nt = start_node_trace("executor")
+
     # 执行步骤
     token = state.token
-    result = _execute_step_with_agent(
+    result, tool_trace_snapshots = _execute_step_with_agent(
         step=current_step,
         agent_name=selected_agent,
         query=query,
         token=token,
+    )
+    
+    # 审计：构建 Agent 快照（包含工具调用详情）
+    settings = get_settings()
+    agent_snap = build_agent_snapshot(
+        agent_name=selected_agent,
+        model_config={"provider": "openai", "model_name": settings.llm_model},
+        tools_snapshot=tool_trace_snapshots,
+    )
+    finish_node_trace(
+        nt,
+        status="SUCCESS" if result.success else "FAILED",
+        agent_snapshot=agent_snap,
     )
     
     # 更新步骤状态
@@ -309,6 +348,7 @@ def plan_task_execute_node(state: AgentState) -> dict[str, Any]:
                 "require_review": True,
                 "plan": plan,
                 "messages": [AIMessage(content=f"[Executor] 步骤 {current_step.step_id} 需要人工审核")],
+                "node_traces": state.node_traces + [nt],
             },
             goto="dispatcher"
         )
@@ -319,8 +359,9 @@ def plan_task_execute_node(state: AgentState) -> dict[str, Any]:
             "step_results": step_results,
             "current_step_index": current_index + 1,
             "plan": plan,
-            "review_status": None,  # 重置审核状态，为下一个可能需要审核的步骤做准备
+            "review_status": None,
             "messages": [AIMessage(content=result.output or f"[Executor] 步骤 {current_step.step_id} 执行完成")],
+            "node_traces": state.node_traces + [nt],
         },
         goto="dispatcher"
     )

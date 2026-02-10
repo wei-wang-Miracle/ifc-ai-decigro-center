@@ -1,458 +1,498 @@
-<script setup lang="ts">
-import { ref, watch } from 'vue'
-import request from '../../utils/request'
-
-// ============================================
-// 组件 Props 定义
-// ============================================
-
-const props = defineProps<{
-  traceId: string
-}>()
-
-const visible = defineModel<boolean>('visible', { default: false })
-
-// ============================================
-// 数据定义
-// ============================================
-
-const loading = ref(false)
-const detail = ref<any>(null)
-
-// ============================================
-// 监听 traceId 变化，自动加载 ES 详情
-// ============================================
-
-watch(
-  () => props.traceId,
-  async (newId) => {
-    if (newId && visible.value) {
-      await fetchDetail(newId)
-    }
-  }
-)
-
-watch(visible, async (isVisible) => {
-  if (isVisible && props.traceId) {
-    await fetchDetail(props.traceId)
-  }
-})
-
-// ============================================
-// 接口调用
-// ============================================
-
-const fetchDetail = async (traceId: string) => {
-  loading.value = true
-  detail.value = null
-  try {
-    const res: any = await request.get(`/trace/detail/${traceId}`)
-    detail.value = res
-  } catch (e) {
-    console.error('获取审计详情失败', e)
-  } finally {
-    loading.value = false
-  }
-}
-
-// ============================================
-// 辅助方法
-// ============================================
-
-// 工具执行状态颜色
-const getToolStatusType = (status: string) => {
-  return status === 'SUCCESS' ? 'success' : 'danger'
-}
-
-// 格式化 JSON 数据用于展示
-const formatJson = (obj: any) => {
-  if (!obj) return '—'
-  try {
-    return JSON.stringify(obj, null, 2)
-  } catch {
-    return String(obj)
-  }
-}
-</script>
-
 <template>
+  <!-- 审计详情抽屉（v2 图节点时间轴版本） -->
   <el-drawer
     v-model="visible"
-    title="审计详情"
-    size="720px"
-    class="audit-detail-drawer"
+    title="审计追踪详情"
     direction="rtl"
-    destroy-on-close>
-    <div v-loading="loading" class="detail-content">
-      <template v-if="detail">
-        <!-- 环境快照 -->
-        <div class="detail-section">
-          <div class="section-header">
-            <span class="section-icon">🔧</span>
-            <span class="section-title">环境快照 (Environment)</span>
+    size="55%"
+    @close="handleClose"
+  >
+    <!-- 加载状态 -->
+    <div v-if="loading" class="loading-box">
+      <el-icon class="is-loading"><Loading /></el-icon>
+      <span>正在加载详情...</span>
+    </div>
+
+    <!-- 错误状态 -->
+    <div v-else-if="error" class="error-box">
+      <el-icon><WarningFilled /></el-icon>
+      <span>{{ error }}</span>
+    </div>
+
+    <!-- 详情内容 -->
+    <div v-else-if="detail" class="detail-content">
+      <!-- 顶部概要信息卡片 -->
+      <div class="summary-card">
+        <div class="summary-header">
+          <span class="trace-id">Trace: {{ detail.trace_id }}</span>
+          <el-tag v-if="detail.task_id" type="info" size="small" effect="plain">
+            Task: {{ detail.task_id }}
+          </el-tag>
+        </div>
+        <div class="summary-meta">
+          <span><el-icon><User /></el-icon> {{ detail.user_id || '未知用户' }}</span>
+          <span><el-icon><Clock /></el-icon> {{ formatTime(detail.start_time) }}</span>
+          <span v-if="detail.session_id" class="session-tag">
+            Session: {{ detail.session_id?.substring(0, 12) }}...
+          </span>
+        </div>
+      </div>
+
+      <!-- 对话摘要 -->
+      <div v-if="detail.dialogue_summary" class="section dialogue-section">
+        <h4 class="section-title">
+          <el-icon><ChatDotRound /></el-icon> 对话摘要
+        </h4>
+        <div class="dialogue-box">
+          <div class="msg user-msg">
+            <div class="msg-label">用户输入</div>
+            <div class="msg-content">{{ detail.dialogue_summary.user_query || '无' }}</div>
           </div>
-          <div class="info-grid" v-if="detail.env_snapshot">
-            <div class="info-item">
-              <div class="label">Agent 名称</div>
-              <div class="value mono">{{ detail.env_snapshot.agent_name || '—' }}</div>
-            </div>
-            <div class="info-item">
-              <div class="label">Agent 版本</div>
-              <div class="value mono">{{ detail.env_snapshot.agent_version || '—' }}</div>
-            </div>
-            <div class="info-item" v-if="detail.env_snapshot.model_config">
-              <div class="label">模型提供商</div>
-              <div class="value mono">{{ detail.env_snapshot.model_config.provider || '—' }}</div>
-            </div>
-            <div class="info-item" v-if="detail.env_snapshot.model_config">
-              <div class="label">模型名称</div>
-              <div class="value mono">{{ detail.env_snapshot.model_config.model_name || '—' }}</div>
-            </div>
-            <div class="info-item" v-if="detail.env_snapshot.model_config">
-              <div class="label">Temperature</div>
-              <div class="value mono">{{ detail.env_snapshot.model_config.temperature ?? '—' }}</div>
-            </div>
-            <div class="info-item" v-if="detail.env_snapshot.model_config">
-              <div class="label">Max Tokens</div>
-              <div class="value mono">{{ detail.env_snapshot.model_config.max_tokens ?? '—' }}</div>
-            </div>
-          </div>
-          <!-- System Prompt -->
-          <div v-if="detail.env_snapshot?.system_prompt" class="system-prompt-block">
-            <div class="prompt-label">System Prompt</div>
-            <pre class="prompt-content">{{ detail.env_snapshot.system_prompt }}</pre>
+          <div class="msg ai-msg">
+            <div class="msg-label">AI 回复</div>
+            <div class="msg-content">{{ detail.dialogue_summary.ai_response || '无' }}</div>
           </div>
         </div>
+      </div>
 
-        <!-- 对话快照 -->
-        <div class="detail-section">
-          <div class="section-header">
-            <span class="section-icon">💬</span>
-            <span class="section-title">对话快照 (Dialogue)</span>
-          </div>
-          <div class="dialogue-block" v-if="detail.dialogue_snapshot">
-            <!-- 用户提问 -->
-            <div class="dialogue-item user">
-              <div class="dialogue-role">用户提问</div>
-              <div class="dialogue-content">{{ detail.dialogue_snapshot.user_query_full || '—' }}</div>
-            </div>
-            <!-- AI 回复 -->
-            <div class="dialogue-item ai">
-              <div class="dialogue-role">AI 回复</div>
-              <div class="dialogue-content">{{ detail.dialogue_snapshot.ai_response_full || '—' }}</div>
-            </div>
-            <!-- 元信息 -->
-            <div class="dialogue-meta">
-              <span>完成原因: <strong>{{ detail.dialogue_snapshot.finish_reason || '—' }}</strong></span>
-              <span>总 Tokens: <strong>{{ detail.dialogue_snapshot.total_tokens ?? '—' }}</strong></span>
-            </div>
+      <!-- 图节点执行轨迹 -->
+      <div class="section graph-section">
+        <h4 class="section-title">
+          <el-icon><Connection /></el-icon> 执行轨迹（{{ graphNodes.length }} 个节点）
+        </h4>
 
-            <!-- 历史上下文窗口 -->
-            <div v-if="detail.dialogue_snapshot.history_window?.length" class="history-section">
-              <div class="history-label">历史上下文窗口 (最近 {{ detail.dialogue_snapshot.history_window.length }} 条)</div>
-              <div
-                v-for="(msg, idx) in detail.dialogue_snapshot.history_window"
-                :key="idx"
-                class="history-msg"
-                :class="msg.role">
-                <span class="msg-role">{{ msg.role }}</span>
-                <span class="msg-content">{{ (msg.content || '').substring(0, 300) }}{{ (msg.content || '').length > 300 ? '...' : '' }}</span>
+        <div v-if="graphNodes.length === 0" class="empty-hint">
+          暂无节点追踪数据
+        </div>
+
+        <!-- 时间轴 -->
+        <el-timeline v-else>
+          <el-timeline-item
+            v-for="(node, idx) in graphNodes"
+            :key="idx"
+            :type="getNodeTagType(node.status)"
+            :hollow="node.status === 'IN_PROGRESS'"
+            :timestamp="formatNodeTime(node)"
+            placement="top"
+          >
+            <div class="node-card">
+              <!-- 节点头部 -->
+              <div class="node-header">
+                <span class="node-name">{{ getNodeLabel(node.node_name) }}</span>
+                <el-tag :type="getNodeTagType(node.status)" size="small" effect="plain">
+                  {{ node.status || 'UNKNOWN' }}
+                </el-tag>
+                <span v-if="node.latency_ms != null" class="latency" :class="getLatencyClass(node.latency_ms)">
+                  {{ node.latency_ms }}ms
+                </span>
+              </div>
+
+              <!-- Agent 快照列表 -->
+              <div v-if="node.agent_snapshots && node.agent_snapshots.length > 0" class="agent-list">
+                <div
+                  v-for="(agent, aIdx) in node.agent_snapshots"
+                  :key="aIdx"
+                  class="agent-card"
+                >
+                  <div class="agent-header">
+                    <el-icon><Avatar /></el-icon>
+                    <span class="agent-name">{{ agent.agent_name || '默认 Agent' }}</span>
+                    <el-tag
+                      v-if="agent.model_config?.model_name"
+                      size="small"
+                      type="info"
+                      effect="plain"
+                    >
+                      {{ agent.model_config.model_name }}
+                    </el-tag>
+                  </div>
+
+                  <!-- 工具调用列表 -->
+                  <div v-if="agent.tools_snapshot && agent.tools_snapshot.length > 0" class="tools-list">
+                    <div
+                      v-for="(tool, tIdx) in agent.tools_snapshot"
+                      :key="tIdx"
+                      class="tool-item"
+                    >
+                      <div class="tool-header">
+                        <el-icon><SetUp /></el-icon>
+                        <span class="tool-name">{{ tool.tool_name }}</span>
+                        <el-tag :type="tool.status === 'SUCCESS' ? 'success' : 'danger'" size="small">
+                          {{ tool.status }}
+                        </el-tag>
+                        <span v-if="tool.latency_ms != null" class="tool-latency">
+                          {{ tool.latency_ms }}ms
+                        </span>
+                      </div>
+                      <!-- 工具入参 -->
+                      <div v-if="tool.input_args" class="tool-detail">
+                        <span class="detail-label">入参:</span>
+                        <pre class="json-pre">{{ formatJson(tool.input_args) }}</pre>
+                      </div>
+                      <!-- 工具出参 -->
+                      <div v-if="tool.output_result" class="tool-detail">
+                        <span class="detail-label">出参:</span>
+                        <pre class="json-pre output-pre">{{ formatJson(tool.output_result) }}</pre>
+                      </div>
+                      <!-- 错误信息 -->
+                      <div v-if="tool.error_message" class="tool-detail error-detail">
+                        <span class="detail-label">错误:</span>
+                        <span>{{ tool.error_message }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-
-        <!-- 工具执行时间轴 -->
-        <div class="detail-section" v-if="detail.tool_snapshots?.length">
-          <div class="section-header">
-            <span class="section-icon">⚙️</span>
-            <span class="section-title">工具执行时间轴 ({{ detail.tool_snapshots.length }} 次调用)</span>
-          </div>
-          <el-timeline class="tool-timeline">
-            <el-timeline-item
-              v-for="(tool, idx) in detail.tool_snapshots"
-              :key="idx"
-              :type="getToolStatusType(tool.status)"
-              :timestamp="tool.start_time || ''"
-              placement="top">
-              <div class="tool-card">
-                <div class="tool-header">
-                  <span class="tool-name">{{ tool.tool_name }}</span>
-                  <el-tag :type="getToolStatusType(tool.status)" size="small" effect="dark">
-                    {{ tool.status }}
-                  </el-tag>
-                  <span class="tool-latency" v-if="tool.latency_ms">{{ tool.latency_ms }}ms</span>
-                </div>
-                <!-- 入参 -->
-                <div class="tool-detail-row" v-if="tool.input_args">
-                  <span class="tool-detail-label">入参:</span>
-                  <pre class="tool-detail-value">{{ formatJson(tool.input_args) }}</pre>
-                </div>
-                <!-- 出参 -->
-                <div class="tool-detail-row" v-if="tool.output_result">
-                  <span class="tool-detail-label">出参:</span>
-                  <pre class="tool-detail-value">{{ (tool.output_result || '').substring(0, 500) }}</pre>
-                </div>
-                <!-- 错误 -->
-                <div class="tool-detail-row error" v-if="tool.error_message">
-                  <span class="tool-detail-label">错误:</span>
-                  <pre class="tool-detail-value">{{ tool.error_message }}</pre>
-                </div>
-              </div>
-            </el-timeline-item>
-          </el-timeline>
-        </div>
-        <div v-else class="detail-section">
-          <div class="section-header">
-            <span class="section-icon">⚙️</span>
-            <span class="section-title">工具执行时间轴</span>
-          </div>
-          <div class="empty-tools">本次请求未调用任何工具</div>
-        </div>
-      </template>
-      <div v-else-if="!loading" class="empty-state">
-        暂无数据
+          </el-timeline-item>
+        </el-timeline>
       </div>
     </div>
   </el-drawer>
 </template>
 
+<script setup lang="ts">
+import { ref, computed, watch } from 'vue'
+import request from '../../utils/request'
+import {
+  Loading, WarningFilled, User, Clock, ChatDotRound,
+  Connection, Avatar, SetUp
+} from '@element-plus/icons-vue'
+
+// Props
+const props = defineProps<{
+  modelValue: boolean
+  traceId: string
+}>()
+
+// Emits
+const emit = defineEmits(['update:modelValue'])
+
+// 状态
+const visible = computed({
+  get: () => props.modelValue,
+  set: (val) => emit('update:modelValue', val)
+})
+
+const loading = ref(false)
+const error = ref('')
+const detail = ref<any>(null)
+
+// 计算属性：提取 graph_nodes 数组
+const graphNodes = computed(() => {
+  return detail.value?.graph_nodes || []
+})
+
+// 监听 traceId 变化，自动加载详情
+watch(() => props.traceId, (newId) => {
+  if (newId && props.modelValue) {
+    loadDetail(newId)
+  }
+})
+
+watch(() => props.modelValue, (val) => {
+  if (val && props.traceId) {
+    loadDetail(props.traceId)
+  }
+})
+
+// 加载详情数据
+async function loadDetail(traceId: string) {
+  loading.value = true
+  error.value = ''
+  detail.value = null
+
+  try {
+    const res = await request.get(`/trace/detail/${traceId}`)
+    // request 拦截器已处理 Result 包装并返回了 .data
+    if (res) {
+      detail.value = res
+    } else {
+      error.value = '未找到该追踪记录详情'
+    }
+  } catch (e: any) {
+    error.value = e.message || '网络请求失败'
+  } finally {
+    loading.value = false
+  }
+}
+
+function handleClose() {
+  detail.value = null
+  error.value = ''
+}
+
+// 工具函数
+function formatTime(t: string) {
+  if (!t) return '—'
+  try {
+    return new Date(t).toLocaleString('zh-CN', { hour12: false })
+  } catch {
+    return t
+  }
+}
+
+function formatNodeTime(node: any) {
+  const parts: string[] = []
+  if (node.start_time) {
+    parts.push(formatTime(node.start_time))
+  }
+  if (node.latency_ms != null) {
+    parts.push(`耗时 ${node.latency_ms}ms`)
+  }
+  return parts.join(' · ') || '—'
+}
+
+// 节点名中文映射
+const NODE_LABELS: Record<string, string> = {
+  intent_recognition: '🎯 意图识别',
+  dispatcher: '🔀 调度器',
+  planner: '📋 规划器',
+  executor: '⚡ 执行器',
+  review: '👁️ 人工审核',
+  feedback: '💬 反馈处理',
+  responder: '📝 响应汇总',
+}
+
+function getNodeLabel(name: string) {
+  return NODE_LABELS[name] || name
+}
+
+function getNodeTagType(status: string) {
+  switch (status) {
+    case 'SUCCESS': return 'success'
+    case 'FAILED': return 'danger'
+    case 'IN_PROGRESS': return 'warning'
+    case 'SKIPPED': return 'info'
+    default: return 'info'
+  }
+}
+
+function getLatencyClass(ms: number) {
+  if (ms < 500) return 'latency-fast'
+  if (ms < 2000) return 'latency-normal'
+  return 'latency-slow'
+}
+
+function formatJson(obj: any) {
+  if (!obj) return ''
+  if (typeof obj === 'string') {
+    try { return JSON.stringify(JSON.parse(obj), null, 2) } catch { return obj }
+  }
+  try { return JSON.stringify(obj, null, 2) } catch { return String(obj) }
+}
+
+</script>
+
 <style scoped>
-/* === 审计详情抽屉样式 === */
-
-.detail-content {
-  padding: 0 4px;
-}
-
-.detail-section {
-  margin-bottom: 24px;
-}
-
-.section-header {
+/* -- 加载和错误状态 -- */
+.loading-box, .error-box {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
+  padding: 40px;
+  color: var(--el-text-color-secondary);
+  font-size: 14px;
+}
+.error-box { color: var(--el-color-danger); }
+
+/* -- 概要卡片 -- */
+.summary-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  padding: 16px 20px;
+  color: #fff;
+  margin-bottom: 20px;
+}
+.summary-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.trace-id {
+  font-size: 13px;
+  font-family: 'Menlo', 'Monaco', monospace;
+  opacity: 0.9;
+}
+.summary-meta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+.summary-meta .el-icon { vertical-align: -2px; }
+.session-tag { font-family: monospace; }
+
+/* -- 通用 Section -- */
+.section {
+  margin-bottom: 24px;
+}
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
   margin-bottom: 12px;
   padding-bottom: 8px;
-  border-bottom: 2px solid #f0f0f0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
-.section-icon {
-  font-size: 18px;
-}
-
-.section-title {
-  font-size: 15px;
-  font-weight: 700;
-  color: #303133;
-}
-
-/* --- 信息网格 --- */
-.info-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-}
-
-.info-item .label {
-  font-size: 12px;
-  color: #909399;
-  margin-bottom: 4px;
-}
-
-.info-item .value {
-  font-size: 14px;
-  color: #303133;
-  font-weight: 500;
-}
-
-.mono {
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-}
-
-/* --- System Prompt --- */
-.system-prompt-block {
-  margin-top: 12px;
-}
-
-.prompt-label {
-  font-size: 12px;
-  color: #909399;
-  margin-bottom: 4px;
-}
-
-.prompt-content {
-  background: #f5f7fa;
-  border: 1px solid #ebeef5;
-  border-radius: 6px;
-  padding: 12px;
-  font-size: 13px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-all;
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-/* --- 对话快照 --- */
-.dialogue-block {
+/* -- 对话摘要 -- */
+.dialogue-box {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
-
-.dialogue-item {
-  border-radius: 8px;
+.msg {
+  border-radius: 10px;
   padding: 12px 16px;
 }
-
-.dialogue-item.user {
-  background: #ecf5ff;
-  border-left: 4px solid #409eff;
-}
-
-.dialogue-item.ai {
-  background: #f0f9eb;
-  border-left: 4px solid #67c23a;
-}
-
-.dialogue-role {
-  font-size: 12px;
+.msg-label {
+  font-size: 11px;
   font-weight: 600;
-  color: #606266;
   margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
-
-.dialogue-content {
-  font-size: 14px;
+.user-msg {
+  background: #e8f4fd;
+  border-left: 3px solid #409eff;
+}
+.user-msg .msg-label { color: #409eff; }
+.ai-msg {
+  background: #f0f9eb;
+  border-left: 3px solid #67c23a;
+}
+.ai-msg .msg-label { color: #67c23a; }
+.msg-content {
+  font-size: 13px;
   line-height: 1.6;
-  color: #303133;
+  color: var(--el-text-color-regular);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.dialogue-meta {
-  display: flex;
-  gap: 20px;
-  font-size: 12px;
-  color: #909399;
-  padding: 4px 0;
+/* -- 图节点时间轴 -- */
+.empty-hint {
+  text-align: center;
+  padding: 24px;
+  color: var(--el-text-color-secondary);
 }
 
-/* --- 历史上下文 --- */
-.history-section {
-  margin-top: 12px;
+.node-card {
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  padding: 12px 16px;
+  transition: box-shadow 0.2s;
+}
+.node-card:hover {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
 }
 
-.history-label {
-  font-size: 12px;
-  color: #909399;
-  margin-bottom: 8px;
-  font-weight: 600;
-}
-
-.history-msg {
-  display: flex;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 4px;
-  margin-bottom: 4px;
-  font-size: 13px;
-}
-
-.history-msg.human,
-.history-msg.user {
-  background: #fafafa;
-}
-
-.history-msg.ai,
-.history-msg.assistant {
-  background: #f5f7f5;
-}
-
-.msg-role {
-  font-weight: 600;
-  min-width: 55px;
-  color: #606266;
-  font-size: 11px;
-  text-transform: uppercase;
-}
-
-.msg-content {
-  color: #606266;
-  word-break: break-word;
-}
-
-/* --- 工具时间轴 --- */
-.tool-card {
-  background: #fafafa;
-  border: 1px solid #ebeef5;
-  border-radius: 8px;
-  padding: 12px;
-}
-
-.tool-header {
+.node-header {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
 }
-
-.tool-name {
-  font-family: 'JetBrains Mono', monospace;
-  font-weight: 600;
+.node-name {
   font-size: 14px;
-  color: #303133;
-}
-
-.tool-latency {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
-  color: #909399;
-}
-
-.tool-detail-row {
-  margin-top: 6px;
-}
-
-.tool-detail-label {
-  font-size: 12px;
-  color: #909399;
   font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+.latency {
+  margin-left: auto;
+  font-size: 12px;
+  font-family: monospace;
+  font-weight: 500;
+}
+.latency-fast { color: #67c23a; }
+.latency-normal { color: #e6a23c; }
+.latency-slow { color: #f56c6c; }
+
+/* -- Agent 卡片 -- */
+.agent-list {
+  margin-top: 8px;
+}
+.agent-card {
+  background: var(--el-fill-color-lighter);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.agent-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 6px;
+  color: var(--el-text-color-regular);
+}
+.agent-name { font-weight: 600; }
+
+/* -- 工具调用列表 -- */
+.tools-list {
+  margin-top: 8px;
+  border-top: 1px dashed var(--el-border-color);
+  padding-top: 8px;
+}
+.tool-item {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--el-border-color-extra-light);
+}
+.tool-item:last-child { border-bottom: none; }
+
+.tool-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.tool-name {
+  font-weight: 600;
+  font-family: monospace;
+  color: var(--el-text-color-primary);
+}
+.tool-latency {
+  margin-left: auto;
+  font-size: 11px;
+  font-family: monospace;
+  color: var(--el-text-color-secondary);
 }
 
-.tool-detail-value {
-  background: #fff;
-  border: 1px solid #ebeef5;
-  border-radius: 4px;
-  padding: 8px;
-  font-family: 'JetBrains Mono', monospace;
+.tool-detail {
+  margin-top: 6px;
   font-size: 12px;
-  line-height: 1.5;
+  color: var(--el-text-color-secondary);
+}
+.detail-label {
+  font-weight: 600;
+  margin-right: 4px;
+  color: var(--el-text-color-regular);
+}
+.json-pre {
+  background: var(--el-fill-color);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: 'Menlo', 'Monaco', monospace;
+  max-height: 120px;
+  overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-all;
-  max-height: 200px;
-  overflow-y: auto;
   margin-top: 4px;
 }
-
-.tool-detail-row.error .tool-detail-value {
-  border-color: #fde2e2;
-  background: #fef0f0;
-  color: #f56c6c;
+.output-pre {
+  max-height: 80px;
 }
-
-.empty-tools {
-  text-align: center;
-  color: #c0c4cc;
-  padding: 20px;
-  font-size: 14px;
-}
-
-.empty-state {
-  text-align: center;
-  color: #c0c4cc;
-  padding: 60px 0;
-  font-size: 16px;
+.error-detail {
+  color: var(--el-color-danger);
 }
 </style>

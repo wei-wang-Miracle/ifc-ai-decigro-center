@@ -13,42 +13,41 @@ import httpx
 from ..config import get_settings
 
 
-def submit_trace(state, ai_response: str) -> None:
+def submit_trace(state, ai_response: str, node_traces: list = None) -> None:
     """
     功能: 异步提交审计数据到 bus-kernel（不阻塞主线程）
     参数:
         state - AgentState 实例，包含完整的工作流状态
         ai_response - AI 最终的回复文本
+        node_traces - 图节点追踪记录列表（由 responder_node 传入完整列表）
     返回: 无（后台线程执行）
     """
     # 在后台线程中执行，避免阻塞 responder_node 的返回
     thread = threading.Thread(
         target=_do_submit,
-        args=(state, ai_response),
+        args=(state, ai_response, node_traces),
         daemon=True,  # 守护线程，主线程退出时自动结束
     )
     thread.start()
 
 
-def _do_submit(state, ai_response: str) -> None:
+def _do_submit(state, ai_response: str, node_traces: list = None) -> None:
     """
     功能: 实际执行审计数据采集和提交的内部函数
     参数:
         state - AgentState 实例
         ai_response - AI 最终回复
+        node_traces - 图节点追踪记录列表
     返回: 无
     """
     try:
-        # 第一步：计算总耗时（从创建到现在的毫秒数）
-        start_ts = time.time()  # 简化处理：记录提交时间作为结束时间参考
+        # 第一步：构建 PG 宽表数据
+        trace_index = _build_trace_index(state, ai_response, node_traces)
 
-        # 第二步：构建 PG 宽表数据
-        trace_index = _build_trace_index(state, ai_response)
+        # 第二步：构建 ES 快照数据（新的 graph_nodes 结构）
+        es_snapshot = _build_es_snapshot(state, ai_response, node_traces)
 
-        # 第三步：构建 ES 快照数据
-        es_snapshot = _build_es_snapshot(state, ai_response)
-
-        # 第四步：通过 HTTP POST 调用 bus-kernel 的 /trace/save 接口
+        # 第三步：通过 HTTP POST 调用 bus-kernel 的 /trace/save 接口
         settings = get_settings()
         url = f"{settings.bus_kernel_base_url}/trace/save"
 
@@ -76,12 +75,13 @@ def _do_submit(state, ai_response: str) -> None:
         print(f"[Audit] 审计数据提交异常: {e}")
 
 
-def _build_trace_index(state, ai_response: str) -> dict:
+def _build_trace_index(state, ai_response: str, node_traces: list = None) -> dict:
     """
     功能: 从 AgentState 构建 PG 宽表数据字典
     参数:
         state - AgentState 实例
         ai_response - AI 最终回复
+        node_traces - 图节点追踪列表（用于计算总耗时）
     返回: dict（字段名为 camelCase，匹配 Java Entity）
     """
     # 收集所有使用过的工具名称
@@ -91,9 +91,11 @@ def _build_trace_index(state, ai_response: str) -> dict:
     # 去重保序
     tools_used = list(dict.fromkeys(tools_used))
 
-    # 构建执行路径（从 step_results 中提取）
+    # 构建执行路径（从 node_traces 中提取节点名序列）
     execution_path = []
-    if state.selected_agent:
+    if node_traces:
+        execution_path = [nt.get("node_name", "") for nt in node_traces if nt.get("node_name")]
+    elif state.selected_agent:
         execution_path.append(state.selected_agent)
 
     # 判断最终状态
@@ -111,6 +113,12 @@ def _build_trace_index(state, ai_response: str) -> dict:
     user_intent = ""
     if state.intent:
         user_intent = state.intent.intent_type.value if state.intent.intent_type else ""
+
+    # 计算总耗时（从第一个节点开始到最后一个节点结束）
+    trace_latency_ms = None
+    if node_traces and len(node_traces) >= 2:
+        total_ms = sum(nt.get("latency_ms", 0) or 0 for nt in node_traces)
+        trace_latency_ms = total_ms
 
     return {
         "traceId": state.trace_id,
@@ -134,49 +142,59 @@ def _build_trace_index(state, ai_response: str) -> dict:
         # 状态
         "status": status,
         "failureReason": failure_reason,
-        # 效能指标（Token 相关当前由 LLM 内部消耗，这里暂留空）
-        "traceLatencyMs": None,
+        # 效能指标
+        "traceLatencyMs": trace_latency_ms,
         "traceTotalTokens": None,
         "traceInputTokens": None,
         "traceOutputTokens": None,
     }
 
 
-def _build_es_snapshot(state, ai_response: str) -> dict:
+def _build_es_snapshot(state, ai_response: str, node_traces: list = None) -> dict:
     """
-    功能: 构建 ES 完整快照文档
+    功能: 构建 ES 完整快照文档（新的 graph_nodes 结构）
     参数:
         state - AgentState 实例
         ai_response - AI 最终回复
+        node_traces - 图节点追踪记录列表
     返回: dict（ES 文档结构）
+
+    新结构层次:
+      trace_id / session_id / task_id / user_id / start_time
+      └── graph_nodes[] (nested)
+          ├── node_name / start_time / end_time / latency_ms / status
+          └── agent_snapshots[] (nested)
+              ├── agent_name / model_config / system_prompt / status
+              └── tools_snapshot[] (nested)
     """
     from datetime import datetime, timezone
 
-    settings = get_settings()
+    # 确定起始时间：取第一个节点的 start_time，或当前时间
+    start_time = datetime.now(timezone.utc).isoformat()
+    if node_traces and node_traces[0].get("start_time"):
+        start_time = node_traces[0]["start_time"]
 
-    # 构建历史窗口（从 messages 中提取）
-    history_window = []
-    for msg in (state.messages or []):
-        history_window.append({
-            "role": msg.type if hasattr(msg, 'type') else "unknown",
-            "content": str(msg.content)[:2000] if msg.content else "",
-        })
+    # 构建 graph_nodes 数据
+    graph_nodes = []
+    if node_traces:
+        for nt in node_traces:
+            # 构建节点快照（清理内部字段）
+            node_data = {
+                "node_name": nt.get("node_name", ""),
+                "start_time": nt.get("start_time"),
+                "end_time": nt.get("end_time"),
+                "latency_ms": nt.get("latency_ms"),
+                "status": nt.get("status", "UNKNOWN"),
+                "agent_snapshots": nt.get("agent_snapshots", []),
+            }
+            graph_nodes.append(node_data)
 
-    # 构建工具执行快照
-    tool_snapshots = []
-    for sr in (state.step_results or []):
-        for tool_name in (sr.tools_called or []):
-            tool_snapshots.append({
-                "tool_name": tool_name,
-                "tool_type": "HTTP",  # 默认 HTTP 类型
-                "start_time": None,
-                "end_time": None,
-                "latency_ms": None,
-                "status": "SUCCESS" if sr.success else "FAILED",
-                "input_args": None,
-                "output_result": (sr.output or "")[:5000],
-                "error_message": sr.error if not sr.success else None,
-            })
+    # 对话摘要（内嵌到顶层，方便搜索）
+    dialogue_summary = {
+        "user_query": state.query or "",
+        "ai_response": ai_response or "",
+        "history_length": len(state.messages or []),
+    }
 
     return {
         "trace_id": state.trace_id,
@@ -184,28 +202,7 @@ def _build_es_snapshot(state, ai_response: str) -> dict:
         "task_id": state.task_id,
         "user_id": state.user_id,
         "dept_id": None,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-
-        "env_snapshot": {
-            "agent_name": state.selected_agent or "",
-            "agent_version": None,
-            "model_config": {
-                "provider": "openai",
-                "model_name": settings.llm_model,
-                "temperature": settings.llm_temperature,
-                "top_p": 0.9,
-                "max_tokens": 4096,
-            },
-            "system_prompt": None,  # 可后续从 Agent Card 中注入
-        },
-
-        "dialogue_snapshot": {
-            "user_query_full": state.query or "",
-            "history_window": history_window[-10:],  # 最近10条对话
-            "ai_response_full": ai_response or "",
-            "finish_reason": "stop",
-            "total_tokens": None,
-        },
-
-        "tool_snapshots": tool_snapshots,
+        "start_time": start_time,
+        "dialogue_summary": dialogue_summary,
+        "graph_nodes": graph_nodes,
     }
