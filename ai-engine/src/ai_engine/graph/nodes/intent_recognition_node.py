@@ -122,10 +122,13 @@ def intent_recognition_node(state: AgentState) -> dict[str, Any]:
             goto = "dispatcher"
             
         # 审计埋点：记录成功
+        intent_result = f"type={intent.intent_type.value}, confidence={intent.confidence}"
         agent_snap = build_agent_snapshot(
             model_config={"provider": "openai", "model_name": get_settings().llm_model},
+            system_prompt=prompt,
+            agent_result=intent_result,
         )
-        finish_node_trace(nt, "SUCCESS", agent_snapshot=agent_snap)
+        finish_node_trace(nt, "SUCCESS", agent_snapshot=agent_snap, node_result=intent_result)
 
         # 使用 LangGraph 1.0 的 Command 进行状态更新和跳转
         return Command(

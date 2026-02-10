@@ -152,10 +152,13 @@ def planner_node(state: AgentState) -> dict[str, Any]:
             print(f"  - [{step.step_id}] {step.description} (Agent: {step.assigned_agent}, Tools: {step.expected_tools}, Deps: {step.dependencies})")
         
         # 审计埋点：记录规划成功
+        plan_result = f"生成 {len(plan)} 步计划: " + "; ".join([f"[{s.step_id}] {s.description}" for s in plan])
         agent_snap = build_agent_snapshot(
             model_config={"provider": "openai", "model_name": settings.llm_model},
+            system_prompt=prompt,
+            agent_result=plan_result,
         )
-        finish_node_trace(nt, "SUCCESS", agent_snapshot=agent_snap)
+        finish_node_trace(nt, "SUCCESS", agent_snapshot=agent_snap, node_result=plan_result)
 
         return Command(
             update={

@@ -185,7 +185,7 @@ def _execute_step_with_agent(
             output=output or "步骤执行完成",
             tools_called=tools_called,
             require_review=require_review,
-        ), tool_trace_snapshots
+        ), tool_trace_snapshots, system_message
     
     except Exception as e:
         print(f"[Executor] 步骤执行异常: {e}")
@@ -193,7 +193,7 @@ def _execute_step_with_agent(
             step_id=step.step_id,
             success=False,
             error=str(e),
-        ), []
+        ), [], system_message
 
 
 def _execute_step_default(step: PlanStep, query: str, token: str) -> StepResult:
@@ -230,6 +230,9 @@ def _execute_step_default(step: PlanStep, query: str, token: str) -> StepResult:
 用户原始需求：{query}
 """
     
+    # 默认模式的系统提示词
+    default_system_prompt = execution_prompt
+
     try:
         # 初始消息列表
         messages = [
@@ -250,14 +253,14 @@ def _execute_step_default(step: PlanStep, query: str, token: str) -> StepResult:
             output=output or "执行完成",
             tools_called=tools_called,
             require_review=require_review,
-        ), tool_trace_snapshots
+        ), tool_trace_snapshots, default_system_prompt
     
     except Exception as e:
         return StepResult(
             step_id=step.step_id,
             success=False,
             error=str(e),
-        ), []
+        ), [], default_system_prompt
 
 
 
@@ -311,24 +314,27 @@ def plan_task_execute_node(state: AgentState) -> dict[str, Any]:
 
     # 执行步骤
     token = state.token
-    result, tool_trace_snapshots = _execute_step_with_agent(
+    result, tool_trace_snapshots, used_system_prompt = _execute_step_with_agent(
         step=current_step,
         agent_name=selected_agent,
         query=query,
         token=token,
     )
     
-    # 审计：构建 Agent 快照（包含工具调用详情）
+    # 审计：构建 Agent 快照（包含工具调用详情、system_prompt 和 agent_result）
     settings = get_settings()
     agent_snap = build_agent_snapshot(
         agent_name=selected_agent,
         model_config={"provider": "openai", "model_name": settings.llm_model},
         tools_snapshot=tool_trace_snapshots,
+        system_prompt=used_system_prompt,
+        agent_result=result.output if result.success else result.error,
     )
     finish_node_trace(
         nt,
         status="SUCCESS" if result.success else "FAILED",
         agent_snapshot=agent_snap,
+        node_result=result.output if result.success else result.error,
     )
     
     # 更新步骤状态

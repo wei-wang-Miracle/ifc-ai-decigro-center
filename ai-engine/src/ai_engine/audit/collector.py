@@ -185,6 +185,7 @@ def _build_es_snapshot(state, ai_response: str, node_traces: list = None) -> dic
                 "end_time": nt.get("end_time"),
                 "latency_ms": nt.get("latency_ms"),
                 "status": nt.get("status", "UNKNOWN"),
+                "node_result": nt.get("node_result"),
                 "agent_snapshots": nt.get("agent_snapshots", []),
             }
             graph_nodes.append(node_data)

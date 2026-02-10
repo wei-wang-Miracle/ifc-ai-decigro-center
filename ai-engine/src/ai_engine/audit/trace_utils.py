@@ -22,6 +22,7 @@ def start_node_trace(node_name: str) -> dict:
         "end_time": None,
         "latency_ms": None,
         "status": "IN_PROGRESS",
+        "node_result": None,  # 节点的最终输出结果（由 finish_node_trace 填充）
         # 每个节点可以有多个 agent 快照（绝大多数节点只有 1 个）
         "agent_snapshots": [],
         # 计时器（内部使用，不会被序列化到 ES）
@@ -33,19 +34,25 @@ def finish_node_trace(
     trace: dict,
     status: str = "SUCCESS",
     agent_snapshot: Optional[dict] = None,
+    node_result: str = None,
 ) -> dict:
     """
-    功能: 完成节点追踪记录（填充结束时间、耗时、状态）
+    功能: 完成节点追踪记录（填充结束时间、耗时、状态、输出）
     参数:
         trace - start_node_trace 返回的追踪记录
         status - 节点执行状态: SUCCESS / FAILED / SKIPPED
         agent_snapshot - 可选的 Agent 快照数据
+        node_result - 可选的节点输出结果（截断到 5000 字符）
     返回: 完整的追踪记录 dict
     """
     end_ts = time.time()
     trace["end_time"] = datetime.now(timezone.utc).isoformat()
     trace["latency_ms"] = int((end_ts - trace["_start_ts"]) * 1000)
     trace["status"] = status
+
+    # 记录节点输出结果
+    if node_result is not None:
+        trace["node_result"] = (str(node_result) or "")[:5000]
 
     # 添加 Agent 快照
     if agent_snapshot:
@@ -63,6 +70,7 @@ def build_agent_snapshot(
     model_config: dict = None,
     system_prompt: str = None,
     tools_snapshot: list = None,
+    agent_result: str = None,
 ) -> dict:
     """
     功能: 构建 Agent 快照结构
@@ -72,6 +80,7 @@ def build_agent_snapshot(
         model_config - 模型配置（provider, model_name, temperature 等）
         system_prompt - 系统提示词
         tools_snapshot - 工具调用快照列表
+        agent_result - Agent 的最终输出结果（截断到 5000 字符）
     返回: Agent 快照 dict
     """
     return {
@@ -79,6 +88,7 @@ def build_agent_snapshot(
         "agent_version": agent_version,
         "model_config": model_config,
         "system_prompt": system_prompt,
+        "agent_result": (str(agent_result) or "")[:5000] if agent_result else None,
         "status": "COMPLETED",
         "tools_snapshot": tools_snapshot or [],
     }

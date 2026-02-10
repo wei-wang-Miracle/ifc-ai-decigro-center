@@ -37,7 +37,7 @@ def responder_node(state: AgentState) -> Command:
             summary = f"任务执行过程中遇到错误: {last_result.error}"
 
     # 完成 responder 节点追踪
-    finish_node_trace(nt, "SUCCESS")
+    finish_node_trace(nt, "SUCCESS", node_result=summary)
 
     # 合并完整的 node_traces（包含 responder 自身）
     all_node_traces = state.node_traces + [nt]

@@ -49,6 +49,7 @@ curl -s -X PUT "${ES_HOST}/${INDEX_NAME}" \
           "end_time":    { "type": "date" },
           "latency_ms":  { "type": "integer" },
           "status":      { "type": "keyword" },
+          "node_result": { "type": "text", "index": false },
 
           "agent_snapshots": {
             "type": "nested",
@@ -58,6 +59,7 @@ curl -s -X PUT "${ES_HOST}/${INDEX_NAME}" \
               "status":         { "type": "keyword" },
               "model_config":   { "type": "object", "enabled": false },
               "system_prompt":  { "type": "text", "index": false },
+              "agent_result":   { "type": "text", "index": false },
 
               "tools_snapshot": {
                 "type": "nested",

@@ -156,7 +156,8 @@ def dispatcher_node(state: AgentState) -> Command:
                 print(f"[Dispatcher] 选择 Agent: {selected_agent} 执行步骤: {current_step.description}")
 
     # 审计埋点：记录路由决策
-    finish_node_trace(nt, "SUCCESS")
+    route_result = f"路由到: {next_route}" + (f", Agent: {selected_agent}" if selected_agent else "")
+    finish_node_trace(nt, "SUCCESS", node_result=route_result)
 
     # 3. 使用 Command 返回
     if next_route == "__end__":

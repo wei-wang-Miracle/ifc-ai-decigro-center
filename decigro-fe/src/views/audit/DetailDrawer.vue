@@ -1,5 +1,5 @@
 <template>
-  <!-- 审计详情抽屉（v2 图节点时间轴版本） -->
+  <!-- 审计详情抽屉（v3 增强信息呈现版本） -->
   <el-drawer
     v-model="visible"
     title="审计追踪详情"
@@ -76,15 +76,24 @@
             placement="top"
           >
             <div class="node-card">
-              <!-- 节点头部 -->
+              <!-- 节点头部：直接使用 node_name -->
               <div class="node-header">
-                <span class="node-name">{{ getNodeLabel(node.node_name) }}</span>
+                <span class="node-name">{{ node.node_name }}</span>
                 <el-tag :type="getNodeTagType(node.status)" size="small" effect="plain">
                   {{ node.status || 'UNKNOWN' }}
                 </el-tag>
                 <span v-if="node.latency_ms != null" class="latency" :class="getLatencyClass(node.latency_ms)">
                   {{ node.latency_ms }}ms
                 </span>
+              </div>
+
+              <!-- 节点输出结果 -->
+              <div v-if="node.node_result" class="node-result">
+                <el-collapse>
+                  <el-collapse-item title="节点输出">
+                    <pre class="result-pre">{{ node.node_result }}</pre>
+                  </el-collapse-item>
+                </el-collapse>
               </div>
 
               <!-- Agent 快照列表 -->
@@ -107,8 +116,27 @@
                     </el-tag>
                   </div>
 
+                  <!-- Agent 系统提示词（可折叠） -->
+                  <div v-if="agent.system_prompt" class="agent-detail-section">
+                    <el-collapse>
+                      <el-collapse-item title="System Prompt">
+                        <pre class="result-pre prompt-pre">{{ agent.system_prompt }}</pre>
+                      </el-collapse-item>
+                    </el-collapse>
+                  </div>
+
+                  <!-- Agent 输出结果（可折叠） -->
+                  <div v-if="agent.agent_result" class="agent-detail-section">
+                    <el-collapse>
+                      <el-collapse-item title="Agent 输出">
+                        <pre class="result-pre">{{ agent.agent_result }}</pre>
+                      </el-collapse-item>
+                    </el-collapse>
+                  </div>
+
                   <!-- 工具调用列表 -->
                   <div v-if="agent.tools_snapshot && agent.tools_snapshot.length > 0" class="tools-list">
+                    <div class="tools-list-title">🔧 工具调用 ({{ agent.tools_snapshot.length }})</div>
                     <div
                       v-for="(tool, tIdx) in agent.tools_snapshot"
                       :key="tIdx"
@@ -117,6 +145,15 @@
                       <div class="tool-header">
                         <el-icon><SetUp /></el-icon>
                         <span class="tool-name">{{ tool.tool_name }}</span>
+                        <el-tag
+                          v-if="tool.tool_type"
+                          size="small"
+                          type="warning"
+                          effect="plain"
+                          class="tool-type-tag"
+                        >
+                          {{ tool.tool_type }}
+                        </el-tag>
                         <el-tag :type="tool.status === 'SUCCESS' ? 'success' : 'danger'" size="small">
                           {{ tool.status }}
                         </el-tag>
@@ -241,21 +278,6 @@ function formatNodeTime(node: any) {
     parts.push(`耗时 ${node.latency_ms}ms`)
   }
   return parts.join(' · ') || '—'
-}
-
-// 节点名中文映射
-const NODE_LABELS: Record<string, string> = {
-  intent_recognition: '🎯 意图识别',
-  dispatcher: '🔀 调度器',
-  planner: '📋 规划器',
-  executor: '⚡ 执行器',
-  review: '👁️ 人工审核',
-  feedback: '💬 反馈处理',
-  responder: '📝 响应汇总',
-}
-
-function getNodeLabel(name: string) {
-  return NODE_LABELS[name] || name
 }
 
 function getNodeTagType(status: string) {
@@ -405,6 +427,7 @@ function formatJson(obj: any) {
   font-size: 14px;
   font-weight: 600;
   color: var(--el-text-color-primary);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
 }
 .latency {
   margin-left: auto;
@@ -415,6 +438,31 @@ function formatJson(obj: any) {
 .latency-fast { color: #67c23a; }
 .latency-normal { color: #e6a23c; }
 .latency-slow { color: #f56c6c; }
+
+/* -- 节点输出结果 -- */
+.node-result {
+  margin-top: 4px;
+  margin-bottom: 8px;
+}
+
+/* -- 通用 result-pre 样式 -- */
+.result-pre {
+  background: var(--el-fill-color);
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: 'Menlo', 'Monaco', monospace;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  line-height: 1.5;
+}
+.prompt-pre {
+  max-height: 150px;
+  color: var(--el-text-color-secondary);
+}
 
 /* -- Agent 卡片 -- */
 .agent-list {
@@ -437,11 +485,62 @@ function formatJson(obj: any) {
 }
 .agent-name { font-weight: 600; }
 
+/* -- Agent 详情区域（system_prompt & agent_result） -- */
+.agent-detail-section {
+  margin-top: 6px;
+}
+.agent-detail-section :deep(.el-collapse) {
+  border: none;
+}
+.agent-detail-section :deep(.el-collapse-item__header) {
+  height: 28px;
+  line-height: 28px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  background: transparent;
+  border-bottom: none;
+}
+.agent-detail-section :deep(.el-collapse-item__wrap) {
+  border-bottom: none;
+  background: transparent;
+}
+.agent-detail-section :deep(.el-collapse-item__content) {
+  padding-bottom: 4px;
+}
+
+/* -- 节点输出折叠样式 -- */
+.node-result :deep(.el-collapse) {
+  border: none;
+}
+.node-result :deep(.el-collapse-item__header) {
+  height: 28px;
+  line-height: 28px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  background: transparent;
+  border-bottom: none;
+}
+.node-result :deep(.el-collapse-item__wrap) {
+  border-bottom: none;
+  background: transparent;
+}
+.node-result :deep(.el-collapse-item__content) {
+  padding-bottom: 4px;
+}
+
 /* -- 工具调用列表 -- */
 .tools-list {
   margin-top: 8px;
   border-top: 1px dashed var(--el-border-color);
   padding-top: 8px;
+}
+.tools-list-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 6px;
 }
 .tool-item {
   padding: 8px 0;
@@ -459,6 +558,9 @@ function formatJson(obj: any) {
   font-weight: 600;
   font-family: monospace;
   color: var(--el-text-color-primary);
+}
+.tool-type-tag {
+  font-size: 10px;
 }
 .tool-latency {
   margin-left: auto;
