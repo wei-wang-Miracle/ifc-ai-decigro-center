@@ -163,10 +163,46 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   /**
-   * 添加消息到当前会话
+   * 添加消息到当前会话（仅本地）
    */
   function addMessage(message: ChatMessage) {
     messages.value.push(message)
+  }
+
+  /**
+   * 将消息持久化到数据库（通过 bus-kernel POST /ai/chat/messages）
+   * 异步调用，不阻塞主流程
+   */
+  async function saveMessageToServer(message: {
+    sessionId: string
+    taskId?: string
+    traceId?: string
+    role: string
+    content: string
+  }) {
+    try {
+      await request.post('/ai/chat/messages', message)
+    } catch (error) {
+      console.error('保存消息到服务器失败:', error)
+    }
+  }
+
+  /**
+   * 异步更新会话标题（通过 bus-kernel PUT 接口）
+   * 截取内容前 30 个字符作为标题
+   */
+  async function updateSessionTitle(sessionId: string, title: string) {
+    try {
+      const trimmedTitle = title.length > 30 ? title.substring(0, 30) + '...' : title
+      await request.put(`/ai/chat/sessions/${sessionId}`, { title: trimmedTitle })
+      // 同步更新本地会话列表中的标题
+      const session = sessions.value.find(s => s.sessionId === sessionId)
+      if (session) {
+        session.sessionTitle = trimmedTitle
+      }
+    } catch (error) {
+      console.error('更新会话标题失败:', error)
+    }
   }
 
   /**
@@ -196,6 +232,8 @@ export const useChatStore = defineStore('chat', () => {
     fetchMessages,
     deleteSession,
     addMessage,
+    saveMessageToServer,
+    updateSessionTitle,
     setTaskId,
     clearTaskId
   }

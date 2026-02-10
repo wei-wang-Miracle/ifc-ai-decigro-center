@@ -2,13 +2,13 @@ package com.ifc.decigro.buskernel.controller;
 
 import com.ifc.decigro.buskernel.common.api.Result;
 import com.ifc.decigro.buskernel.common.auth.TokenProvider;
-import lombok.Data;
+import com.ifc.decigro.buskernel.dto.CreateSessionRequest;
+import com.ifc.decigro.buskernel.dto.SaveMessageRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -27,35 +27,6 @@ public class AiChatController {
 
     @Autowired
     private TokenProvider tokenProvider;
-
-    // ========================================
-    // 请求/响应 DTO
-    // ========================================
-
-    @Data
-    public static class CreateSessionRequest {
-        private String title;
-    }
-
-    @Data
-    public static class SessionResponse {
-        private String sessionId;
-        private String userId;
-        private String sessionTitle;
-        private LocalDateTime createTime;
-        private LocalDateTime updateTime;
-    }
-
-    @Data
-    public static class MessageResponse {
-        private Long id;
-        private String sessionId;
-        private String taskId;
-        private String traceId;
-        private String role;
-        private String content;
-        private LocalDateTime createTime;
-    }
 
     // ========================================
     // API 端点
@@ -137,6 +108,40 @@ public class AiChatController {
         } catch (Exception e) {
             log.error("获取消息列表失败", e);
             return Result.fail("获取消息列表失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 保存消息记录
+     * POST /api/dg/ai/chat/messages
+     * 前端在发送消息和收到 AI 回复后分别调用此接口持久化
+     */
+    @PostMapping("/messages")
+    public Result<Void> saveMessage(
+            @RequestHeader("X-Auth-Token") String token,
+            @RequestBody SaveMessageRequest request) {
+        try {
+            // 验证 token
+            tokenProvider.validateAndParse(token);
+
+            jdbcTemplate.update(
+                    "INSERT INTO ai_chat_message (session_id, task_id, trace_id, role, content, create_time) " +
+                            "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                    request.getSessionId(),
+                    request.getTaskId(),
+                    request.getTraceId(),
+                    request.getRole(),
+                    request.getContent());
+
+            // 同时更新会话的 update_time，让最近活跃的会话排在前面
+            jdbcTemplate.update(
+                    "UPDATE ai_chat_session SET update_time = CURRENT_TIMESTAMP WHERE session_id = ?",
+                    request.getSessionId());
+
+            return Result.success();
+        } catch (Exception e) {
+            log.error("保存消息失败", e);
+            return Result.fail("保存消息失败: " + e.getMessage());
         }
     }
 

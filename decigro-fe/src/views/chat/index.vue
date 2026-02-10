@@ -90,6 +90,19 @@ const handleSend = async () => {
         createTime: new Date()
     }
     chatStore.addMessage(userMessage)
+
+    // 异步持久化用户消息到数据库（通过 bus-kernel）
+    chatStore.saveMessageToServer({
+        sessionId: chatStore.currentSessionId!,
+        taskId: chatStore.currentTaskId || undefined,
+        role: 'user',
+        content: userQuery
+    })
+
+    // 首条消息发送后，异步更新会话标题为消息内容（通过 bus-kernel PUT 接口）
+    if (chatStore.messages.length === 1 && chatStore.currentSession?.sessionTitle === '新会话') {
+        chatStore.updateSessionTitle(chatStore.currentSessionId!, userQuery)
+    }
     
     isLoading.value = true
     scrollToBottom()
@@ -119,6 +132,15 @@ const handleSend = async () => {
             requireReview: res.require_review
         }
         chatStore.addMessage(aiMessage)
+
+        // 异步持久化 AI 回复到数据库（通过 bus-kernel）
+        chatStore.saveMessageToServer({
+            sessionId: chatStore.currentSessionId!,
+            taskId: res.task_id,
+            traceId: res.trace_id,
+            role: 'assistant',
+            content: res.message
+        })
 
         // 如果任务完成，清理任务 ID
         if (res.status === 'completed') {
