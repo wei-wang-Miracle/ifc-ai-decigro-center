@@ -6,6 +6,7 @@
 from langchain_core.messages import AIMessage
 from langgraph.types import Command
 from ..state import AgentState, IntentType
+from ...audit import submit_trace  # 审计采集（低侵入）
 
 
 def responder_node(state: AgentState) -> Command:
@@ -31,6 +32,9 @@ def responder_node(state: AgentState) -> Command:
             summary = last_result.output
         else:
             summary = f"任务执行过程中遇到错误: {last_result.error}"
+
+    # 异步提交审计数据（后台线程，不阻塞主流程）
+    submit_trace(state, summary)
 
     return Command(
         update={

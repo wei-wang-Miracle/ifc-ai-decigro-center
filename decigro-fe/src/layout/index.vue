@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '../stores/user'
-import { ArrowRight, User, Lock, SwitchButton, Calendar, Stamp, List, OfficeBuilding, Monitor, ArrowDown, PriceTag, Box, Cpu } from '@element-plus/icons-vue'
+import { ArrowRight, User, Lock, SwitchButton, Calendar, Stamp, List, OfficeBuilding, Monitor, ArrowDown, PriceTag, Box, Cpu, DataAnalysis } from '@element-plus/icons-vue'
 import AIChat from '../components/AIChat.vue'
 
 const router = useRouter()
@@ -112,6 +112,10 @@ const breadcrumbs = computed(() => {
             <el-menu-item index="/chat/index">
                 <el-icon><Promotion /></el-icon>
                 AI 智能对话
+            </el-menu-item>
+            <el-menu-item index="/audit/list">
+                <el-icon><DataAnalysis /></el-icon>
+                审计监控
             </el-menu-item>
         </el-menu>
         

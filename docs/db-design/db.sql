@@ -220,3 +220,77 @@ CREATE INDEX IF NOT EXISTS idx_message_trace ON ai_chat_message(trace_id);
 COMMENT ON TABLE ai_chat_message IS 'AI 聊天消息表';
 COMMENT ON COLUMN ai_chat_message.task_id IS '任务标识，一个 plan 执行期间共享';
 COMMENT ON COLUMN ai_chat_message.trace_id IS '链路追踪 ID，用于审计和问题排查';
+-- =================================================================
+-- AI 全链路审计宽表 (ai_chat_trace_index)
+-- 核心价值: 快速筛选、异常发现、宏观透视
+-- 分表策略建议: 按 create_time 进行 Range Partition（月度或季度）
+-- =================================================================
+CREATE TABLE IF NOT EXISTS ai_chat_trace_index (
+    -- === 1. 链路指纹 (Identity) ===
+    trace_id VARCHAR(64) PRIMARY KEY,
+    -- 全局唯一请求ID (与 ES _id 对应)
+    session_id VARCHAR(64) NOT NULL,
+    -- 会话ID
+    task_id VARCHAR(64),
+    -- 异步任务ID (可空)
+    user_id VARCHAR(64) NOT NULL,
+    -- 用户ID
+    dept_id VARCHAR(64),
+    -- 部门ID
+    tenant_code VARCHAR(32),
+    -- 多租户隔离字段
+    -- === 2. 智能体画像 (Agent Profile) ===
+    agent_name VARCHAR(64),
+    -- 入口 Agent 名称
+    agent_version VARCHAR(32),
+    -- Agent 版本号
+    model_provider VARCHAR(32),
+    -- 模型底座 (e.g., "gpt-4-turbo")
+    user_feedback SMALLINT DEFAULT 0,
+    -- 用户反馈 (1=好评, 0=无, -1=差评)
+    -- === 3. 摘要与透视 (Summary & Insight) ===
+    user_intent VARCHAR(200),
+    -- 用户意图 (意图识别节点提供)
+    user_trace_query VARCHAR(500),
+    -- 用户本次请求的提问 (前500字符截断)
+    ai_trace_response VARCHAR(500),
+    -- AI 本次回复的内容 (前500字符截断)
+    execution_path JSONB DEFAULT '[]',
+    -- 经过的节点 agent_name 列表
+    tools_used JSONB DEFAULT '[]',
+    -- 本次使用的工具 tool_name 列表
+    -- === 4. 状态与合规 (Status & Compliance) ===
+    status VARCHAR(20) NOT NULL DEFAULT 'RUNNING',
+    -- SUCCESS, FAILED, RUNNING, INTERRUPTED
+    failure_reason VARCHAR(255),
+    -- 简短的失败原因 (长堆栈存 ES)
+    -- === 5. 效能账本 (Metrics) ===
+    trace_latency_ms INT,
+    -- trace 总耗时 (毫秒)
+    trace_total_tokens INT,
+    -- trace 总 Token 消耗
+    trace_input_tokens INT,
+    -- trace 提示词 Token
+    trace_output_tokens INT,
+    -- trace 输出 Token
+    -- === 6. 时序 (Timing) ===
+    create_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+-- ==========================================
+-- 核心索引设计 (Performance Boosters)
+-- ==========================================
+-- 1. 基础列表查询 (最常用的默认视图)
+CREATE INDEX IF NOT EXISTS idx_chat_trace_time ON ai_chat_trace_index (create_time DESC);
+-- 2. 用户维度的历史查询
+CREATE INDEX IF NOT EXISTS idx_chat_trace_user ON ai_chat_trace_index (user_id, create_time DESC);
+-- 3. 部门/租户级审计 (B端多租户必备)
+CREATE INDEX IF NOT EXISTS idx_chat_trace_tenant_dept ON ai_chat_trace_index (tenant_code, dept_id);
+-- 4. 状态筛选
+CREATE INDEX IF NOT EXISTS idx_chat_trace_status ON ai_chat_trace_index (status);
+-- 5. JSONB GIN 索引 (用于工具包含查询)
+CREATE INDEX IF NOT EXISTS idx_chat_trace_tools ON ai_chat_trace_index USING GIN (tools_used);
+COMMENT ON TABLE ai_chat_trace_index IS 'AI 全链路审计宽表，PG 索引承担 90% 日常查询';
+COMMENT ON COLUMN ai_chat_trace_index.trace_id IS '全局唯一请求ID，与 ES _id 一一对应';
+COMMENT ON COLUMN ai_chat_trace_index.tools_used IS 'JSONB 数组，利用 GIN 索引支持"包含"查询';
+COMMENT ON COLUMN ai_chat_trace_index.execution_path IS '执行路径，记录经过的节点列表';

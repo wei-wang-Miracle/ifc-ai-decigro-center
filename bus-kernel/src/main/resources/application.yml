@@ -3,6 +3,11 @@ server:
   servlet:
     context-path: /api/dg
 
+# Elasticsearch 配置 (本地部署，无密码)
+elasticsearch:
+  host: localhost
+  port: 9200
+
 spring:
   application:
     name: bus-kernel
