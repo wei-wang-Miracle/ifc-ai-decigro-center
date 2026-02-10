@@ -11,13 +11,7 @@ const loading = ref(false)
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
 
-const toolOptions = [
-    { label: '搜索工具', value: 'search' },
-    { label: '代码解释器', value: 'interpreter' },
-    { label: '智能分析', value: 'analysis' },
-    { label: '文档生成', value: 'doc_gen' },
-    { label: '外部插件', value: 'plugin' }
-]
+const allTools = ref<any[]>([])
 
 const form = reactive<any>({
     roleId: null,
@@ -43,6 +37,15 @@ const fetchData = async () => {
         console.error(e)
     } finally {
         loading.value = false
+    }
+}
+
+const fetchAllTools = async () => {
+    try {
+        const res: any = await request.get('/tool/list-all')
+        allTools.value = res || []
+    } catch (e) {
+        console.error(e)
     }
 }
 
@@ -121,6 +124,7 @@ const resetForm = () => {
 
 onMounted(() => {
     fetchData()
+    fetchAllTools()
 })
 </script>
 
@@ -157,7 +161,7 @@ onMounted(() => {
               <template #default="scope">
                   <div class="flex flex-wrap gap-1">
                       <el-tag v-for="tool in scope.row.toolList" :key="tool" size="small" effect="plain" round>
-                          {{ toolOptions.find(o => o.value === tool)?.label || tool }}
+                          {{ allTools.find(o => o.toolName === tool)?.toolAlias || tool }}
                       </el-tag>
                       <span v-if="!scope.row.toolList?.length" class="text-gray-400 text-xs">未分配</span>
                   </div>
@@ -192,8 +196,12 @@ onMounted(() => {
                 <el-input v-model="form.roleDesc" type="textarea" placeholder="描述角色的职权访问范围" />
             </el-form-item>
             <el-form-item label="分配工具" prop="toolList">
-                <el-select v-model="form.toolList" multiple placeholder="请选择可选工具" class="w-full">
-                    <el-option v-for="item in toolOptions" :key="item.value" :label="item.label" :value="item.value" />
+                <el-select v-model="form.toolList" multiple filterable placeholder="请选择可选工具" class="w-full">
+                    <el-option 
+                        v-for="item in allTools" 
+                        :key="item.toolName" 
+                        :label="`${item.toolName}${item.toolAlias ? ' (' + item.toolAlias + ')' : ''}`" 
+                        :value="item.toolName" />
                 </el-select>
             </el-form-item>
             <el-form-item label="是否启用">
