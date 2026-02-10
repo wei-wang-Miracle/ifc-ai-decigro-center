@@ -27,6 +27,7 @@ CREATE TABLE agent_cards (
     -- 4. 元数据 (Meta Data)
     agent_version VARCHAR(50) DEFAULT '1.0.0',
     is_online BOOLEAN DEFAULT true,
+    require_review BOOLEAN DEFAULT false,
     manager_by VARCHAR(100),
     -- 审计时间
     create_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,

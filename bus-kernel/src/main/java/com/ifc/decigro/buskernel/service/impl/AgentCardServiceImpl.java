@@ -100,7 +100,7 @@ public class AgentCardServiceImpl implements AgentCardService {
     public List<AgentCardSummaryVO> getAvailableAgents() {
         QueryWrapper queryWrapper = QueryWrapper.create()
                 .select(AGENT_CARD.AGENT_NAME, AGENT_CARD.AGENT_ALIAS, AGENT_CARD.AGENT_DESCRIPTION,
-                        AGENT_CARD.AGENT_TAGS)
+                        AGENT_CARD.AGENT_TAGS, AGENT_CARD.REQUIRE_REVIEW)
                 .from(AGENT_CARD)
                 .where(AGENT_CARD.IS_ONLINE.eq(true));
 

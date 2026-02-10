@@ -146,7 +146,7 @@ public class ToolCardServiceImpl implements ToolCardService {
         }
 
         QueryWrapper queryWrapper = QueryWrapper.create()
-                .select(TOOL_CARD.TOOL_NAME, TOOL_CARD.TOOL_DESCRIPTION, TOOL_CARD.TOOL_TAGS)
+                .select(TOOL_CARD.TOOL_NAME, TOOL_CARD.TOOL_ALIAS, TOOL_CARD.TOOL_DESCRIPTION, TOOL_CARD.TOOL_TAGS)
                 .from(TOOL_CARD)
                 .where(TOOL_CARD.IS_ONLINE.eq(true))
                 .and(privilegeCondition);
@@ -209,5 +209,15 @@ public class ToolCardServiceImpl implements ToolCardService {
     @Override
     public boolean existsByToolName(String toolName) {
         return toolCardMapper.selectOneById(toolName) != null;
+    }
+
+    @Override
+    public List<ToolCardSummaryVO> listAll() {
+        QueryWrapper queryWrapper = QueryWrapper.create()
+                .select(TOOL_CARD.TOOL_NAME, TOOL_CARD.TOOL_ALIAS, TOOL_CARD.TOOL_DESCRIPTION, TOOL_CARD.TOOL_TAGS)
+                .from(TOOL_CARD)
+                .where(TOOL_CARD.IS_ONLINE.eq(true))
+                .orderBy(TOOL_CARD.TOOL_ALIAS.asc(), TOOL_CARD.TOOL_NAME.asc());
+        return toolCardMapper.selectListByQueryAs(queryWrapper, ToolCardSummaryVO.class);
     }
 }

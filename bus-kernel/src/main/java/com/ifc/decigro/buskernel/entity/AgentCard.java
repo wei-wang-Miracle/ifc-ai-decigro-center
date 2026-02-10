@@ -92,6 +92,13 @@ public class AgentCard implements Serializable {
     private Boolean isOnline;
 
     /**
+     * 是否需要人工审核
+     * true = 需要人工审核任务计划
+     * false = 自动执行
+     */
+    private Boolean requireReview;
+
+    /**
      * 管理人
      */
     private String managerBy;

@@ -91,6 +91,8 @@ CREATE TABLE tool_cards (
     -- 1. Identity & Intent (身份与意图)
     tool_name VARCHAR(128) NOT NULL,
     -- 主键，唯一标识，建议 snake_case，如 'get_weather_data'
+    tool_alias VARCHAR(128),
+    -- 工具别名，用于前端展示，可为空
     tool_description TEXT NOT NULL,
     -- 核心 Prompt：包含 Action, Trigger, Constraint。
     -- Ex: "Retrieves weather. Use when user asks for temperature. Input strictly city name."
@@ -165,6 +167,8 @@ CREATE TABLE agent_cards (
     agent_version VARCHAR(20) DEFAULT '1.0.0',
     is_online BOOLEAN DEFAULT true,
     -- 上下线状态，方便灰度发布或熔断
+    require_review BOOLEAN DEFAULT false,
+    -- 是否需要人工审核任务计划
     manager_by VARCHAR(100),
     -- 责任人/团队
     create_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
@@ -186,6 +190,8 @@ CREATE TABLE IF NOT EXISTS ai_chat_session (
     -- 用户标识
     session_title VARCHAR(200) DEFAULT '新会话',
     -- 会话标题
+    tool_list JSONB DEFAULT '[]'::jsonb,
+    -- 租户可用的工具列表
     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT pk_ai_chat_session PRIMARY KEY (session_id)

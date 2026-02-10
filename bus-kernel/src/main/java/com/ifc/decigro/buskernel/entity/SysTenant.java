@@ -1,10 +1,14 @@
 package com.ifc.decigro.buskernel.entity;
 
+import com.ifc.decigro.buskernel.common.handler.Fastjson2TypeHandler;
+import com.mybatisflex.annotation.Column;
 import com.mybatisflex.annotation.Id;
 import com.mybatisflex.annotation.KeyType;
 import com.mybatisflex.annotation.Table;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+
+import java.util.List;
 
 /**
  * 租户表
@@ -25,6 +29,12 @@ public class SysTenant extends BaseEntity {
      * 租户名称
      */
     private String tenantName;
+
+    /**
+     * 绑定的工具列表 (JSONB)
+     */
+    @Column(typeHandler = Fastjson2TypeHandler.class)
+    private List<String> toolList;
 
     /**
      * 是否有效

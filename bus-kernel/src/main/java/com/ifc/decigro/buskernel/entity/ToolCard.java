@@ -33,6 +33,12 @@ public class ToolCard implements Serializable {
     private String toolName;
 
     /**
+     * 工具别名（展示用）
+     * 可为空
+     */
+    private String toolAlias;
+
+    /**
      * 工具描述（核心 Prompt）
      * 应包含：Trigger（何时触发）、Action（执行什么）、Constraint（限制条件）
      * 示例："Retrieves weather data. Use when user asks for temperature. Input must be

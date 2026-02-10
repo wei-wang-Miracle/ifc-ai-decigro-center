@@ -20,6 +20,7 @@ interface AgentCard {
     reasoningFramework: string
     agentVersion: string
     isOnline: boolean
+    requireReview: boolean
     managerBy: string
     createTime: string
     updateTime: string
@@ -53,6 +54,7 @@ const form = reactive<AgentCard>({
     reasoningFramework: 'ReAct',
     agentVersion: '1.0.0',
     isOnline: true,
+    requireReview: false,
     managerBy: '',
     createTime: '',
     updateTime: ''
@@ -165,6 +167,7 @@ const resetForm = () => {
         reasoningFramework: 'ReAct',
         agentVersion: '1.0.0',
         isOnline: true,
+        requireReview: false,
         managerBy: '',
         createTime: '',
         updateTime: ''
@@ -227,6 +230,10 @@ onMounted(() => fetchList())
                     <div class="status-bar" :class="card.isOnline ? 'online' : 'offline'">
                         <span class="status-dot"></span>
                         {{ card.isOnline ? 'READY' : 'OFF' }}
+                    </div>
+
+                    <div v-if="card.requireReview" class="review-badge" title="需要人工审核">
+                        <el-icon><Check /></el-icon> REVIEW
                     </div>
                     
                     <div class="id-band">
@@ -323,6 +330,13 @@ onMounted(() => fetchList())
                     </el-form-item>
                 </el-col>
                 <el-col :span="12">
+                    <el-form-item label="人工审核">
+                        <el-switch v-model="form.requireReview" active-text="开启" inactive-text="关闭" />
+                    </el-form-item>
+                </el-col>
+            </el-row>
+            <el-row :gutter="20">
+                <el-col :span="12">
                     <el-form-item label="标签">
                         <el-input v-model="newTag" size="small" placeholder="Enter添加" @keyup.enter="handleAddTag" class="mb-2" />
                         <div class="flex flex-wrap gap-1">
@@ -397,6 +411,8 @@ onMounted(() => fetchList())
 .status-dot { width: 5px; height: 5px; border-radius: 50%; background: #ccc; }
 .online .status-dot { background: #4ade80; box-shadow: 0 0 5px #4ade80; }
 .online.status-bar { color: #555; }
+
+.review-badge { position: absolute; top: 15px; right: 45px; font-size: 8px; font-weight: 900; color: #ff9800; display: flex; align-items: center; gap: 2px; border: 1px solid #ff9800; padding: 1px 4px; border-radius: 4px; }
 
 .id-band { margin: 45px 15px 15px; background: #1a1a1a; border-radius: 8px; padding: 6px 12px; }
 .id-text { color: #fff; font-size: 13px; font-weight: 700; letter-spacing: 0.5px; font-family: 'JetBrains Mono', monospace; }

@@ -39,4 +39,9 @@ public class AgentCardSummaryVO implements Serializable {
      */
     @Column(typeHandler = Fastjson2TypeHandler.class)
     private List<String> agentTags;
+
+    /**
+     * 是否需要人工审核
+     */
+    private Boolean requireReview;
 }

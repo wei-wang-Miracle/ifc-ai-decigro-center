@@ -20,6 +20,7 @@ interface ToolParameter {
 
 interface ToolCard {
     toolName: string
+    toolAlias: string
     toolDescription: string
     toolTags: string[]
     toolVersion: string
@@ -53,6 +54,7 @@ const isEdit = ref(false)
 const formRef = ref<FormInstance>()
 const form = reactive<ToolCard>({
     toolName: '',
+    toolAlias: '',
     toolDescription: '',
     toolTags: [],
     toolVersion: '1.0.0',
@@ -268,6 +270,7 @@ const submitForm = async (formEl: FormInstance | undefined) => {
 const resetForm = () => {
     Object.assign(form, {
         toolName: '',
+        toolAlias: '',
         toolDescription: '',
         toolTags: [],
         toolVersion: '1.0.0',
@@ -418,7 +421,7 @@ onMounted(() => {
             
             <!-- 卡片内容 -->
             <div class="card-content">
-                <h4 class="card-title">{{ card.toolName }}</h4>
+                <h4 class="card-title">{{ card.toolAlias || card.toolName }}</h4>
                 <p class="card-desc">{{ card.toolDescription }}</p>
                 
                 <!-- 标签 -->
@@ -485,9 +488,18 @@ onMounted(() => {
                         </el-form-item>
                     </el-col>
                     <el-col :span="12">
+                        <el-form-item label="工具别名">
+                            <el-input v-model="form.toolAlias" placeholder="展示名称" />
+                        </el-form-item>
+                    </el-col>
+                </el-row>
+                <el-row :gutter="16">
+                    <el-col :span="12">
                         <el-form-item label="版本号">
                             <el-input v-model="form.toolVersion" placeholder="1.0.0" class="mono-input" />
                         </el-form-item>
+                    </el-col>
+                    <el-col :span="12">
                     </el-col>
                 </el-row>
                 <el-form-item label="工具描述" prop="toolDescription">

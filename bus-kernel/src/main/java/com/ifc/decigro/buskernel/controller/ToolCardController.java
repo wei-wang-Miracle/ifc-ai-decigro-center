@@ -134,4 +134,10 @@ public class ToolCardController {
         String username = UserContext.getUserName();
         return Result.success(toolCardService.getToolDetail(request.getToolName(), username));
     }
+
+    @GetMapping("/list-all")
+    @Operation(summary = "获取所有可用工具简要信息", description = "用于管理端下拉选择等场景")
+    public Result<List<com.ifc.decigro.buskernel.entity.vo.ToolCardSummaryVO>> listAll() {
+        return Result.success(toolCardService.listAll());
+    }
 }

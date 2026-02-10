@@ -11,9 +11,12 @@ const loading = ref(false)
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
 
+const allTools = ref<any[]>([])
+
 const form = reactive<any>({
     tenantCode: '',
     tenantName: '',
+    toolList: [],
     isEnabled: true
 })
 
@@ -33,6 +36,15 @@ const fetchData = async () => {
         console.error(e)
     } finally {
         loading.value = false
+    }
+}
+
+const fetchAllTools = async () => {
+    try {
+        const res: any = await request.get('/tool/list-all')
+        allTools.value = res || []
+    } catch (e) {
+        console.error(e)
     }
 }
 
@@ -100,6 +112,7 @@ const resetForm = () => {
     Object.assign(form, {
         tenantCode: '',
         tenantName: '',
+        toolList: [],
         isEnabled: true
     })
     ruleFormRef.value?.resetFields()
@@ -107,6 +120,7 @@ const resetForm = () => {
 
 onMounted(() => {
     fetchData()
+    fetchAllTools()
 })
 </script>
 
@@ -145,6 +159,13 @@ onMounted(() => {
                   </el-tag>
               </template>
           </el-table-column>
+          <el-table-column label="可用工具数" width="120" align="center">
+              <template #default="scope">
+                  <el-tag type="info" effect="plain" round>
+                      {{ (scope.row.toolList || []).length }}
+                  </el-tag>
+              </template>
+          </el-table-column>
           <el-table-column label="管理操作" width="220" fixed="right">
             <template #default="scope">
                 <el-button link type="primary" :icon="Edit" @click="handleEdit(scope.row)">详情</el-button>
@@ -168,6 +189,15 @@ onMounted(() => {
             </el-form-item>
             <el-form-item label="状态">
                 <el-switch v-model="form.isEnabled" active-text="服务中" inactive-text="已停服" />
+            </el-form-item>
+            <el-form-item label="可用工具">
+                <el-select v-model="form.toolList" multiple filterable placeholder="选择租户可用工具" class="w-full">
+                    <el-option
+                        v-for="item in allTools"
+                        :key="item.toolName"
+                        :label="`${item.toolName}${item.toolAlias ? ' (' + item.toolAlias + ')' : ''}`"
+                        :value="item.toolName" />
+                </el-select>
             </el-form-item>
         </el-form>
         <template #footer>

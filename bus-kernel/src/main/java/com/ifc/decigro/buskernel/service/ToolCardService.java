@@ -79,4 +79,9 @@ public interface ToolCardService {
      * 返回: true=已存在, false=不存在
      */
     boolean existsByToolName(String toolName);
+
+    /**
+     * 获取所有上线工具及其别名
+     */
+    java.util.List<com.ifc.decigro.buskernel.entity.vo.ToolCardSummaryVO> listAll();
 }

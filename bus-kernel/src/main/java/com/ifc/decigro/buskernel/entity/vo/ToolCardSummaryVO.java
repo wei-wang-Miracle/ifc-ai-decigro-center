@@ -25,6 +25,11 @@ public class ToolCardSummaryVO implements Serializable {
     private String toolName;
 
     /**
+     * 工具别名
+     */
+    private String toolAlias;
+
+    /**
      * 工具描述
      */
     private String toolDescription;

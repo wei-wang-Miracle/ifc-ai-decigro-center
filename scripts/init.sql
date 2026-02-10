@@ -4,6 +4,7 @@
 CREATE TABLE IF NOT EXISTS sys_tenant (
     tenant_code VARCHAR(32) PRIMARY KEY,
     tenant_name VARCHAR(100) NOT NULL,
+    tool_list JSONB DEFAULT '[]'::jsonb,
     is_enabled BOOLEAN DEFAULT TRUE,
     created_time TIMESTAMP DEFAULT NOW(),
     updated_time TIMESTAMP DEFAULT NOW()
