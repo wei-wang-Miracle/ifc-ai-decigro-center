@@ -143,7 +143,11 @@ class AgentState(BaseModel):
     query: str = Field(default="", description="用户原始输入的查询内容")
     user_id: str = Field(default="", description="发起请求的用户唯一标识符")
     session_id: str = Field(default="", description="当前对话的会话标识符")
-    thread_id: str = Field(default="", description="LangGraph 内部使用的线程或运行标识符")
+    
+    # 任务与链路追踪
+    task_id: str = Field(default="", description="当前任务标识符，一个 plan 执行完毕后更新")
+    trace_id: str = Field(default="", description="链路追踪 ID，用于审计和问题排查")
+    task_completed: bool = Field(default=False, description="当前 plan 是否已全部执行完成")
     
     # 对话历史（使用 add_messages 自动合并）
     messages: Annotated[list[BaseMessage], add_messages] = Field(
@@ -180,7 +184,8 @@ def create_initial_state(
     query: str,
     user_id: str,
     session_id: str,
-    thread_id: str = "",
+    task_id: str = "",
+    trace_id: str = "",
     token: Optional[str] = None
 ) -> AgentState:
     """
@@ -189,15 +194,19 @@ def create_initial_state(
         query - 用户输入
         user_id - 用户标识
         session_id - 会话标识
-        thread_id - 线程标识（可选）
+        task_id - 任务标识（可选，首次请求时自动生成）
+        trace_id - 链路追踪 ID（每次请求必须生成）
         token - 用户认证 Token（可选）
     返回: 初始化的 AgentState
     """
+    import uuid
     return AgentState(
         query=query,
         user_id=user_id,
         session_id=session_id,
-        thread_id=thread_id or f"{session_id}_{user_id}",
+        task_id=task_id or f"task_{uuid.uuid4().hex[:12]}",
+        trace_id=trace_id or f"trace_{uuid.uuid4().hex[:16]}",
+        task_completed=False,
         messages=[],
         intent=None,
         plan=None,

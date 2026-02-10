@@ -175,3 +175,48 @@ COMMENT ON TABLE agent_cards IS 'Agent 注册与配置表';
 COMMENT ON COLUMN agent_cards.agent_name IS '唯一标识 (ID)，建议 snake_case';
 COMMENT ON COLUMN agent_cards.agent_description IS '给 Planner 看的路由描述';
 COMMENT ON COLUMN agent_cards.bound_tools IS 'NULL=全部工具, {}=无工具, [names]=指定工具';
+-- =================================================================
+-- AI 聊天会话表 (ai_chat_session)
+-- 用于存储用户的 AI 对话会话
+-- =================================================================
+CREATE TABLE IF NOT EXISTS ai_chat_session (
+    session_id VARCHAR(64) NOT NULL,
+    -- 会话 ID (主键)
+    user_id VARCHAR(64) NOT NULL,
+    -- 用户标识
+    session_title VARCHAR(200) DEFAULT '新会话',
+    -- 会话标题
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_ai_chat_session PRIMARY KEY (session_id)
+);
+CREATE INDEX IF NOT EXISTS idx_session_user ON ai_chat_session(user_id);
+COMMENT ON TABLE ai_chat_session IS 'AI 聊天会话表';
+COMMENT ON COLUMN ai_chat_session.session_id IS '会话唯一标识';
+COMMENT ON COLUMN ai_chat_session.user_id IS '所属用户标识';
+COMMENT ON COLUMN ai_chat_session.session_title IS '会话标题，可由首条消息自动生成';
+-- =================================================================
+-- AI 聊天消息表 (ai_chat_message)
+-- 用于存储会话中的对话消息
+-- =================================================================
+CREATE TABLE IF NOT EXISTS ai_chat_message (
+    id BIGSERIAL PRIMARY KEY,
+    -- 自增主键
+    session_id VARCHAR(64) NOT NULL,
+    -- 所属会话
+    task_id VARCHAR(64),
+    -- 所属任务
+    trace_id VARCHAR(64),
+    -- 链路追踪 ID
+    role VARCHAR(16) NOT NULL,
+    -- 'user' | 'assistant'
+    content TEXT NOT NULL,
+    -- 消息内容
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_message_session FOREIGN KEY (session_id) REFERENCES ai_chat_session(session_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_message_session ON ai_chat_message(session_id);
+CREATE INDEX IF NOT EXISTS idx_message_trace ON ai_chat_message(trace_id);
+COMMENT ON TABLE ai_chat_message IS 'AI 聊天消息表';
+COMMENT ON COLUMN ai_chat_message.task_id IS '任务标识，一个 plan 执行期间共享';
+COMMENT ON COLUMN ai_chat_message.trace_id IS '链路追踪 ID，用于审计和问题排查';

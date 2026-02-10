@@ -30,13 +30,15 @@ class ChatRequest(BaseModel):
     query: str = Field(..., description="用户输入的任务描述")
     user_id: str = Field(..., description="用户标识")
     session_id: str = Field(..., description="会话标识")
+    task_id: Optional[str] = Field(default=None, description="任务标识（可选，若上一任务未完成则复用）")
 
 
 class ChatResponse(BaseModel):
     """
     功能: 发起任务响应模型
     """
-    thread_id: str = Field(..., description="工作流线程 ID")
+    task_id: str = Field(..., description="任务标识")
+    trace_id: str = Field(..., description="链路追踪 ID")
     status: str = Field(..., description="执行状态")
     message: str = Field(..., description="响应消息")
     require_review: bool = Field(default=False, description="是否需要人工审核")
@@ -54,7 +56,8 @@ class ReviewResponse(BaseModel):
     """
     功能: 审核响应模型
     """
-    thread_id: str
+    task_id: str
+    trace_id: str
     status: str
     message: str
 
@@ -63,7 +66,8 @@ class PendingReview(BaseModel):
     """
     功能: 待审核任务信息
     """
-    thread_id: str
+    task_id: str
+    trace_id: str
     query: str
     current_step: str
     tools_called: list[str]
@@ -92,20 +96,24 @@ _active_workflows: dict[str, dict] = {}
 async def start_workflow(request: ChatRequest, x_auth_token: Optional[str] = Header(None, alias="X-Auth-Token")):
     """
     功能: 发起新的工作流任务
-    参数: request - 包含用户查询、用户ID、会话ID
-    返回: 工作流线程ID和初始状态
+    参数: request - 包含用户查询、用户ID、会话ID、可选任务ID
+    返回: 任务ID、链路追踪ID和执行状态
     
     流程:
-    1. 创建新的工作流实例
-    2. 初始化状态 (携带 X-Auth-Token)
-    3. 运行工作流直到完成或需要审核
-    4. 返回结果
+    1. 生成 trace_id（每次请求必生成）
+    2. 检查是否复用已有 task_id 或生成新 task_id
+    3. 创建工作流实例并初始化状态
+    4. 运行工作流直到完成或需要审核
+    5. 返回结果
     """
     try:
         from ..graph import create_workflow_graph, create_initial_state
         
-        # 生成线程 ID
-        thread_id = f"thread_{uuid.uuid4().hex[:12]}"
+        # 每次请求生成新的 trace_id（链路追踪）
+        trace_id = f"trace_{uuid.uuid4().hex[:16]}"
+        
+        # 任务 ID 逻辑：如果前端传入且上一任务未完成则复用，否则生成新的
+        task_id = request.task_id or f"task_{uuid.uuid4().hex[:12]}"
         
         # 创建工作流
         workflow = create_workflow_graph()
@@ -115,12 +123,14 @@ async def start_workflow(request: ChatRequest, x_auth_token: Optional[str] = Hea
             query=request.query,
             user_id=request.user_id,
             session_id=request.session_id,
-            thread_id=thread_id,
+            task_id=task_id,
+            trace_id=trace_id,
             token=x_auth_token,  # 传递 Token
         )
         
-        # 配置
-        config = {"configurable": {"thread_id": thread_id}}
+        # 配置（LangGraph 内部仍使用 thread_id 概念，但对外隐藏）
+        internal_thread_id = f"{request.session_id}_{task_id}"
+        config = {"configurable": {"thread_id": internal_thread_id}}
         
         # 运行工作流
         result = None
@@ -144,16 +154,18 @@ async def start_workflow(request: ChatRequest, x_auth_token: Optional[str] = Hea
                     if messages:
                         final_message = messages[-1].content if hasattr(messages[-1], 'content') else str(messages[-1])
         
-        # 存储工作流状态（用于后续审核）
+        # 存储工作流状态（用于后续审核），key 使用 task_id
         if require_review:
-            _active_workflows[thread_id] = {
+            _active_workflows[task_id] = {
                 "workflow": workflow,
                 "config": config,
                 "state": result,
+                "trace_id": trace_id,
             }
         
         return ChatResponse(
-            thread_id=thread_id,
+            task_id=task_id,
+            trace_id=trace_id,
             status="pending_review" if require_review else "completed",
             message=final_message or "任务已完成",
             require_review=require_review,
@@ -172,8 +184,9 @@ async def get_pending_reviews():
     """
     pending_reviews = []
     
-    for thread_id, workflow_data in _active_workflows.items():
+    for task_id, workflow_data in _active_workflows.items():
         state = workflow_data.get("state", {})
+        trace_id = workflow_data.get("trace_id", "")
         
         # 从状态中提取相关信息
         query = ""
@@ -195,7 +208,8 @@ async def get_pending_reviews():
                         tools_called.extend(result.tools_called)
         
         pending_reviews.append(PendingReview(
-            thread_id=thread_id,
+            task_id=task_id,
+            trace_id=trace_id,
             query=query,
             current_step=current_step,
             tools_called=tools_called,
@@ -208,12 +222,12 @@ async def get_pending_reviews():
     )
 
 
-@router.post("/review/{thread_id}", response_model=ReviewResponse)
-async def submit_review(thread_id: str, request: ReviewRequest):
+@router.post("/review/{task_id}", response_model=ReviewResponse)
+async def submit_review(task_id: str, request: ReviewRequest):
     """
     功能: 提交人工审核结果
     参数:
-        thread_id - 工作流线程ID
+        task_id - 任务ID
         request - 审核动作和反馈
     返回: 审核结果和后续状态
     
@@ -221,13 +235,14 @@ async def submit_review(thread_id: str, request: ReviewRequest):
     - approve: 审核通过，继续执行
     - reject: 审核驳回，需要提供反馈
     """
-    # 检查线程是否存在
-    if thread_id not in _active_workflows:
-        raise HTTPException(status_code=404, detail=f"线程 {thread_id} 不存在或已完成")
+    # 检查任务是否存在
+    if task_id not in _active_workflows:
+        raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在或已完成")
     
-    workflow_data = _active_workflows[thread_id]
+    workflow_data = _active_workflows[task_id]
     workflow = workflow_data["workflow"]
     config = workflow_data["config"]
+    trace_id = workflow_data.get("trace_id", "")
     
     # 验证请求
     if request.action.lower() not in ["approve", "reject"]:
@@ -263,15 +278,16 @@ async def submit_review(thread_id: str, request: ReviewRequest):
         
         # 如果还需要审核，更新状态
         if require_review:
-            _active_workflows[thread_id]["state"] = result
+            _active_workflows[task_id]["state"] = result
             status = "pending_review"
         else:
             # 任务完成，移除记录
-            del _active_workflows[thread_id]
+            del _active_workflows[task_id]
             status = "completed"
         
         return ReviewResponse(
-            thread_id=thread_id,
+            task_id=task_id,
+            trace_id=trace_id,
             status=status,
             message=final_message or f"审核{request.action}完成",
         )
