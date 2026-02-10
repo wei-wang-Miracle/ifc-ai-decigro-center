@@ -1,149 +1,376 @@
-# 业务内核 (Bus Kernel)
+# ⚙️ Bus Kernel — 业务内核
 
-## 核心理念: Context Provider（上下文提供者） + Tools Provider（工具提供者）
+> **系统躯干 + 守门员**：只 "做"，不 "想"。负责注册中心、权限守门、工具执行、数据服务、审计存储。
 
-以服务于 AI Agent 为第一核心原则。
-作为 AI 的“统一数据网关” 和 “统一执行器”，在信息获取时执行语义层职责，通过 API View 暴露数据和含义，提供AI友好的数据结构和数据提供，将数据包装成业务语义；在执行动作时，负责工具层职责，通过 API View 暴露工具和限制，为AI提供做什么？怎么用？为什么用不了？预校验服务。
+## 概述
 
-## 主要职责
+Bus Kernel 是 NexusGraph 系统的 **"躯干和守门员"** —— 它是连接 AI 大脑与真实业务世界的桥梁。
 
-1. **降低 AI 获取信息的认知负载**: 通过结构化方式，将业务信息输出给Agent。
-2. **提升 AI 执行动作的确定性**: 通过结构化交互，保证Agent Function Calling的有效执行。
-3. **限制 AI 信息获取和数据处理权限**: 通过租户和会话管理，将AI工具调用和数据处理限制在权限范围内。
-4. **审计 AI 执行动作和产出结果**: 通过执行日志和各类监控，保证AI执行的透明性和可追溯性。
-5. **提供 业务管理功能**: 包括租户管理、用户管理、Agent管理、工具管理、标签管理等。
+以 **服务于 AI Agent 为第一核心原则**，Bus Kernel 承担三重角色：
+
+| 角色                 | 隐喻            | 职责                                           |
+| -------------------- | --------------- | ---------------------------------------------- |
+| **Context Provider** | 📖 图书馆管理员 | 为 AI 提供结构化的业务上下文数据               |
+| **Tools Provider**   | 🔧 工具管家     | 将业务能力封装为 AI 可调用的工具（Tool Cards） |
+| **Gatekeeper**       | 🛡️ 安全守卫     | 权限校验、Token 认证、租户隔离、全链路审计     |
+
+### 核心原则
+
+- **降低 AI 获取信息的认知负载**：通过结构化方式，将业务数据转化为 AI 友好的语义信息
+- **提升 AI 执行动作的确定性**：标准化 API 接口，确保 Function Calling 精准执行
+- **限制 AI 的权限边界**：基于用户角色的工具白名单，不同用户看到不同能力集
+- **审计 AI 的全部行为**：PG 宽表 + ES 快照，实现全链路可追踪
+
+---
+
+## 技术栈
+
+| 技术                  | 版本    | 用途         |
+| --------------------- | ------- | ------------ |
+| **Java**              | JDK 17  | 编程语言     |
+| **Spring Boot**       | 3.2.2+  | 核心框架     |
+| **MyBatis-Flex**      | 1.9.3+  | ORM 框架     |
+| **PostgreSQL**        | 17+     | 核心数据存储 |
+| **Redis**             | 7.0+    | Token 缓存   |
+| **Elasticsearch**     | 8.x     | 审计详情存储 |
+| **Hutool**            | 5.8.26+ | 工具类库     |
+| **FastJSON2**         | 2.0.43+ | JSON 处理    |
+| **SpringDoc OpenAPI** | 2.5.0+  | API 文档生成 |
+| **Lombok**            | Latest  | 简化代码     |
+
+---
 
 ## 功能模块
 
-### 1. 系统管理 (System Management)
+### 1. 📋 注册中心 (Registry Center) — 核心模块
 
-- **用户管理**: 用户增删改查、角色分配、密码重置。
-- **角色管理**: 角色定义、权限分配（菜单权限、数据权限）。
-- **部门管理**: 组织架构管理。
-- **租户管理**: 多租户支持。
-- **在线用户**: 实时监控在线用户状态。
+> 工具即能力，注册中心是能力的目录和守门员。
 
-### 2. Agent 管理 (Agent Management)
+#### Tool Card — 工具能力注册
 
-- **Agent Card**: 定义 Agent 的身份、能力和配置。
+**Tool Card** 是一份给 LLM 看的"自述文件"。它不仅符合编程规范（Schema），更符合语言模型的认知逻辑（Semantics）。
 
-### 3. 工具管理 (Tool Management)
+##### Tool Card 数据结构
 
-- **Tool Card**: 定义工具的元数据、参数、调用协议及权限。
-- **权限控制**: 基于角色和用户的工具访问控制（Public/Protected）。
+| 字段分类       | 字段名             | 说明                                            |
+| -------------- | ------------------ | ----------------------------------------------- |
+| **身份与意图** | `tool_name`        | 唯一标识（PK），`snake_case` 格式               |
+|                | `tool_description` | 核心 Prompt：做什么 + 何时用 + 约束条件         |
+|                | `tool_tags`        | JSONB，用于检索或权限分组                       |
+| **调用协议**   | `tool_protocol`    | `http`（REST API）或 `reference`（本地引用）    |
+|                | `url_path`         | HTTP 工具的 API 端点路径                        |
+|                | `reference_target` | 本地引用类的目标标识                            |
+| **参数定义**   | `tool_parameters`  | JSONB 入参定义（名称、类型、描述、是否必填）    |
+|                | `output_schema`    | JSONB 出参定义，帮助 Agent 解析结果             |
+| **少样本增强** | `input_examples`   | JSONB，辅助 Intent Detection 和 Slot Filling    |
+|                | `output_examples`  | JSONB，帮助 Agent 建立结果处理逻辑              |
+| **权限控制**   | `tool_privileges`  | `public`（所有用户可用）/ `protected`（需授权） |
+| **生命周期**   | `is_online`        | 上线状态开关，下线后 Agent 不可见               |
+|                | `manager_by`       | 责任人                                          |
 
-### 4. 客户标签管理 (Customer Tag Management)
+##### Tool Card API
 
-- **标签类目**: 标签的分类管理。
-- **标签定义**: 具体标签的定义与管理。
-- **标签枚举**: 标签值的枚举管理。
+| 端点                       | 方法     | 说明                                     | 调用方        |
+| -------------------------- | -------- | ---------------------------------------- | ------------- |
+| `/tool/page`               | GET      | 分页查询工具列表（支持关键字、标签筛选） | 前端管理      |
+| `/tool/detail/{toolName}`  | GET      | 获取工具详情                             | 前端管理      |
+| `/tool/save`               | POST     | 新增/更新工具                            | 前端管理      |
+| `/tool/remove/{toolName}`  | DELETE   | 删除工具                                 | 前端管理      |
+| `/tool/online/{toolName}`  | PUT      | 工具上线                                 | 前端管理      |
+| `/tool/offline/{toolName}` | PUT      | 工具下线                                 | 前端管理      |
+| `/tool/check-name`         | GET      | 检查工具名称可用性                       | 前端表单校验  |
+| **`/tool/available`**      | **POST** | **获取当前用户可用工具列表（摘要）**     | **AI Engine** |
+| **`/tool/detail`**         | **POST** | **获取工具详情（含参数定义）**           | **AI Engine** |
 
-### 5. 安全与监控
+> `/tool/available` 返回的是 **摘要信息**（ToolCardSummaryVO），仅包含名称、描述和标签，符合渐进式加载思想。
 
-- **请求日志**: 全链路请求日志记录（RequestLogFilter）。
-- **RSA 加密**: 敏感信息（如密码）传输采用 RSA 非对称加密。
+##### 工具权限模型
 
-## 技术栈 (Technology Stack)
+```
+用户可用工具 = PUBLIC 工具 ∪ 角色绑定工具 ∪ 用户单独绑定工具
 
-| 技术                  | 版本    | 用途           |
-| --------------------- | ------- | -------------- |
-| **Java**              | JDK 17  | Java开发       |
-| **Spring Boot**       | 3.2.2+  | 核心框架       |
-| **MyBatis-Flex**      | 1.9.3+  | ORM框架        |
-| **PostgreSQL**        | 17+     | 数据库         |
-| **Redis**             | 7.0+    | 缓存、消息队列 |
-| **Hutool**            | 5.8.26+ | 工具类库       |
-| **FastJSON2**         | 2.0.43+ | JSON处理       |
-| **SpringDoc OpenAPI** | 2.5.0+  | API文档生成    |
-| **Lombok**            | Latest  | 简化代码       |
-| **HikariCP**          | Default | 数据库连接池   |
-| **Slf4j**             | Default | 日志处理       |
+过滤规则: is_online = true AND (public OR 用户角色授权 OR 用户个人授权)
+```
 
-### Agent Card (参考 Character Card 设计思想)
+- `PUBLIC`：所有登录用户可用
+- `PROTECTED`：需在角色表（`sys_role.tool_list`）或用户表（`sys_user.tool_list`）中显式授权
 
-"Agent Card" 是 AI Agent 的“身份身份证”和“核心配置单”。它定义了 Agent 是谁、能做什么、以及如何思考。
+---
 
-#### 1. 身份与形象 (Identity & Profile) —— 解决“我是谁？”
+#### Agent Card — 智能体身份注册
 
-- **agent_name** (唯一标识): Agent 的系统级唯一 ID，建议使用 `snake_case`，如 `customer_service_bot`。
-- **agent_alias** (显示名称): Agent 的对外昵称，如 "金牌客服小助手"。
-- **agent_description** (人设描述): 简短描述 Agent 的职责和角色，用于展示和初步检索。
-- **agent_tags** (能力标签): 用于对 Agent 进行分类和检索，如 `['customer_support', 'nlp']`。
+**Agent Card** 是 AI Agent 的"身份证"和"核心配置单"。它定义了 Agent 是谁、能做什么、以及如何思考。
 
-#### 2. 核心大脑 (Core Brain) —— 解决“怎么思考？”
+##### Agent Card 数据结构
 
-- **system_prompt** (系统提示词): Agent 的核心指令集，定义了其行为准则、语气风格和任务边界。
-- **negative_prompt** (负向提示词): 明确 Agent **不应该** 做什么或说什么。
-- **reasoning_framework** (推理框架): 定义 Agent 的思考模式，如 `ReAct`, `PlanSolve` 等。
+| 字段分类       | 字段名                | 说明                              |
+| -------------- | --------------------- | --------------------------------- |
+| **身份与形象** | `agent_name`          | 唯一标识（PK），`snake_case` 格式 |
+|                | `agent_alias`         | 显示名称，如 "金牌客服小助手"     |
+|                | `agent_description`   | 职责描述，用于展示和检索          |
+|                | `agent_tags`          | JSONB，能力标签                   |
+| **核心大脑**   | `system_prompt`       | 系统提示词（核心指令集）          |
+|                | `negative_prompt`     | 负向提示词（不应做什么）          |
+|                | `reasoning_framework` | 推理框架：`ReAct` / `PlanSolve`   |
+| **能力边界**   | `bound_tools`         | JSONB 工具绑定白名单              |
+| **元数据**     | `agent_version`       | 版本号                            |
+|                | `is_online`           | 上线状态                          |
+|                | `manager_by`          | 负责人                            |
 
-#### 3. 能力边界 (Capabilities) —— 解决“能用什么？”
+##### 工具绑定规则
 
-- **bound_tools** (绑定工具): 定义该 Agent 可以调用的工具白名单。
-  - `NULL`: 可使用所有 Public 工具。
-  - `[]`: 不可使用任何工具。
-  - `["tool_a", "tool_b"]`: 仅可使用列表中的工具。
+```
+bound_tools = NULL       → 使用所有 Public 工具（通用 Agent）
+bound_tools = []         → 不使用任何工具（纯对话模式）
+bound_tools = ["a","b"]  → 仅使用指定工具（专项 Agent）
+```
 
-#### 4. 元数据 (Meta Information)
+##### Agent Card API
 
-- **agent_version**: 版本号，用于迭代管理。
-- **is_online**: 上线状态控制。
-- **manager_by**: 负责人。
+| 端点                         | 方法     | 说明                             | 调用方        |
+| ---------------------------- | -------- | -------------------------------- | ------------- |
+| `/agent/page`                | GET      | 分页查询智能体列表               | 前端管理      |
+| `/agent/detail/{agentName}`  | GET      | 获取智能体详情                   | 前端管理      |
+| `/agent/save`                | POST     | 新增/更新智能体                  | 前端管理      |
+| `/agent/remove/{agentName}`  | DELETE   | 删除智能体                       | 前端管理      |
+| `/agent/online/{agentName}`  | PUT      | 智能体上线                       | 前端管理      |
+| `/agent/offline/{agentName}` | PUT      | 智能体下线                       | 前端管理      |
+| `/agent/check-name`          | GET      | 检查名称可用性                   | 前端表单校验  |
+| `/agent/available-tools`     | GET      | 获取可绑定工具列表               | 前端配置      |
+| **`/agent/available`**       | **POST** | **获取可用智能体列表（摘要）**   | **AI Engine** |
+| **`/agent/detail`**          | **POST** | **获取智能体详情（含提示词等）** | **AI Engine** |
 
-### 工具使用管理拦截
+---
 
-_面向对象：所有用户_
+### 2. 💬 AI 聊天会话管理
 
-1. Tools 共分为2级：
-   - `PUBLIC`: 公开工具，所有用户可用。
-   - `PROTECTED`: 受保护工具，需特定权限。
-2. 级别维护在 **Tool Card** (工具管理表) 中。
-3. 用户可使用的工具 = `PUBLIC` + `角色绑定的工具` + `用户单独绑定的工具`。
+提供完整的会话生命周期管理（CRUD）：
 
-**Tool Gatekeeper**:
+| 端点                                     | 方法   | 说明                   |
+| ---------------------------------------- | ------ | ---------------------- |
+| `/ai/chat/sessions`                      | GET    | 获取当前用户的会话列表 |
+| `/ai/chat/sessions`                      | POST   | 创建新会话             |
+| `/ai/chat/sessions/{sessionId}`          | PUT    | 更新会话标题           |
+| `/ai/chat/sessions/{sessionId}`          | DELETE | 删除会话               |
+| `/ai/chat/sessions/{sessionId}/messages` | GET    | 获取会话历史消息       |
+| `/ai/chat/messages`                      | POST   | 保存消息记录           |
 
-- 用户通过 Agent 访问时，Agent 仅可调用当前用户有权限使用的工具。
+所有接口需携带 `X-Auth-Token` 请求头，实现用户级数据隔离。
 
-### Tool Card (参考 Claude Skill 设计思想)
+---
 
-"AI-friendly Tool Card"，本质上是一份给 LLM 看的“自述文件”。它不仅要符合编程规范（Schema），更要符合语言模型的认知逻辑（Semantics）。
+### 3. 📊 全链路审计监控
 
-#### 1. 身份与意图 (Identity & Intent)
+**双存储架构**：PG 宽表（列表查询） + ES 快照（详情钻取）
 
-- **tool_name**: 唯一标识，建议 `snake_case`。
-- **tool_description**: 核心 Prompt，包含 Action, Trigger, Constraint。
-- **tool_tags**: 用于检索或权限分组。
+| 端点                      | 方法     | 说明                                | 数据源             |
+| ------------------------- | -------- | ----------------------------------- | ------------------ |
+| `/trace/page`             | GET      | 审计列表分页查询（多维度筛选）      | PostgreSQL         |
+| `/trace/detail/{traceId}` | GET      | 审计详情查询（完整执行堆栈）        | Elasticsearch      |
+| `/trace/task/{taskId}`    | GET      | 按 task_id 聚合查询（重建执行链路） | PostgreSQL         |
+| **`/trace/save`**         | **POST** | **保存审计数据（PG + ES 双写）**    | **AI Engine 调用** |
 
-#### 2. 调用协议 (Protocol)
+##### PG 宽表字段 (`ai_chat_trace_index`)
 
-- **tool_protocol**: `http` (REST API) 或 `reference` (本地引用)。
-- **url_path / reference_target**: 调用地址或目标。
+```
+trace_id / session_id / task_id / user_id / dept_id / tenant_code
+agent_name / agent_version / model_provider
+user_intent / user_trace_query / ai_trace_response
+execution_path[] / tools_used[]
+status (SUCCESS/FAILED) / failure_reason
+trace_latency_ms / trace_total_tokens
+user_feedback (-1/0/1)
+```
 
-#### 3. 参数定义 (Parameters)
+##### ES 快照结构
 
-- **tool_parameters**: 入参定义，描述如何从用户输入提取值。
-- **output_schema**: 出参定义，帮助 Agent 解析结果。
+```json
+{
+  "trace_id": "...",
+  "graph_nodes": [
+    {
+      "node_name": "intent_recognition",
+      "latency_ms": 1200,
+      "status": "SUCCESS",
+      "agent_snapshots": [
+        {
+          "agent_name": "...",
+          "system_prompt": "...",
+          "tools_snapshot": [
+            {
+              "tool_name": "get_all_customer_tags",
+              "input_args": {},
+              "output_result": "...",
+              "latency_ms": 300
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
 
-#### 4. 少样本增强 (Few-Shot Examples)
+---
 
-- **input_examples**: 辅助 Intent Detection 和 Slot Filling。
-- **output_examples**: 帮助 Agent 建立结果处理逻辑。
+### 4. 🏷 客户标签管理
 
-#### 5. 元数据 (Meta Information)
+| 端点                             | 方法     | 说明                            |
+| -------------------------------- | -------- | ------------------------------- |
+| `/tag/page`                      | GET      | 分页查询标签                    |
+| `/tag/detail/{tagField}`         | GET      | 获取标签详情                    |
+| `/tag/save`                      | POST     | 新增/更新标签                   |
+| `/tag/remove/{tagField}`         | DELETE   | 删除标签（级联删除枚举值）      |
+| `/tag/migrate`                   | POST     | 批量迁移分类下的标签            |
+| **`/tag/get_all_customer_tags`** | **POST** | **获取所有标签（AI 工具端点）** |
 
-- **is_online**: 上线状态。
-- **manager_by**: 责任人。
+关联模块：
+
+- **CustomerTagCategory**：标签分类管理（树形结构）
+- **CustomerTagEnum**：标签枚举值管理
+
+---
+
+### 5. 👥 系统管理
+
+| 模块         | Controller             | 功能                                    |
+| ------------ | ---------------------- | --------------------------------------- |
+| **认证**     | `AuthController`       | 登录（RSA 加密）、登出、Token 管理      |
+| **用户管理** | `SysUserController`    | 用户 CRUD、角色分配、密码重置、头像上传 |
+| **角色管理** | `SysRoleController`    | 角色 CRUD、控制工具 (`tool_list`)       |
+| **部门管理** | `SysDeptController`    | 组织架构管理                            |
+| **租户管理** | `SysTenantController`  | 多租户支持                              |
+| **在线用户** | `OnlineUserController` | 实时监控、强制下线                      |
+| **Token**    | `TokenController`      | Token 校验、续签                        |
+
+---
+
+### 6. 🛡️ 安全体系
+
+| 组件                       | 位置                  | 功能                                 |
+| -------------------------- | --------------------- | ------------------------------------ |
+| **TokenProvider**          | `common/auth/`        | Token 生成、验证、解析（Redis 存储） |
+| **AuthInterceptor**        | `common/interceptor/` | 请求拦截、Token 校验、用户上下文注入 |
+| **UserContext**            | `common/context/`     | 线程级用户信息（ThreadLocal）        |
+| **RSA 加密**               | `common/crypto/`      | 密码传输非对称加密                   |
+| **RequestLogFilter**       | `common/filter/`      | 全链路请求日志（URL、参数、耗时）    |
+| **GlobalExceptionHandler** | `common/handler/`     | 统一异常处理                         |
+
+---
+
+## 目录结构
+
+```
+bus-kernel/
+├── pom.xml                     # Maven 项目配置
+├── README.md                   # 本文档
+├── src/main/
+│   ├── java/com/ifc/decigro/buskernel/
+│   │   ├── BusKernelApplication.java   # Spring Boot 启动类
+│   │   │
+│   │   ├── controller/                 # REST API 层
+│   │   │   ├── ToolCardController.java      # 工具注册中心 API
+│   │   │   ├── AgentCardController.java     # 智能体注册中心 API
+│   │   │   ├── AiChatController.java        # AI 会话管理 API
+│   │   │   ├── AiChatTraceController.java   # 审计监控 API
+│   │   │   ├── CustomerTagController.java   # 客户标签 API
+│   │   │   ├── CustomerTagCategoryController.java  # 标签分类 API
+│   │   │   ├── CustomerTagEnumController.java      # 标签枚举 API
+│   │   │   ├── AuthController.java          # 认证 API
+│   │   │   ├── SysUserController.java       # 用户管理 API
+│   │   │   ├── SysRoleController.java       # 角色管理 API
+│   │   │   ├── SysDeptController.java       # 部门管理 API
+│   │   │   ├── SysTenantController.java     # 租户管理 API
+│   │   │   ├── OnlineUserController.java    # 在线用户 API
+│   │   │   └── TokenController.java         # Token 管理 API
+│   │   │
+│   │   ├── service/                    # 业务逻辑层
+│   │   │   ├── ToolCardService.java         # 工具管理服务
+│   │   │   ├── AgentCardService.java        # 智能体管理服务
+│   │   │   ├── AiChatTraceIndexService.java # 审计存储服务
+│   │   │   ├── CustomerTagService.java      # 标签管理服务
+│   │   │   ├── SysUserService.java          # 用户管理服务
+│   │   │   └── impl/                        # 服务实现类
+│   │   │
+│   │   ├── entity/                     # 数据实体
+│   │   │   ├── ToolCard.java                # 工具卡片实体
+│   │   │   ├── AgentCard.java               # 智能体卡片实体
+│   │   │   ├── AiChatTraceIndex.java        # 审计索引实体
+│   │   │   ├── CustomerTag.java             # 客户标签实体
+│   │   │   ├── SysUser.java / SysRole.java  # 系统实体
+│   │   │   ├── dto/                         # 请求 DTO
+│   │   │   └── vo/                          # 响应 VO
+│   │   │
+│   │   ├── mapper/                     # MyBatis-Flex 数据访问层
+│   │   │
+│   │   ├── common/                     # 通用组件
+│   │   │   ├── api/Result.java              # 统一响应包装
+│   │   │   ├── auth/TokenProvider.java      # Token 管理
+│   │   │   ├── context/UserContext.java     # 用户上下文
+│   │   │   ├── crypto/                      # RSA 加密
+│   │   │   ├── filter/RequestLogFilter.java # 请求日志过滤器
+│   │   │   ├── interceptor/                 # 认证拦截器
+│   │   │   ├── handler/                     # 异常处理器
+│   │   │   └── annotation/                  # 自定义注解
+│   │   │
+│   │   ├── config/                     # 配置类
+│   │   └── dto/                        # 公共 DTO
+│   │
+│   └── resources/
+│       └── application.yml             # 应用配置
+```
+
+---
 
 ## 接口文档
 
 项目集成了 `springdoc-openapi`，自动生成符合 OpenAPI 3 规范的接口文档。
 
-### 访问地址 (Context Path: `/api/dg`)
+### 访问地址（Context Path: `/api/dg`）
 
 - **Swagger UI**: [http://localhost:8080/api/dg/swagger-ui.html](http://localhost:8080/api/dg/swagger-ui.html)
 - **OpenAPI JSON**: [http://localhost:8080/api/dg/v3/api-docs](http://localhost:8080/api/dg/v3/api-docs)
 
-### 主要功能
+---
 
-1. **自动化**: 代码更新自动同步文档。
-2. **交互式**: 浏览器直接测试接口。
-3. **标准化**: 标准 OpenAPI 3.0 定义。
+## 快速开始
+
+### 1. 数据库初始化
+
+```bash
+# 创建数据库
+createdb -U postgres decigro
+
+# 初始化系统表和基础数据
+psql -U postgres -d decigro -f scripts/init.sql
+
+# 初始化业务表（Tool Card, Agent Card, 标签等）
+psql -U postgres -d decigro -f docs/db-design/db.sql
+```
+
+### 2. 配置修改
+
+编辑 `src/main/resources/application.yml`：
+
+- 数据库连接信息
+- Redis 连接信息
+- ES 连接信息（可选）
+
+### 3. 编译运行
+
+```bash
+mvn clean package -DskipTests
+java -jar target/bus-kernel-*.jar
+```
+
+### 4. 验证
+
+```bash
+# 健康检查
+curl http://localhost:8080/api/dg/actuator/health
+
+# 登录获取 Token
+curl -X POST http://localhost:8080/api/dg/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin"}'
+```
