@@ -163,12 +163,11 @@ bound_tools = ["a","b"]  → 仅使用指定工具（专项 Agent）
 
 **双存储架构**：PG 宽表（列表查询） + ES 快照（详情钻取）
 
-| 端点                      | 方法     | 说明                                | 数据源             |
-| ------------------------- | -------- | ----------------------------------- | ------------------ |
-| `/trace/page`             | GET      | 审计列表分页查询（多维度筛选）      | PostgreSQL         |
-| `/trace/detail/{traceId}` | GET      | 审计详情查询（完整执行堆栈）        | Elasticsearch      |
-| `/trace/task/{taskId}`    | GET      | 按 task_id 聚合查询（重建执行链路） | PostgreSQL         |
-| **`/trace/save`**         | **POST** | **保存审计数据（PG + ES 双写）**    | **AI Engine 调用** |
+| 端点                      | 方法     | 说明                             | 数据源             |
+| ------------------------- | -------- | -------------------------------- | ------------------ |
+| `/trace/page`             | GET      | 审计列表分页查询（多维度筛选）   | PostgreSQL         |
+| `/trace/detail/{traceId}` | GET      | 审计详情查询（完整执行堆栈）     | Elasticsearch      |
+| **`/trace/save`**         | **POST** | **保存审计数据（PG + ES 双写）** | **AI Engine 调用** |
 
 ##### PG 宽表字段 (`ai_chat_trace_index`)
 

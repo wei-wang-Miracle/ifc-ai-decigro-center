@@ -2,6 +2,8 @@ package com.ifc.decigro.buskernel.controller;
 
 import com.ifc.decigro.buskernel.common.api.Result;
 import com.ifc.decigro.buskernel.common.context.UserContext;
+import com.ifc.decigro.buskernel.dto.ProfileUpdateRequest;
+import com.ifc.decigro.buskernel.dto.UpdatePasswordRequest;
 import com.ifc.decigro.buskernel.entity.SysUser;
 import com.ifc.decigro.buskernel.service.SysUserService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -11,7 +13,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * 用户管理控制器
@@ -78,34 +79,24 @@ public class SysUserController {
      */
     @Operation(summary = "更新当前登录用户信息", description = "修改当前登录用户的个人基本资料。仅允许修改昵称、性别、展示邮箱及电话字段。")
     @PutMapping("/profile")
-    public Result<Void> updateProfile(@RequestBody SysUser user) {
+    public Result<Void> updateProfile(@RequestBody ProfileUpdateRequest request) {
         String username = UserContext.getUserName();
-        SysUser currentUser = userService.getByUsername(username);
-
-        if (currentUser != null) {
-            currentUser.setNickName(user.getNickName());
-            currentUser.setGender(user.getGender());
-            currentUser.setEmail(user.getEmail());
-            currentUser.setPhone(user.getPhone());
-            userService.saveOrUpdate(currentUser);
-        }
+        userService.updateProfile(username, request);
         return Result.success();
     }
 
     /**
      * 修改当前登录用户密码
-     * 参数: 包含 oldPassword 和 newPassword 的 Map
+     * 参数: 包含 oldPassword 和 newPassword 的请求对象
      * 返回: 成功标志
      */
     @Operation(summary = "修改当前登录用户密码", description = "通过验证旧密码来设置新密码。当用户怀疑账户安全或定期更正时调用。")
     @PutMapping("/password")
-    public Result<Void> updatePassword(@RequestBody Map<String, String> params) {
+    public Result<Void> updatePassword(@RequestBody UpdatePasswordRequest request) {
         String username = UserContext.getUserName();
-        String oldPassword = params.get("oldPassword");
-        String newPassword = params.get("newPassword");
 
         log.info("修改密码请求: username={}", username);
-        userService.updatePassword(username, oldPassword, newPassword);
+        userService.updatePassword(username, request.getOldPassword(), request.getNewPassword());
         return Result.success();
     }
 }

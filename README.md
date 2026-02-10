@@ -285,35 +285,40 @@ is_online            -- 上线状态开关
 
 ```mermaid
 graph TD
-    START([用户输入]) --> intent[🔍 意图识别<br/>Intent Recognition]
+    %% 节点定义
+    START([用户输入]) --> intent[意图识别]
 
-    intent -->|task/question/chat| dispatcher[📡 调度中心<br/>Dispatcher]
-    intent -->|unsupported| responder[📝 响应汇总<br/>Responder]
-    intent -->|end/invalid| END1([结束])
+    %% 意图识别分支
+    intent -->|任务/提问| dispatcher{调度中心}
+    intent -->|不支持| responder[响应汇总]
+    intent -->|结束| END([结束])
 
-    dispatcher -->|需要规划| planner[📋 任务规划<br/>Planner]
-    dispatcher -->|执行任务| executor[⚡ 任务执行<br/>Executor]
-    dispatcher -->|需要审核| review[👁 人工审核<br/>Review]
+    %% 调度中心核心循环
+    dispatcher -->|任务规划| planner[任务规划]
+    dispatcher -->|直接执行| executor[任务执行]
+    dispatcher -->|人工审核| review[人工审核]
     dispatcher -->|全部完成| responder
 
-    planner -->|计划完成| dispatcher
+    %% 返回路径
+    planner --> dispatcher
+    executor --> dispatcher
 
-    executor -->|继续| dispatcher
-
+    %% 审核逻辑
     review -->|通过| dispatcher
-    review -->|驳回| feedback[🔄 反馈处理<br/>Feedback]
-
+    review -->|驳回| feedback[反馈处理]
     feedback --> dispatcher
 
-    responder -->|审计采集| END2([返回用户])
+    %% 最终输出
+    responder --> EXIT([返回用户])
 
-    style dispatcher fill:#ff9800,stroke:#e65100,stroke-width:3px
-    style intent fill:#2196f3,stroke:#0d47a1,stroke-width:2px
-    style planner fill:#4caf50,stroke:#1b5e20,stroke-width:2px
-    style executor fill:#4caf50,stroke:#1b5e20,stroke-width:2px
-    style review fill:#9c27b0,stroke:#4a148c,stroke-width:2px
-    style feedback fill:#f44336,stroke:#b71c1c,stroke-width:2px
-    style responder fill:#607d8b,stroke:#263238,stroke-width:2px
+    %% 样式美化 - 优化了间距和兼容性
+    style dispatcher fill:#ff9800,stroke:#e65100,stroke-width:2px,color:#fff
+    style intent fill:#2196f3,stroke:#0d47a1,stroke-width:2px,color:#fff
+    style planner fill:#4caf50,stroke:#1b5e20,stroke-width:2px,color:#fff
+    style executor fill:#4caf50,stroke:#1b5e20,stroke-width:2px,color:#fff
+    style review fill:#9c27b0,stroke:#4a148c,stroke-width:2px,color:#fff
+    style feedback fill:#f44336,stroke:#b71c1c,stroke-width:2px,color:#fff
+    style responder fill:#607d8b,stroke:#263238,stroke-width:2px,color:#fff
 ```
 
 ### 七大核心节点

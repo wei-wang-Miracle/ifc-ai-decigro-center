@@ -2,6 +2,7 @@ package com.ifc.decigro.buskernel.controller;
 
 import com.ifc.decigro.buskernel.common.api.Result;
 import com.ifc.decigro.buskernel.entity.AiChatTraceIndex;
+import com.ifc.decigro.buskernel.dto.TraceWriteRequest;
 import com.ifc.decigro.buskernel.service.AiChatTraceIndexService;
 import com.mybatisflex.core.paginate.Page;
 import io.swagger.v3.oas.annotations.Operation;
@@ -10,7 +11,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -66,16 +66,6 @@ public class AiChatTraceController {
     }
 
     /**
-     * 按 task_id 聚合查询 — 追踪同一任务的完整执行链路
-     */
-    @GetMapping("/task/{taskId}")
-    @Operation(summary = "task_id 聚合查询", description = "查询同一 task_id 下所有 trace 记录，重建完整执行链路")
-    public Result<List<AiChatTraceIndex>> listByTask(
-            @Parameter(description = "Task ID") @PathVariable String taskId) {
-        return Result.success(traceIndexService.listByTaskId(taskId));
-    }
-
-    /**
      * 保存审计数据 (供 AI 引擎调用)
      * 同时写入 PG 宽表 + ES 快照
      */
@@ -84,22 +74,5 @@ public class AiChatTraceController {
     public Result<Void> save(@RequestBody TraceWriteRequest request) {
         traceIndexService.saveTrace(request.getTraceIndex(), request.getEsSnapshot());
         return Result.success();
-    }
-
-    /**
-     * 审计数据写入请求体
-     * 包含 PG 宽表数据和 ES 快照数据
-     */
-    @lombok.Data
-    public static class TraceWriteRequest {
-        /**
-         * PG 宽表数据
-         */
-        private AiChatTraceIndex traceIndex;
-
-        /**
-         * ES 完整快照数据 (JSON Map)
-         */
-        private Map<String, Object> esSnapshot;
     }
 }

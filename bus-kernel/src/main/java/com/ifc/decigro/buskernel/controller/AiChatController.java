@@ -4,14 +4,13 @@ import com.ifc.decigro.buskernel.common.api.Result;
 import com.ifc.decigro.buskernel.common.auth.TokenProvider;
 import com.ifc.decigro.buskernel.dto.CreateSessionRequest;
 import com.ifc.decigro.buskernel.dto.SaveMessageRequest;
+import com.ifc.decigro.buskernel.service.AiChatService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * AI 聊天会话控制器
@@ -23,7 +22,7 @@ import java.util.UUID;
 public class AiChatController {
 
     @Autowired
-    private JdbcTemplate jdbcTemplate;
+    private AiChatService aiChatService;
 
     @Autowired
     private TokenProvider tokenProvider;
@@ -43,12 +42,7 @@ public class AiChatController {
             String[] parts = tokenProvider.validateAndParse(token);
             String userId = parts[3]; // username 作为 user_id
 
-            List<Map<String, Object>> sessions = jdbcTemplate.queryForList(
-                    "SELECT session_id, user_id, session_title, create_time, update_time " +
-                            "FROM ai_chat_session WHERE user_id = ? ORDER BY update_time DESC",
-                    userId);
-
-            return Result.success(sessions);
+            return Result.success(aiChatService.listSessions(userId));
         } catch (Exception e) {
             log.error("获取会话列表失败", e);
             return Result.fail("获取会话列表失败: " + e.getMessage());
@@ -67,20 +61,7 @@ public class AiChatController {
             String[] parts = tokenProvider.validateAndParse(token);
             String userId = parts[3];
 
-            String sessionId = "session_" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
-            String title = (request != null && request.getTitle() != null) ? request.getTitle() : "新会话";
-
-            jdbcTemplate.update(
-                    "INSERT INTO ai_chat_session (session_id, user_id, session_title, create_time, update_time) " +
-                            "VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-                    sessionId, userId, title);
-
-            Map<String, Object> result = Map.of(
-                    "sessionId", sessionId,
-                    "userId", userId,
-                    "sessionTitle", title);
-
-            return Result.success(result);
+            return Result.success(aiChatService.createSession(userId, request));
         } catch (Exception e) {
             log.error("创建会话失败", e);
             return Result.fail("创建会话失败: " + e.getMessage());
@@ -99,12 +80,7 @@ public class AiChatController {
             // 验证 token
             tokenProvider.validateAndParse(token);
 
-            List<Map<String, Object>> messages = jdbcTemplate.queryForList(
-                    "SELECT id, session_id, task_id, trace_id, role, content, create_time " +
-                            "FROM ai_chat_message WHERE session_id = ? ORDER BY create_time ASC",
-                    sessionId);
-
-            return Result.success(messages);
+            return Result.success(aiChatService.getMessages(sessionId));
         } catch (Exception e) {
             log.error("获取消息列表失败", e);
             return Result.fail("获取消息列表失败: " + e.getMessage());
@@ -124,20 +100,7 @@ public class AiChatController {
             // 验证 token
             tokenProvider.validateAndParse(token);
 
-            jdbcTemplate.update(
-                    "INSERT INTO ai_chat_message (session_id, task_id, trace_id, role, content, create_time) " +
-                            "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
-                    request.getSessionId(),
-                    request.getTaskId(),
-                    request.getTraceId(),
-                    request.getRole(),
-                    request.getContent());
-
-            // 同时更新会话的 update_time，让最近活跃的会话排在前面
-            jdbcTemplate.update(
-                    "UPDATE ai_chat_session SET update_time = CURRENT_TIMESTAMP WHERE session_id = ?",
-                    request.getSessionId());
-
+            aiChatService.saveMessage(request);
             return Result.success();
         } catch (Exception e) {
             log.error("保存消息失败", e);
@@ -157,15 +120,7 @@ public class AiChatController {
             String[] parts = tokenProvider.validateAndParse(token);
             String userId = parts[3];
 
-            // 只允许删除自己的会话
-            int affected = jdbcTemplate.update(
-                    "DELETE FROM ai_chat_session WHERE session_id = ? AND user_id = ?",
-                    sessionId, userId);
-
-            if (affected == 0) {
-                return Result.fail("会话不存在或无权删除");
-            }
-
+            aiChatService.deleteSession(sessionId, userId);
             return Result.success();
         } catch (Exception e) {
             log.error("删除会话失败", e);
@@ -186,15 +141,7 @@ public class AiChatController {
             String[] parts = tokenProvider.validateAndParse(token);
             String userId = parts[3];
 
-            int affected = jdbcTemplate.update(
-                    "UPDATE ai_chat_session SET session_title = ?, update_time = CURRENT_TIMESTAMP " +
-                            "WHERE session_id = ? AND user_id = ?",
-                    request.getTitle(), sessionId, userId);
-
-            if (affected == 0) {
-                return Result.fail("会话不存在或无权修改");
-            }
-
+            aiChatService.updateSession(sessionId, userId, request);
             return Result.success();
         } catch (Exception e) {
             log.error("更新会话失败", e);

@@ -46,4 +46,9 @@ public interface SysUserService {
      * 修改密码
      */
     void updatePassword(String username, String oldPassword, String newPassword);
+
+    /**
+     * 更新个人资料
+     */
+    void updateProfile(String username, com.ifc.decigro.buskernel.dto.ProfileUpdateRequest request);
 }

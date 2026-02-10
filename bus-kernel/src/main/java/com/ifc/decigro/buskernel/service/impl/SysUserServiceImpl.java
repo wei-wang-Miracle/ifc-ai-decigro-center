@@ -164,4 +164,17 @@ public class SysUserServiceImpl implements SysUserService {
         user.setPassword(BCrypt.hashpw(rawNewPassword, BCrypt.gensalt()));
         userMapper.update(user);
     }
+
+    @Override
+    @Transactional
+    public void updateProfile(String username, com.ifc.decigro.buskernel.dto.ProfileUpdateRequest request) {
+        SysUser user = getByUsername(username);
+        if (user != null) {
+            user.setNickName(request.getNickName());
+            user.setGender(request.getGender());
+            user.setEmail(request.getEmail());
+            user.setPhone(request.getPhone());
+            userMapper.update(user);
+        }
+    }
 }
