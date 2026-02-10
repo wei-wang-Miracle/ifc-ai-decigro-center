@@ -4,10 +4,12 @@ import { Promotion, Warning, ChatLineRound, Plus, Delete, ChatDotSquare } from '
 import aiRequest from '../../utils/aiRequest'
 import { useUserStore } from '../../stores/user'
 import { useChatStore, type ChatMessage } from '../../stores/chatStore'
+import { useAppStore } from '../../stores/app'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const userStore = useUserStore()
 const chatStore = useChatStore()
+const appStore = useAppStore()
 const inputMessage = ref('')
 const isLoading = ref(false)
 const scrollContainer = ref<HTMLElement | null>(null)
@@ -23,8 +25,11 @@ const scrollToBottom = async () => {
     }
 }
 
-// 初始化：加载会话列表
+// 初始化：加载会话列表 + 自动收起侧边栏
 onMounted(async () => {
+    // 自动收起侧边栏以提供沉浸式对话体验
+    appStore.setSidebarCollapsed(true)
+    
     await chatStore.fetchSessions()
     // 如果有会话，自动选中第一个
     if (chatStore.sessions.length > 0) {
@@ -188,41 +193,41 @@ const formatTime = (date: Date | string) => {
 <template>
     <div class="chat-page flex h-full">
         <!-- 左侧会话列表 -->
-        <div class="session-sidebar w-64 bg-slate-50 border-r border-gray-200 flex flex-col">
+        <div class="session-sidebar w-38 bg-slate-50 border-r border-gray-200 flex flex-col">
             <!-- 新建会话按钮 -->
-            <div class="p-4 border-b border-gray-200">
-                <el-button type="primary" class="w-full" @click="handleNewSession">
-                    <el-icon class="mr-2"><Plus /></el-icon>
+            <div class="p-3 border-b border-gray-200">
+                <el-button type="primary" class="w-full" size="default" @click="handleNewSession">
+                    <el-icon class="mr-1"><Plus /></el-icon>
                     新建会话
                 </el-button>
             </div>
             
             <!-- 会话列表 -->
-            <div class="flex-1 overflow-y-auto p-2 space-y-1">
-                <div v-if="chatStore.sessions.length === 0" class="text-center text-gray-400 text-sm py-8">
+            <div class="flex-1 overflow-y-auto p-2 space-y-0.5">
+                <div v-if="chatStore.sessions.length === 0" class="text-center text-gray-400 text-xs py-8">
                     暂无会话
                 </div>
                 <div
                     v-for="session in chatStore.sessions"
                     :key="session.sessionId"
                     :class="[
-                        'session-item group flex items-center justify-between p-3 rounded-lg cursor-pointer transition-all',
+                        'session-item group flex items-center justify-between p-2 px-3 rounded-lg cursor-pointer transition-all',
                         session.sessionId === chatStore.currentSessionId
-                            ? 'bg-brand-100 text-brand-700'
-                            : 'hover:bg-gray-100'
+                            ? 'bg-brand-100 text-brand-700 font-medium'
+                            : 'hover:bg-gray-100 text-gray-600'
                     ]"
                     @click="handleSwitchSession(session.sessionId)"
                 >
                     <div class="flex items-center space-x-2 flex-1 min-w-0">
-                        <el-icon class="flex-shrink-0"><ChatDotSquare /></el-icon>
-                        <span class="truncate text-sm">{{ session.sessionTitle }}</span>
+                        <el-icon :size="14" class="flex-shrink-0"><ChatDotSquare /></el-icon>
+                        <span class="truncate text-xs">{{ session.sessionTitle }}</span>
                     </div>
                     <el-button
                         type="danger"
                         size="small"
-                        circle
+                        link
                         :icon="Delete"
-                        class="opacity-0 group-hover:opacity-100 transition-opacity"
+                        class="opacity-0 group-hover:opacity-100 transition-opacity p-0 h-auto"
                         @click.stop="handleDeleteSession(session.sessionId)"
                     />
                 </div>
@@ -352,10 +357,6 @@ const formatTime = (date: Date | string) => {
     height: 100%;
 }
 
-.session-sidebar {
-    min-width: 240px;
-    max-width: 280px;
-}
 
 .session-item:hover .el-button {
     opacity: 1;

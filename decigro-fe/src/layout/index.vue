@@ -2,12 +2,14 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '../stores/user'
-import { ArrowRight, User, Lock, SwitchButton, Calendar, Stamp, List, OfficeBuilding, Monitor, ArrowDown, PriceTag, Box, Cpu, DataAnalysis } from '@element-plus/icons-vue'
+import { useAppStore } from '../stores/app'
+import { ArrowRight, User, Lock, SwitchButton, Calendar, Stamp, List, OfficeBuilding, Monitor, ArrowDown, PriceTag, Box, Cpu, DataAnalysis, Fold, Expand, Promotion } from '@element-plus/icons-vue'
 import AIChat from '../components/AIChat.vue'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+const appStore = useAppStore()
 
 // 实时时间相关
 const currentTime = ref('')
@@ -58,9 +60,15 @@ const breadcrumbs = computed(() => {
 <template>
   <div class="common-layout h-full flex font-sans overflow-hidden">
     <!-- 侧边栏: DDS v3.0 品牌深色 #174EA6 -->
-    <div class="w-64 bg-brand-900 text-white flex flex-col shadow-lg z-20">
-        <div class="h-16 flex items-center px-6 font-bold text-xl border-b border-brand-700/50">
-            <span class="tracking-wider">Deci<span class="text-brand-500">Gro</span></span>
+    <div 
+        :class="[
+            'bg-brand-900 text-white flex flex-col shadow-lg z-20 transition-all duration-300 ease-in-out overflow-hidden whitespace-nowrap',
+            appStore.isSidebarCollapsed ? 'w-20' : 'w-64'
+        ]"
+    >
+        <div class="h-16 flex items-center px-6 font-bold text-xl border-b border-brand-700/50 flex-shrink-0">
+            <span v-if="!appStore.isSidebarCollapsed" class="tracking-wider">Deci<span class="text-brand-500">Gro</span></span>
+            <span v-else class="text-brand-500 w-full text-center">DG</span>
         </div>
         
         <el-menu
@@ -68,6 +76,8 @@ const breadcrumbs = computed(() => {
             background-color="transparent"
             class="el-menu-vertical-demo flex-1 border-r-0 pt-4"
             :default-active="route.path"
+            :collapse="appStore.isSidebarCollapsed"
+            :collapse-transition="false"
             text-color="rgba(255, 255, 255, 0.7)"
             router
         >
@@ -78,54 +88,54 @@ const breadcrumbs = computed(() => {
                 </template>
                 <el-menu-item index="/system/user">
                     <el-icon><User /></el-icon>
-                    用户管理
+                    <template #title>用户管理</template>
                 </el-menu-item>
                 <el-menu-item index="/system/role">
                     <el-icon><Stamp /></el-icon>
-                    角色管理
+                    <template #title>角色管理</template>
                 </el-menu-item>
                 <el-menu-item index="/system/dept">
                     <el-icon><List /></el-icon>
-                    部门管理
+                    <template #title>部门管理</template>
                 </el-menu-item>
                 <el-menu-item index="/system/tenant">
                     <el-icon><OfficeBuilding /></el-icon>
-                    租户管理
+                    <template #title>租户管理</template>
                 </el-menu-item>
                 <el-menu-item index="/system/online">
                     <el-icon><Monitor /></el-icon>
-                    在线用户
+                    <template #title>在线用户</template>
                 </el-menu-item>
             </el-sub-menu>
             <el-menu-item index="/tag/list">
                 <el-icon><PriceTag /></el-icon>
-                标签管理
+                <template #title>标签管理</template>
             </el-menu-item>
             <el-menu-item index="/tool/list">
                 <el-icon><Box /></el-icon>
-                工具管理
+                <template #title>工具管理</template>
             </el-menu-item>
             <el-menu-item index="/agent/list">
                 <el-icon><Cpu /></el-icon>
-                智能体管理
+                <template #title>智能体管理</template>
             </el-menu-item>
             <el-menu-item index="/chat/index">
                 <el-icon><Promotion /></el-icon>
-                AI 智能对话
+                <template #title>AI 智能对话</template>
             </el-menu-item>
             <el-menu-item index="/audit/list">
                 <el-icon><DataAnalysis /></el-icon>
-                审计监控
+                <template #title>审计监控</template>
             </el-menu-item>
         </el-menu>
         
         <!-- 用户简要信息 -->
-        <div class="p-4 bg-brand-700/30 border-t border-brand-700/50">
-             <div class="flex items-center space-x-3">
-                 <div class="w-8 h-8 rounded-full bg-brand-500 shadow-sm flex items-center justify-center text-xs font-bold ring-2 ring-brand-50/20">
+        <div class="p-4 bg-brand-700/30 border-t border-brand-700/50 flex-shrink-0">
+             <div class="flex items-center space-x-3 overflow-hidden">
+                 <div class="w-8 h-8 flex-shrink-0 rounded-full bg-brand-500 shadow-sm flex items-center justify-center text-xs font-bold ring-2 ring-brand-50/20">
                      {{ userStore.userInfo.username?.[0]?.toUpperCase() || 'U' }}
                  </div>
-                 <div class="flex flex-col min-w-0">
+                 <div v-if="!appStore.isSidebarCollapsed" class="flex flex-col min-w-0 transition-opacity duration-300">
                     <span class="text-sm font-medium truncate opacity-90">{{ userStore.userInfo.username }}</span>
                     <span class="text-[10px] opacity-50 uppercase tracking-tighter">Administrator</span>
                  </div>
@@ -138,9 +148,18 @@ const breadcrumbs = computed(() => {
         <AIChat />
         
         <!-- 头部: 带实时时钟和用户中心 -->
-        <header class="h-16 bg-white/80 backdrop-blur-md border-b border-gray-100 flex items-center justify-between px-6 z-10">
-            <!-- 左侧: 面包屑 -->
-            <div class="flex items-center">
+        <header class="h-16 bg-white/80 backdrop-blur-md border-b border-gray-100 flex items-center justify-between px-6 z-10 flex-shrink-0">
+            <!-- 左侧: 面包屑 + 切换按钮 -->
+            <div class="flex items-center space-x-4">
+                <div 
+                    class="p-1 cursor-pointer text-gray-400 hover:text-brand-500 transition-colors"
+                    @click="appStore.toggleSidebar"
+                >
+                    <el-icon size="20">
+                        <Expand v-if="appStore.isSidebarCollapsed" />
+                        <Fold v-else />
+                    </el-icon>
+                </div>
                 <el-breadcrumb :separator-icon="ArrowRight">
                     <el-breadcrumb-item :to="{ path: '/' }">系统首页</el-breadcrumb-item>
                     <el-breadcrumb-item v-for="item in breadcrumbs" :key="item.path">
@@ -190,8 +209,18 @@ const breadcrumbs = computed(() => {
         </header>
 
         <!-- 内容渲染区 -->
-        <main class="flex-1 p-6 overflow-auto">
-             <div class="max-w-7xl mx-auto h-full">
+        <main 
+            :class="[
+                'flex-1 overflow-auto transition-all duration-300',
+                route.path === '/chat/index' ? 'p-0' : 'p-6'
+            ]"
+        >
+             <div 
+                :class="[
+                    'h-full transition-all duration-300',
+                    route.path === '/chat/index' ? 'max-w-none' : 'max-w-7xl mx-auto'
+                ]"
+             >
                 <RouterView />
              </div>
         </main>
@@ -200,31 +229,106 @@ const breadcrumbs = computed(() => {
 </template>
 
 <style scoped>
+/* 侧边栏整体样式 */
 :deep(.el-menu) {
     border-right: none;
+    transition: width 0.3s;
 }
 
-:deep(.el-menu-item) {
-    height: 50px;
-    line-height: 50px;
-    margin: 4px 12px;
-    border-radius: 8px;
-}
-
-:deep(.el-menu-item.is-active) {
-    background-color: var(--el-color-primary) !important;
-    color: white !important;
-    box-shadow: 0 4px 12px rgba(66, 133, 244, 0.3);
-}
-
+/* 菜单项基础样式 */
+:deep(.el-menu-item),
 :deep(.el-sub-menu__title) {
     height: 50px;
     line-height: 50px;
     margin: 4px 12px;
     border-radius: 8px;
+    transition: all 0.3s ease;
 }
 
-:deep(.el-sub-menu__title:hover) {
-    background-color: rgba(255, 255, 255, 0.1) !important;
+/* 展开状态：选中高亮 */
+:deep(.el-menu-item.is-active),
+:deep(.el-sub-menu.is-active > .el-sub-menu__title) {
+    background-color: var(--el-color-primary) !important;
+    color: white !important;
+    box-shadow: 0 4px 12px rgba(66, 133, 244, 0.3);
+}
+
+/* --------------------------------------------------
+   收缩状态 (Collapse) 核心修复：对齐与尺寸
+   -------------------------------------------------- */
+:deep(.el-menu--collapse) .el-menu-item,
+:deep(.el-menu--collapse) .el-sub-menu__title {
+    margin: 4px 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+/* 修复激活状态下的“小方块”背景 */
+:deep(.el-menu--collapse) .el-menu-item.is-active,
+:deep(.el-menu--collapse) .el-sub-menu.is-active > .el-sub-menu__title {
+    position: relative;
+    background-color: transparent !important; /* 容器背景透明 */
+    box-shadow: none !important;
+}
+
+/* 使用伪元素制作固定比例的背景方块，确保图标始终在方块正中 */
+:deep(.el-menu--collapse) .el-menu-item.is-active::after,
+:deep(.el-menu--collapse) .el-sub-menu.is-active > .el-sub-menu__title::after {
+    content: '';
+    position: absolute;
+    width: 42px;
+    height: 42px;
+    background-color: var(--el-color-primary);
+    border-radius: 12px;
+    z-index: 0;
+}
+
+:deep(.el-menu--collapse) .el-icon {
+    position: relative;
+    z-index: 1;
+    margin: 0 !important;
+    font-size: 20px;
+    color: inherit;
+}
+
+:deep(.el-menu--collapse) .el-menu-item.is-active .el-icon,
+:deep(.el-menu--collapse) .el-sub-menu.is-active > .el-sub-menu__title .el-icon {
+    color: white !important;
+}
+
+/* 隐藏收缩后的弹出箭头 */
+:deep(.el-menu--collapse) .el-sub-menu__icon-arrow {
+    display: none !important;
+}
+</style>
+
+<!-- 
+    注意：子菜单弹出框 (Popper) 是挂载在 body 上的，
+    Scoped 样式无法触及，必须使用非 Scoped 样式进行全局覆盖。
+-->
+<style>
+.el-menu--popup {
+    background-color: #1a202c !important; /* 使用更深的深灰色/深蓝色背景 */
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+}
+
+.el-menu--popup .el-menu-item {
+    color: rgba(255, 255, 255, 0.8) !important;
+    font-size: 13px !important;
+}
+
+.el-menu--popup .el-menu-item:hover {
+    background-color: #174EA6 !important;
+    color: white !important;
+}
+
+.el-menu--popup .el-menu-item.is-active {
+    background-color: #174EA6 !important;
+    color: white !important;
+    font-weight: bold;
 }
 </style>
