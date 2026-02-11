@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, nextTick, onMounted, computed, reactive } from 'vue'
-import { Promotion, Warning, ChatLineRound, Plus, Delete, ChatDotSquare, Operation, Loading, ArrowDown } from '@element-plus/icons-vue'
+import { Promotion, Warning, ChatLineRound, Plus, Delete, ChatDotSquare, Operation, Loading, ArrowDown, Close } from '@element-plus/icons-vue'
 import aiRequest from '../../utils/aiRequest'
 import { useUserStore } from '../../stores/user'
 import { useChatStore, type ChatMessage } from '../../stores/chatStore'
@@ -13,8 +13,35 @@ const appStore = useAppStore()
 const inputMessage = ref('')
 const isLoading = ref(false)
 const scrollContainer = ref<HTMLElement | null>(null)
+const agentPanelScroll = ref<HTMLElement | null>(null)
 // 控制思考过程展开/收起
 const showThoughts = ref<Record<string, boolean>>({})
+
+// ===== Agent 工作面板相关 =====
+
+// Agent 面板是否可见
+const agentPanelVisible = ref(false)
+
+// 当前高亮的 Agent 别名（聊天区和面板联动）
+const highlightedAgent = ref<string | null>(null)
+
+// Agent 工作日志数据结构
+interface AgentWorkEntry {
+    id: string
+    agentName: string        // Agent 原始名称
+    agentAlias: string       // Agent 别名（展示用）
+    status: 'running' | 'success' | 'failed'
+    startTime: number
+    tools: { name: string; alias: string; status: string; output?: string }[]
+    thinking: string         // Agent 的思考内容（流式累加）
+    result: string           // Agent 最终产出
+}
+
+// 当前所有 Agent 工作记录
+const agentWorkEntries = reactive<AgentWorkEntry[]>([])
+
+// 当前活跃的 Agent（正在工作中）
+const activeAgentName = ref<string | null>(null)
 
 // 计算属性：使用 store 中的消息
 const messages = computed(() => chatStore.messages)
@@ -25,6 +52,47 @@ const scrollToBottom = async () => {
     if (scrollContainer.value) {
         scrollContainer.value.scrollTop = scrollContainer.value.scrollHeight
     }
+}
+
+// Agent 面板自动滚动到底部
+const scrollAgentPanelToBottom = async () => {
+    await nextTick()
+    if (agentPanelScroll.value) {
+        agentPanelScroll.value.scrollTop = agentPanelScroll.value.scrollHeight
+    }
+}
+
+// 点击聊天区中的 Agent 名称，高亮右侧面板对应条目
+const handleAgentClick = (agentAlias: string) => {
+    highlightedAgent.value = agentAlias
+    // 如果面板未展开，自动展开
+    if (!agentPanelVisible.value) {
+        agentPanelVisible.value = true
+    }
+    // 滚动到对应 Agent 条目
+    nextTick(() => {
+        const el = document.getElementById(`agent-entry-${agentAlias}`)
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }
+    })
+    // 3 秒后清除高亮
+    setTimeout(() => {
+        if (highlightedAgent.value === agentAlias) {
+            highlightedAgent.value = null
+        }
+    }, 3000)
+}
+
+// 关闭 Agent 面板
+const closeAgentPanel = () => {
+    agentPanelVisible.value = false
+    highlightedAgent.value = null
+}
+
+// 获取当前活跃的 AgentWorkEntry
+const getActiveAgent = (): AgentWorkEntry | undefined => {
+    return agentWorkEntries.find(e => e.status === 'running')
 }
 
 // 初始化：加载会话列表 + 自动收起侧边栏
@@ -68,6 +136,9 @@ const handleDeleteSession = async (sessionId: string) => {
 const handleSwitchSession = async (sessionId: string) => {
     if (sessionId !== chatStore.currentSessionId) {
         await chatStore.switchSession(sessionId)
+        // 切换会话时清理 Agent 面板
+        agentPanelVisible.value = false
+        agentWorkEntries.splice(0)
         scrollToBottom()
     }
 }
@@ -87,6 +158,11 @@ const handleSend = async () => {
 
     const userQuery = inputMessage.value
     inputMessage.value = ''
+    
+    // 每次新消息清理上一轮的 Agent 面板数据
+    agentPanelVisible.value = false
+    agentWorkEntries.splice(0)
+    activeAgentName.value = null
     
     // 添加用户消息
     const userMessage = reactive<ChatMessage>({
@@ -117,7 +193,7 @@ const handleSend = async () => {
     // 添加 AI 消息占位
     const aiMessage = reactive<ChatMessage>({
         sessionId: chatStore.currentSessionId!,
-        taskId: undefined, // 暂时未定
+        taskId: undefined,
         traceId: undefined,
         role: 'assistant',
         content: '',
@@ -143,7 +219,7 @@ const handleSend = async () => {
                 query: userQuery,
                 user_id: userStore.userInfo.userId || userStore.userInfo.username || 'guest',
                 session_id: chatStore.currentSessionId,
-                task_id: chatStore.currentTaskId // 传递当前任务 ID（如果有）
+                task_id: chatStore.currentTaskId
             })
         })
 
@@ -179,12 +255,13 @@ const handleSend = async () => {
                             if (event.type === 'meta') {
                                 aiMessage.taskId = event.task_id
                                 aiMessage.traceId = event.trace_id
-                                // 确保 taskId 用于消息映射
                                 chatStore.setTaskId(event.task_id)
+
                             } else if (event.type === 'thinking') {
-                                // 简单显示“正在思考”
+                                // 简单显示"正在思考"
+
                             } else if (event.type === 'node_start') {
-                                // 先结束上一个节点的 running 状态
+                                // 结束上一个节点的 running 状态
                                 if (aiMessage.thoughts && aiMessage.thoughts.length > 0) {
                                     const last = aiMessage.thoughts[aiMessage.thoughts.length - 1]
                                     if (last.status === 'running') last.status = 'success'
@@ -198,22 +275,49 @@ const handleSend = async () => {
                                     timestamp: Date.now(),
                                     content: ''
                                 })
+
                             } else if (event.type === 'agent_start') {
+                                // ====== Agent 进场：展开右侧面板 ======
+                                const agentAlias = event.agent_alias || event.agent
+                                const agentName = event.agent
+                                
+                                // 结束上一个运行中的思考步骤
                                 if (aiMessage.thoughts && aiMessage.thoughts.length > 0) {
                                     const last = aiMessage.thoughts[aiMessage.thoughts.length - 1]
                                     if (last.status === 'running') last.status = 'success'
                                 }
 
+                                // 在聊天气泡中记录 Agent 启动
                                 aiMessage.thoughts?.push({
                                     id: `agent-${Date.now()}-${Math.random()}`,
                                     type: 'agent_start',
-                                    title: `Agent: ${event.agent_alias || event.agent}`,
+                                    title: agentAlias,
                                     status: 'running',
                                     timestamp: Date.now(),
                                     content: ''
                                 })
+
+                                // 向右侧 Agent 面板添加工作条目
+                                const entry: AgentWorkEntry = {
+                                    id: `aw-${Date.now()}`,
+                                    agentName,
+                                    agentAlias,
+                                    status: 'running',
+                                    startTime: Date.now(),
+                                    tools: [],
+                                    thinking: '',
+                                    result: ''
+                                }
+                                agentWorkEntries.push(entry)
+                                activeAgentName.value = agentName
+
+                                // 展开 Agent 面板
+                                agentPanelVisible.value = true
                                 scrollToBottom()
+                                scrollAgentPanelToBottom()
+
                             } else if (event.type === 'tool_start') {
+                                // 在聊天思考中记录
                                 aiMessage.thoughts?.push({
                                     id: `tool-${Date.now()}-${Math.random()}`,
                                     type: 'tool_start',
@@ -221,43 +325,102 @@ const handleSend = async () => {
                                     status: 'running',
                                     timestamp: Date.now()
                                 })
+                                // 同步到 Agent 面板
+                                const activeEntry = getActiveAgent()
+                                if (activeEntry) {
+                                    activeEntry.tools.push({
+                                        name: event.tool,
+                                        alias: event.tool_alias || event.tool,
+                                        status: 'running'
+                                    })
+                                }
+                                scrollAgentPanelToBottom()
+
                             } else if (event.type === 'tool_end') {
-                                // 找到对应的 tool_start 并更新
-                                const thought = aiMessage.thoughts?.slice().reverse().find(t => t.type === 'tool_start' && t.title.includes(event.tool_alias || event.tool))
+                                // 更新聊天思考中的工具状态
+                                const thought = aiMessage.thoughts?.slice().reverse().find(
+                                    t => t.type === 'tool_start' && t.title.includes(event.tool_alias || event.tool)
+                                )
                                 if (thought) {
                                     thought.status = 'success'
-                                    // 节点的输出结果存于日志或内部状态，依用户要求“不必展示节点的输出结果”
-                                    console.log(`[Tool Result] ${event.tool}:`, event.output)
                                 }
+                                // 同步到 Agent 面板
+                                const activeEntry = getActiveAgent()
+                                if (activeEntry) {
+                                    const tool = activeEntry.tools.slice().reverse().find(
+                                        t => t.name === event.tool || t.alias === (event.tool_alias || event.tool)
+                                    )
+                                    if (tool) {
+                                        tool.status = 'success'
+                                        tool.output = event.output
+                                    }
+                                }
+                                console.log(`[Tool Result] ${event.tool}:`, event.output)
+
                             } else if (event.type === 'node_result') {
-                                // 节点执行结果：标记当前节点为成功，并记录日志，不展示在 UI 思考过程内容中
+                                // 标记节点完成
                                 const nodeThought = aiMessage.thoughts?.slice().reverse().find(t => t.status === 'running')
                                 if (nodeThought) {
                                     nodeThought.status = 'success'
                                 }
+                                // 如果当前有活跃 Agent，标记其完成
+                                const activeEntry = getActiveAgent()
+                                if (activeEntry && event.node === 'executor') {
+                                    activeEntry.status = 'success'
+                                    activeAgentName.value = null
+                                }
                                 console.log(`[Node Result] ${event.node}:`, event.output)
+
                             } else if (event.type === 'token') {
-                                const { content, reasoning, is_thought, is_json } = event
-                                
-                                // 规则 1: 如果是 JSON 数据，标记为 is_thought 也不在 UI 思考框中追加
+                                const { content, reasoning, is_thought, is_json, node } = event
+
+                                // 过滤技术性的 JSON
                                 if (is_json) continue
 
                                 if (is_thought) {
-                                    // 规则 2: 思考过程流 -> 进入思考步骤详情
-                                    const agentThought = aiMessage.thoughts?.slice().reverse().find(t => t.status === 'running')
-                                    if (agentThought) {
-                                        if (!agentThought.content) agentThought.content = ''
-                                        if (reasoning) agentThought.content += reasoning
-                                        else if (content) agentThought.content += content
+                                    // ====== 思考流：分发到聊天气泡 + Agent 面板 ======
+                                    let activeThought = aiMessage.thoughts?.slice().reverse().find(t => t.status === 'running')
+                                    
+                                    if (!activeThought) {
+                                        const newThought = {
+                                            id: `auto-${Date.now()}`,
+                                            type: 'thinking' as const,
+                                            title: (node === 'responder' ? '整理思路...' : '深度思考中...'),
+                                            status: 'running' as const,
+                                            timestamp: Date.now(),
+                                            content: ''
+                                        }
+                                        aiMessage.thoughts?.push(newThought)
+                                        activeThought = newThought
+                                    }
+
+                                    if (activeThought) {
+                                        if (reasoning) activeThought.content += reasoning
+                                        else if (content) activeThought.content += content
+                                    }
+
+                                    // 同步思考内容到 Agent 面板
+                                    const activeEntry = getActiveAgent()
+                                    if (activeEntry) {
+                                        if (reasoning) activeEntry.thinking += reasoning
+                                        else if (content) activeEntry.thinking += content
+                                        scrollAgentPanelToBottom()
                                     }
                                     continue
                                 }
 
-                                // 规则 3: 非思考过程 (is_thought === false) -> 直接进入聊天正文
+                                // ====== 正文流 ======
                                 if (content) {
+                                    // 如果有活跃 Agent，同时追加到 Agent 面板的 result
+                                    const activeEntry = getActiveAgent()
+                                    if (activeEntry) {
+                                        activeEntry.result += content
+                                        scrollAgentPanelToBottom()
+                                    }
                                     aiMessage.content += content
                                     scrollToBottom()
                                 }
+
                             } else if (event.type === 'result') {
                                 if (event.message) {
                                     aiMessage.content = event.message
@@ -265,7 +428,7 @@ const handleSend = async () => {
                                 aiMessage.status = event.status
                                 aiMessage.requireReview = event.require_review
                                 
-                                 // 异步持久化 AI 回复到数据库
+                                // 异步持久化 AI 回复到数据库
                                 chatStore.saveMessageToServer({
                                     sessionId: chatStore.currentSessionId!,
                                     taskId: event.task_id,
@@ -277,6 +440,11 @@ const handleSend = async () => {
 
                                 if (event.status === 'completed') {
                                     chatStore.clearTaskId()
+                                    // 结束所有运行中的 Agent
+                                    agentWorkEntries.forEach(e => {
+                                        if (e.status === 'running') e.status = 'success'
+                                    })
+                                    activeAgentName.value = null
                                 }
                             }
                             
@@ -292,7 +460,6 @@ const handleSend = async () => {
         console.error('Chat error:', error)
         ElMessage.error('发送消息失败')
         
-        // 更新消息状态为失败
         aiMessage.content = '抱歉，响应过程中出现错误。'
         aiMessage.status = 'failed'
     } finally {
@@ -309,7 +476,6 @@ const handleReview = async (taskId: string, action: 'approve' | 'reject') => {
             feedback: action === 'reject' ? '已被用户驳回' : '通过'
         }) as any
 
-        // 更新消息状态
         const msg = messages.value.find(m => m.taskId === taskId && m.requireReview)
         if (msg) {
             msg.content = res.message
@@ -375,8 +541,10 @@ const formatTime = (date: Date | string) => {
             </div>
         </div>
 
-        <!-- 右侧聊天区域 -->
-        <div class="chat-container flex-1 flex flex-col bg-white overflow-hidden">
+        <!-- 中间聊天区域（Agent 进场时宽度比例变为 9:16 ≈ 56%） -->
+        <div :class="['chat-container flex flex-col bg-white overflow-hidden transition-all duration-500 ease-in-out',
+             agentPanelVisible ? 'chat-area-shrink' : 'flex-1']"
+        >
             <!-- 头部 -->
             <div class="px-6 py-4 border-b bg-slate-50 flex items-center justify-between">
                 <div class="flex items-center space-x-3">
@@ -416,7 +584,7 @@ const formatTime = (date: Date | string) => {
                 <div v-for="(msg, idx) in messages" :key="idx" 
                     :class="['flex w-full', msg.role === 'user' ? 'justify-end' : 'justify-start']"
                 >
-                    <div :class="['flex items-start max-w-[80%] space-x-3', msg.role === 'user' ? 'flex-row-reverse space-x-reverse' : '']">
+                    <div :class="['flex items-start max-w-[85%] space-x-3', msg.role === 'user' ? 'flex-row-reverse space-x-reverse' : '']">
                         <!-- 头像 -->
                         <div :class="['w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center shadow-sm', 
                             msg.role === 'user' ? 'bg-brand-100 text-brand-700' : 'bg-brand-600 text-white']"
@@ -432,7 +600,7 @@ const formatTime = (date: Date | string) => {
                                     ? 'bg-brand-600 text-white rounded-tr-none' 
                                     : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none']"
                             >
-                                <!-- 思考过程展示 -->
+                                <!-- 思考过程展示（精简版，详细内容在右侧面板） -->
                                 <div v-if="msg.thoughts && msg.thoughts.length > 0" class="mb-3 border-b border-dashed border-gray-200 pb-2">
                                     <div 
                                         class="flex items-center text-xs text-gray-500 cursor-pointer hover:text-brand-600 select-none"
@@ -444,18 +612,25 @@ const formatTime = (date: Date | string) => {
                                         <el-icon class="ml-1 transition-transform" :class="{ 'rotate-180': showThoughts[msg.id || idx] }"><ArrowDown /></el-icon>
                                     </div>
                                     
-                                    <div v-show="showThoughts[msg.id || idx] || msg.status === 'running'" class="mt-2 text-xs space-y-2 bg-slate-50 p-2 rounded max-h-60 overflow-y-auto">
-                                        <div v-for="thought in msg.thoughts" :key="thought.id" class="flex items-start">
-                                            <div class="mr-2 mt-0.5">
+                                    <div v-show="showThoughts[msg.id || idx] || msg.status === 'running'" class="mt-2 text-xs space-y-1.5 bg-slate-50 p-2 rounded max-h-48 overflow-y-auto">
+                                        <div v-for="thought in msg.thoughts" :key="thought.id" class="flex items-center">
+                                            <div class="mr-2">
                                                 <div v-if="thought.status === 'running'" class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
                                                 <div v-else-if="thought.type === 'node_start'" class="w-2 h-2 rounded-full bg-purple-400"></div>
                                                 <div v-else-if="thought.type === 'agent_start'" class="w-2 h-2 rounded-full bg-indigo-400"></div>
                                                 <div v-else-if="thought.type === 'tool_start'" class="w-2 h-2 rounded-full bg-amber-400"></div>
                                                 <div v-else class="w-2 h-2 rounded-full bg-green-400"></div>
                                             </div>
-                                            <div class="flex-1">
-                                                <div class="font-medium text-gray-700">{{ thought.title }}</div>
-                                                <div v-if="thought.content" class="text-gray-400 mt-1 font-mono text-[10px] whitespace-pre-wrap break-all">{{ thought.content }}</div>
+                                            <div class="flex-1 min-w-0">
+                                                <!-- Agent 名称可点击：联动右侧面板 -->
+                                                <span 
+                                                    v-if="thought.type === 'agent_start'"
+                                                    class="font-medium text-indigo-600 cursor-pointer hover:underline"
+                                                    @click="handleAgentClick(thought.title)"
+                                                >
+                                                    🤖 {{ thought.title }}
+                                                </span>
+                                                <span v-else class="font-medium text-gray-700 truncate">{{ thought.title }}</span>
                                             </div>
                                         </div>
                                     </div>
@@ -519,6 +694,104 @@ const formatTime = (date: Date | string) => {
                 <p class="text-[10px] text-gray-400 mt-2 text-center">AI 引擎由 DeciGro 业务内核驱动，所有敏感操作均受安全策略限制。</p>
             </div>
         </div>
+
+        <!-- ====== 右侧 Agent 工作面板 ====== -->
+        <transition name="agent-panel">
+            <div v-if="agentPanelVisible" class="agent-panel border-l border-gray-200 bg-slate-50 flex flex-col overflow-hidden">
+                <!-- 面板头部 -->
+                <div class="px-4 py-3 border-b bg-white flex items-center justify-between">
+                    <div class="flex items-center space-x-2">
+                        <div class="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center">
+                            <span class="text-sm">🤖</span>
+                        </div>
+                        <div>
+                            <h3 class="text-sm font-bold text-gray-800">Agent 工作台</h3>
+                            <p class="text-[10px] text-gray-400">智能体思考与执行过程</p>
+                        </div>
+                    </div>
+                    <el-button :icon="Close" circle size="small" @click="closeAgentPanel" class="close-panel-btn" />
+                </div>
+
+                <!-- 面板内容：Agent 工作条目列表 -->
+                <div ref="agentPanelScroll" class="flex-1 overflow-y-auto p-3 space-y-3">
+                    <div v-if="agentWorkEntries.length === 0" class="text-center text-gray-400 text-xs py-12">
+                        等待 Agent 进场...
+                    </div>
+
+                    <div 
+                        v-for="entry in agentWorkEntries" 
+                        :key="entry.id"
+                        :id="`agent-entry-${entry.agentAlias}`"
+                        :class="[
+                            'agent-work-card rounded-xl p-3 border transition-all duration-300',
+                            highlightedAgent === entry.agentAlias 
+                                ? 'border-indigo-400 bg-indigo-50 ring-2 ring-indigo-200 shadow-md' 
+                                : 'border-gray-200 bg-white shadow-sm',
+                            entry.status === 'running' ? 'agent-card-active' : ''
+                        ]"
+                    >
+                        <!-- Agent 头部 -->
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="flex items-center space-x-2">
+                                <div :class="['w-6 h-6 rounded-full flex items-center justify-center text-xs',
+                                    entry.status === 'running' ? 'bg-indigo-500 text-white' : 'bg-green-500 text-white']">
+                                    <span v-if="entry.status === 'running'" class="animate-pulse">⚡</span>
+                                    <span v-else>✓</span>
+                                </div>
+                                <span class="text-sm font-semibold text-gray-800">{{ entry.agentAlias }}</span>
+                            </div>
+                            <el-tag 
+                                :type="entry.status === 'running' ? 'primary' : 'success'" 
+                                size="small" 
+                                effect="dark"
+                                round
+                            >
+                                {{ entry.status === 'running' ? '执行中' : '已完成' }}
+                            </el-tag>
+                        </div>
+
+                        <!-- 工具调用 -->
+                        <div v-if="entry.tools.length > 0" class="mb-2">
+                            <div class="text-[10px] text-gray-500 font-medium mb-1 uppercase tracking-wider">工具调用</div>
+                            <div class="space-y-1">
+                                <div v-for="(tool, tidx) in entry.tools" :key="tidx" 
+                                    class="flex items-center text-xs py-1 px-2 rounded bg-gray-50">
+                                    <div :class="['w-1.5 h-1.5 rounded-full mr-2',
+                                        tool.status === 'running' ? 'bg-amber-500 animate-pulse' : 'bg-green-500']"></div>
+                                    <span class="text-gray-700">{{ tool.alias }}</span>
+                                    <span v-if="tool.status === 'success'" class="ml-auto text-green-600">✓</span>
+                                    <el-icon v-else class="ml-auto animate-spin text-gray-400"><Loading /></el-icon>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 思考过程 -->
+                        <div v-if="entry.thinking" class="mb-2">
+                            <div class="text-[10px] text-gray-500 font-medium mb-1 uppercase tracking-wider">思考过程</div>
+                            <div class="text-xs text-gray-600 bg-gradient-to-br from-slate-50 to-indigo-50/30 p-2 rounded-lg max-h-40 overflow-y-auto font-mono leading-relaxed whitespace-pre-wrap break-all">
+                                {{ entry.thinking }}
+                                <span v-if="entry.status === 'running'" class="inline-block w-1.5 h-3 bg-indigo-400 animate-pulse ml-0.5 align-middle"></span>
+                            </div>
+                        </div>
+
+                        <!-- 产出结果 -->
+                        <div v-if="entry.result">
+                            <div class="text-[10px] text-gray-500 font-medium mb-1 uppercase tracking-wider">执行产出</div>
+                            <div class="text-xs text-gray-700 bg-white border border-gray-100 p-2 rounded-lg max-h-60 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+                                {{ entry.result }}
+                            </div>
+                        </div>
+
+                        <!-- 空状态 -->
+                        <div v-if="!entry.thinking && !entry.result && entry.tools.length === 0" 
+                            class="text-center text-gray-400 text-xs py-4">
+                            <el-icon class="animate-spin mb-1"><Loading /></el-icon>
+                            <p>Agent 正在启动...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </transition>
     </div>
 </template>
 
@@ -527,7 +800,79 @@ const formatTime = (date: Date | string) => {
     height: 100%;
 }
 
+/* ===== 聊天区域收缩动画 ===== */
+.chat-area-shrink {
+    /* 9:16 ≈ 56.25%，减去左侧侧边栏后的比例 */
+    flex: 0 0 56%;
+    min-width: 0;
+}
 
+/* ===== Agent 面板 ===== */
+.agent-panel {
+    flex: 1;
+    min-width: 320px;
+    max-width: 44%;
+}
+
+/* 面板入场/离场动画 */
+.agent-panel-enter-active {
+    animation: slideInRight 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.agent-panel-leave-active {
+    animation: slideOutRight 0.3s cubic-bezier(0.4, 0, 1, 1);
+}
+
+@keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideOutRight {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+}
+
+/* 活跃 Agent 卡片左侧发光边框 */
+.agent-card-active {
+    border-left: 3px solid #6366f1;
+    background: linear-gradient(135deg, #f8faff 0%, #eef2ff 100%);
+}
+
+/* 高亮联动时的缩放效果 */
+.agent-work-card {
+    transition: all 0.3s ease;
+}
+
+.agent-work-card:hover {
+    box-shadow: 0 2px 12px rgba(99, 102, 241, 0.15);
+}
+
+/* 关闭按钮 */
+.close-panel-btn {
+    border: none;
+    background: transparent;
+    color: #94a3b8;
+}
+
+.close-panel-btn:hover {
+    color: #475569;
+    background: #f1f5f9;
+}
+
+/* ===== 原有样式 ===== */
 .session-item:hover .el-button {
     opacity: 1;
 }

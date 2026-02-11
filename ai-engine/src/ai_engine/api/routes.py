@@ -225,18 +225,19 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
             # 发送初始信息
             yield f"data: {json.dumps({'type': 'meta', 'task_id': task_id, 'trace_id': trace_id})}\n\n"
             
-            # 使用 astream_events 获取详细事件
-            # version="v1" 兼容性更好
+            # 使用 astream_events v2 获取详细事件
+            # v2 支持 on_custom_event（Agent 进场等自定义事件），v1 不支持
             current_node = None
-            async for event in workflow.astream_events(initial_state, config, version="v1"):
+            async for event in workflow.astream_events(initial_state, config, version="v2"):
                 event_type = event["event"]
                 metadata = event.get("metadata", {})
                 node_name = metadata.get("langgraph_node")
                 if node_name:
                     current_node = node_name
                 
-                # 过滤并转换事件
-                # print(f"[Stream] Event: {event_type}, Name: {event.get('name')}")
+                # 调试日志（上线后可注释）
+                if event_type in ["on_custom_event", "on_tool_start", "on_tool_end"]:
+                    print(f"[Stream] Event: {event_type}, Name: {event.get('name')}, Data: {str(event.get('data', ''))[:200]}")
                 
                 if event_type in ["on_node_start", "on_chain_start"]:
                     # 识别节点进入 (astream_events v1 中 node 可能是 chain 也可能是 node)
@@ -298,34 +299,53 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
                     if chunk:
                         content = ""
                         reasoning = ""
-                        # 兼容不同厂商的推理内容 (如 DeepSeek-R1)
-                        if hasattr(chunk, "additional_kwargs") and chunk.additional_kwargs.get("reasoning_content"):
-                            reasoning = chunk.additional_kwargs.get("reasoning_content")
                         
+                        # 1. 提取推理内容 (Reasoning)
+                        # 兼容 Moonshot/DeepSeek 等厂商。LangChain OpenAI 会将其放在 additional_kwargs
+                        if hasattr(chunk, "additional_kwargs"):
+                            reasoning = chunk.additional_kwargs.get("reasoning_content", "")
+                        
+                        # 特殊版本或某些封装可能直接放在 reasoning 字段
+                        if not reasoning and hasattr(chunk, "reasoning"):
+                            reasoning = getattr(chunk, "reasoning", "")
+                        
+                        # 2. 提取文本内容 (Content)
                         if hasattr(chunk, "content"):
                             content = chunk.content
                         elif isinstance(chunk, dict):
                             content = chunk.get("content", "")
                         
                         if content or reasoning:
-                            # 区分思考过程：
-                            # 1. reasoning (思维链) 永远属于 is_thought
-                            # 2. responder 节点的 content 属于最终结果 (is_thought=False)
-                            # 3. intent_recognition 和 planner 的 content 是 JSON，属于结果数据，前端应隐藏
-                            # 4. executor 的 content 通常是 Agent 的思考/动作 (Monologue)，属于 is_thought
+                            # 识别当前节点及其属性
+                            node_name = event.get("metadata", {}).get("langgraph_node") or current_node
                             
-                            node_name = event.get("metadata", {}).get("langgraph_node")
-                            if not node_name:
-                                node_name = current_node
-                            
-                            is_thought = True
+                            is_thought = False
                             is_json = False
                             
-                            if node_name == "responder":
-                                is_thought = False
-                            elif node_name in ["intent_recognition", "planner"]:
+                            # 逻辑 A: 任何显式的『推理流』字段都属于思考过程
+                            if reasoning:
                                 is_thought = True
-                                is_json = True
+                            
+                            # 逻辑 B: 根据节点名处理 content
+                            if node_name == "responder":
+                                # 汇总节点：reasoning 属于思考，content 属于最终结果
+                                if content:
+                                    is_thought = False
+                            elif node_name in ["intent_recognition", "planner", "dispatcher"]:
+                                # 中间解析/调度节点：产生的结构化数据标记为 is_json 隐藏
+                                # dispatcher 输出的是 Agent 名称选择结果，也不应展示
+                                if content:
+                                    is_thought = True
+                                    is_json = True
+                            elif node_name == "executor":
+                                # 执行器节点：Agent 的 Monologue 属于思考过程
+                                if content:
+                                    is_thought = True
+                            else:
+                                # 默认逻辑：如果没有明确节点名，尝试根据是否有 content 来区分
+                                # 参考 Kimi 示例：如果没有 content 只有 reasoning，则是思考中
+                                if reasoning and not content:
+                                    is_thought = True
                                 
                             yield f"data: {json.dumps({
                                 'type': 'token', 
