@@ -66,14 +66,19 @@ const scrollAgentPanelToBottom = async () => {
 
 // 点击聊天区中的 Agent 名称，高亮右侧面板对应条目
 const handleAgentClick = (agentAlias: string, msg?: ChatMessage) => {
-    // 如果消息带有持久化的 Agent 日志，且当前面板为空或版本不一致，则进行恢复
+    // 联动时，重置所有面板内逻辑块的展开状态为收起
+    expandedThinking.value = {}
+
+    // 如果消息带有持久化的 Agent 日志，则进行恢复
     if (msg && msg.agentLog && msg.agentLog.length > 0) {
-        // 如果当前是空或者是历史会话刚刚加载，我们恢复该条消息关联的 Agent 日志
-        // 只有在非运行状态下才覆盖，避免干扰当前正在进行的流
+        // 只有在非运行状态（非当前实时生成）下才覆盖，避免干扰当前正在进行的流
         if (!isLoading.value) {
-            agentWorkEntries.splice(0, agentWorkEntries.length, ...msg.agentLog)
-            // 恢复历史记录时，重置所有展示状态为收起
-            expandedThinking.value = {}
+            const restoredLog = msg.agentLog.map(e => ({
+                ...e,
+                // 历史记录必须标记为已完成，才能触发 CSS 自动收起逻辑
+                status: (e.status === 'running' || !e.status) ? 'success' : e.status
+            }))
+            agentWorkEntries.splice(0, agentWorkEntries.length, ...restoredLog)
         }
     }
 
@@ -157,7 +162,11 @@ const handleSwitchSession = async (sessionId: string) => {
         // 查找最后一条带有 Agent 日志的消息进行恢复，保证刷新后依然有内容
         const lastAssistantMsg = [...chatStore.messages].reverse().find(m => m.role === 'assistant' && m.agentLog && m.agentLog.length > 0)
         if (lastAssistantMsg && lastAssistantMsg.agentLog) {
-            agentWorkEntries.push(...lastAssistantMsg.agentLog)
+            const restoredLog = lastAssistantMsg.agentLog.map(e => ({
+                ...e,
+                status: e.status === 'running' ? 'success' : e.status
+            }))
+            agentWorkEntries.push(...restoredLog)
         }
         
         scrollToBottom()
@@ -321,7 +330,7 @@ const handleSend = async () => {
 
                                 // 向右侧 Agent 面板添加工作条目
                                 const entry: AgentWorkEntry = {
-                                    id: `aw-${Date.now()}`,
+                                    id: `aw-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
                                     agentName,
                                     agentAlias,
                                     status: 'running',
@@ -518,6 +527,39 @@ const formatTime = (date: Date | string) => {
     const d = typeof date === 'string' ? new Date(date) : date
     return d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
 }
+
+// 将扁平的思考过程转化为树状结构 (用于聊天气泡展示)
+const getThoughtTree = (thoughts?: any[]) => {
+    if (!thoughts) return []
+    const tree: any[] = []
+    let lastNode: any = null
+    let lastAgent: any = null
+
+    thoughts.forEach(t => {
+        // 只处理结构化节点
+        if (t.type === 'node_start') {
+            lastNode = { ...t, children: [] }
+            tree.push(lastNode)
+            lastAgent = null
+        } else if (t.type === 'agent_start') {
+            lastAgent = { ...t, children: [] }
+            if (lastNode) {
+                lastNode.children.push(lastAgent)
+            } else {
+                tree.push(lastAgent)
+            }
+        } else if (t.type === 'tool_start') {
+            if (lastAgent) {
+                lastAgent.children.push(t)
+            } else if (lastNode) {
+                lastNode.children.push(t)
+            } else {
+                tree.push(t)
+            }
+        }
+    })
+    return tree
+}
 </script>
 
 <template>
@@ -635,25 +677,43 @@ const formatTime = (date: Date | string) => {
                                         <el-icon class="ml-1 transition-transform" :class="{ 'rotate-180': showThoughts[msg.id || idx] }"><ArrowDown /></el-icon>
                                     </div>
                                     
-                                    <div v-show="showThoughts[msg.id || idx] || msg.status === 'running'" class="mt-2 text-xs space-y-1.5 bg-slate-50 p-2 rounded max-h-48 overflow-y-auto">
-                                        <div v-for="thought in msg.thoughts" :key="thought.id" class="flex items-center">
-                                            <div class="mr-2">
-                                                <div v-if="thought.status === 'running'" class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
-                                                <div v-else-if="thought.type === 'node_start'" class="w-2 h-2 rounded-full bg-purple-400"></div>
-                                                <div v-else-if="thought.type === 'agent_start'" class="w-2 h-2 rounded-full bg-indigo-400"></div>
-                                                <div v-else-if="thought.type === 'tool_start'" class="w-2 h-2 rounded-full bg-amber-400"></div>
-                                                <div v-else class="w-2 h-2 rounded-full bg-green-400"></div>
+                                    <div v-show="showThoughts[msg.id || idx] || msg.status === 'running'" class="mt-2 text-[11px] space-y-1 bg-slate-50/50 p-2.5 rounded-xl max-h-60 overflow-y-auto border border-slate-100/50">
+                                        <!-- 第一层：Node (如 planner, executor) -->
+                                        <div v-for="node in getThoughtTree(msg.thoughts)" :key="node.id" class="thought-node">
+                                            <div class="flex items-center py-0.5">
+                                                <div class="node-dot mr-2" :class="node.status"></div>
+                                                <span class="font-bold text-slate-600 uppercase tracking-tighter">{{ node.title }}</span>
                                             </div>
-                                            <div class="flex-1 min-w-0">
-                                                <!-- Agent 名称可点击：联动右侧面板 -->
-                                                <span 
-                                                    v-if="thought.type === 'agent_start'"
-                                                    class="font-medium text-indigo-600 cursor-pointer hover:underline"
-                                                    @click="handleAgentClick(thought.title, msg)"
-                                                >
-                                                    🤖 {{ thought.title }}
-                                                </span>
-                                                <span v-else class="font-medium text-gray-700 truncate">{{ thought.title }}</span>
+                                            
+                                            <!-- 第二层：Agent (低于 Node 一级) -->
+                                            <div v-if="node.children && node.children.length > 0" class="ml-4 border-l border-slate-200 pl-3 space-y-1 my-1">
+                                                <div v-for="agent in node.children" :key="agent.id" class="thought-agent">
+                                                    <div v-if="agent.type === 'agent_start'">
+                                                        <div class="flex items-center py-0.5">
+                                                            <div class="agent-dot mr-2" :class="agent.status"></div>
+                                                            <span 
+                                                                class="font-semibold text-indigo-600 cursor-pointer hover:underline"
+                                                                @click="handleAgentClick(agent.title, msg)"
+                                                            >
+                                                                {{ agent.title }}
+                                                            </span>
+                                                        </div>
+                                                        
+                                                        <!-- 第三层：Tool (低于 Agent 一级) -->
+                                                        <div v-if="agent.children && agent.children.length > 0" class="ml-4 border-l border-slate-200 pl-3 space-y-1 my-1">
+                                                            <div v-for="tool in agent.children" :key="tool.id" class="flex items-center py-0.5 thought-tool">
+                                                                <div class="tool-dot mr-2" :class="tool.status"></div>
+                                                                <span class="text-slate-500 italic">{{ tool.title }}</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <!-- 处理 Node 下直接包含 Tool 的情况 -->
+                                                    <div v-else class="flex items-center py-0.5">
+                                                        <div class="tool-dot mr-2" :class="agent.status"></div>
+                                                        <span class="text-slate-500 italic">{{ agent.title }}</span>
+                                                    </div>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -788,12 +848,12 @@ const formatTime = (date: Date | string) => {
                                     <button 
                                         v-if="entry.status !== 'running'"
                                         class="ap-toggle-btn"
-                                        @click="expandedThinking[entry.id || entry.agentName] = !expandedThinking[entry.id || entry.agentName]"
+                                        @click="expandedThinking[entry.id] = !expandedThinking[entry.id]"
                                     >
-                                        {{ expandedThinking[entry.id || entry.agentName] ? '收起更多记录' : '展开全文' }}
+                                        {{ expandedThinking[entry.id] ? '收起更多记录' : '展开全文' }}
                                     </button>
                                 </div>
-                                <div :class="['ap-thought-text-flat', { 'is-collapsed': entry.status !== 'running' && !expandedThinking[entry.id || entry.agentName] }]">
+                                <div :class="['ap-thought-text-flat', { 'is-collapsed': entry.status !== 'running' && !expandedThinking[entry.id] }]">
                                     {{ entry.thinking }}
                                     <span v-if="entry.status === 'running'" class="ap-cursor-flat">_</span>
                                 </div>
@@ -950,8 +1010,8 @@ const formatTime = (date: Date | string) => {
     transition: max-height 0.4s ease-out;
 }
 .ap-thought-text-flat.is-collapsed {
-    max-height: 4.8em; /* 约三行高度 */
-    overflow: hidden;
+    max-height: 4.8em !important; /* 约三行高度 */
+    overflow: hidden !important;
     mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
     -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
 }
@@ -988,6 +1048,17 @@ const formatTime = (date: Date | string) => {
 .send-btn:hover { background-color: #1a5ac1; border-color: #1a5ac1; }
 .animate-bounce { animation: bounce 1s infinite; }
 @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+/* ===== 思考过程树状样式 ===== */
+.node-dot, .agent-dot, .tool-dot { width: 6px; height: 6px; border-radius: 50%; }
+.node-dot.running, .agent-dot.running, .tool-dot.running { background: #3b82f6; animation: pulse 1.5s infinite; }
+.node-dot { background: #a855f7; } /* 紫色 Node */
+.agent-dot { background: #6366f1; } /* 靛青 Agent */
+.tool-dot { background: #f59e0b; } /* 橙色 Tool */
+.node-dot.success, .agent-dot.success, .tool-dot.success { background: #10b981; }
+
+.thought-node { margin-top: 4px; }
+.thought-node:first-child { margin-top: 0; }
+
 .delay-150 { animation-delay: 0.15s; }
 .delay-300 { animation-delay: 0.3s; }
 </style>
