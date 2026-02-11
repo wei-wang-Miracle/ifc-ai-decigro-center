@@ -52,7 +52,8 @@ public class AiChatServiceImpl implements AiChatService {
         @Override
         public List<Map<String, Object>> getMessages(String sessionId) {
                 return jdbcTemplate.queryForList(
-                                "SELECT id, session_id, task_id, trace_id, role, content, thought_log, create_time " +
+                                "SELECT id, session_id, task_id, trace_id, role, content, thought_log, agent_log, create_time "
+                                                +
                                                 "FROM ai_chat_message WHERE session_id = ? ORDER BY create_time ASC",
                                 sessionId);
         }
@@ -61,15 +62,16 @@ public class AiChatServiceImpl implements AiChatService {
         @Transactional
         public void saveMessage(SaveMessageRequest request) {
                 jdbcTemplate.update(
-                                "INSERT INTO ai_chat_message (session_id, task_id, trace_id, role, content, thought_log, create_time) "
+                                "INSERT INTO ai_chat_message (session_id, task_id, trace_id, role, content, thought_log, agent_log, create_time) "
                                                 +
-                                                "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                                                "VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
                                 request.getSessionId(),
                                 request.getTaskId(),
                                 request.getTraceId(),
                                 request.getRole(),
                                 request.getContent(),
-                                request.getThoughtLog());
+                                request.getThoughtLog(),
+                                request.getAgentLog());
 
                 // 同时更新会话的 update_time
                 jdbcTemplate.update(

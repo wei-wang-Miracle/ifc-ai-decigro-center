@@ -16,6 +16,8 @@ const scrollContainer = ref<HTMLElement | null>(null)
 const agentPanelScroll = ref<HTMLElement | null>(null)
 // 控制思考过程展开/收起
 const showThoughts = ref<Record<string, boolean>>({})
+// 控制 Agent 面板中思考过程的展开/收起
+const expandedThinking = ref<Record<string, boolean>>({})
 
 // ===== Agent 工作面板相关 =====
 
@@ -63,7 +65,18 @@ const scrollAgentPanelToBottom = async () => {
 }
 
 // 点击聊天区中的 Agent 名称，高亮右侧面板对应条目
-const handleAgentClick = (agentAlias: string) => {
+const handleAgentClick = (agentAlias: string, msg?: ChatMessage) => {
+    // 如果消息带有持久化的 Agent 日志，且当前面板为空或版本不一致，则进行恢复
+    if (msg && msg.agentLog && msg.agentLog.length > 0) {
+        // 如果当前是空或者是历史会话刚刚加载，我们恢复该条消息关联的 Agent 日志
+        // 只有在非运行状态下才覆盖，避免干扰当前正在进行的流
+        if (!isLoading.value) {
+            agentWorkEntries.splice(0, agentWorkEntries.length, ...msg.agentLog)
+            // 恢复历史记录时，重置所有展示状态为收起
+            expandedThinking.value = {}
+        }
+    }
+
     highlightedAgent.value = agentAlias
     // 如果面板未展开，自动展开
     if (!agentPanelVisible.value) {
@@ -103,7 +116,7 @@ onMounted(async () => {
     await chatStore.fetchSessions()
     // 如果有会话，自动选中第一个
     if (chatStore.sessions.length > 0) {
-        await chatStore.switchSession(chatStore.sessions[0].sessionId)
+        await handleSwitchSession(chatStore.sessions[0].sessionId)
     }
 })
 
@@ -136,9 +149,17 @@ const handleDeleteSession = async (sessionId: string) => {
 const handleSwitchSession = async (sessionId: string) => {
     if (sessionId !== chatStore.currentSessionId) {
         await chatStore.switchSession(sessionId)
-        // 切换会话时清理 Agent 面板
+        // 切换会话时清理 Agent 面板，但尝试从历史消息中恢复最后一次 Agent 活动
         agentPanelVisible.value = false
         agentWorkEntries.splice(0)
+        expandedThinking.value = {}
+
+        // 查找最后一条带有 Agent 日志的消息进行恢复，保证刷新后依然有内容
+        const lastAssistantMsg = [...chatStore.messages].reverse().find(m => m.role === 'assistant' && m.agentLog && m.agentLog.length > 0)
+        if (lastAssistantMsg && lastAssistantMsg.agentLog) {
+            agentWorkEntries.push(...lastAssistantMsg.agentLog)
+        }
+        
         scrollToBottom()
     }
 }
@@ -162,6 +183,7 @@ const handleSend = async () => {
     // 每次新消息清理上一轮的 Agent 面板数据
     agentPanelVisible.value = false
     agentWorkEntries.splice(0)
+    expandedThinking.value = {}
     activeAgentName.value = null
     
     // 添加用户消息
@@ -435,7 +457,8 @@ const handleSend = async () => {
                                     traceId: aiMessage.traceId,
                                     role: 'assistant',
                                     content: event.message,
-                                    thoughts: aiMessage.thoughts
+                                    thoughts: aiMessage.thoughts,
+                                    agentLog: [...agentWorkEntries]
                                 })
 
                                 if (event.status === 'completed') {
@@ -626,7 +649,7 @@ const formatTime = (date: Date | string) => {
                                                 <span 
                                                     v-if="thought.type === 'agent_start'"
                                                     class="font-medium text-indigo-600 cursor-pointer hover:underline"
-                                                    @click="handleAgentClick(thought.title)"
+                                                    @click="handleAgentClick(thought.title, msg)"
                                                 >
                                                     🤖 {{ thought.title }}
                                                 </span>
@@ -695,10 +718,10 @@ const formatTime = (date: Date | string) => {
             </div>
         </div>
 
-        <!-- ====== 右侧 Agent 工作面板（拟人化汇报风格）====== -->
+        <!-- ====== 右侧 Agent 工作面板 ====== -->
         <transition name="agent-panel">
             <div v-if="agentPanelVisible" class="agent-panel flex flex-col overflow-hidden">
-                <!-- 面板头部：简洁的工牌条 -->
+                <!-- 面板头部：回滚至深受喜欢的工牌条风格 -->
                 <div class="ap-header">
                     <div class="ap-header-left">
                         <div class="ap-header-icon">
@@ -712,14 +735,11 @@ const formatTime = (date: Date | string) => {
                     <button class="ap-close-btn" @click="closeAgentPanel" title="关闭面板">✕</button>
                 </div>
 
-                <!-- 面板内容：拟人化对话流 -->
-                <div ref="agentPanelScroll" class="ap-scroll">
+                <!-- 面板内容：结构化流 -->
+                <div ref="agentPanelScroll" class="ap-scroll-flat">
                     <!-- 空状态 -->
-                    <div v-if="agentWorkEntries.length === 0" class="ap-empty">
-                        <div class="ap-empty-avatar">
-                            <img src="https://api.dicebear.com/9.x/notionists/svg?seed=waiting" alt="等待中" />
-                        </div>
-                        <p class="ap-empty-text">等待同事加入协作...</p>
+                    <div v-if="agentWorkEntries.length === 0" class="ap-empty-flat">
+                        <p>等待指令分发...</p>
                     </div>
 
                     <!-- Agent 汇报条目 -->
@@ -727,65 +747,67 @@ const formatTime = (date: Date | string) => {
                         v-for="entry in agentWorkEntries" 
                         :key="entry.id"
                         :id="`agent-entry-${entry.agentAlias}`"
-                        :class="['ap-entry', { 'ap-entry-highlight': highlightedAgent === entry.agentAlias }]"
+                        :class="['ap-entry-flat', { 'ap-entry-highlight': highlightedAgent === entry.agentAlias }]"
                     >
-                        <!-- Agent 身份区：头像 + 名称 + 状态 -->
-                        <div class="ap-identity">
-                            <div class="ap-avatar-wrap">
-                                <img 
-                                    :src="`https://api.dicebear.com/9.x/notionists/svg?seed=${entry.agentName}`" 
-                                    :alt="entry.agentAlias"
-                                    class="ap-avatar-img"
-                                />
-                                <!-- 呼吸灯状态指示 -->
-                                <div :class="['ap-status-dot', entry.status === 'running' ? 'ap-dot-active' : 'ap-dot-done']"></div>
-                            </div>
-                            <div class="ap-name-area">
-                                <div class="ap-name">{{ entry.agentAlias }}</div>
-                                <div class="ap-role">{{ entry.agentName }}</div>
-                            </div>
-                            <div :class="['ap-status-tag', entry.status === 'running' ? 'ap-tag-working' : 'ap-tag-done']">
-                                {{ entry.status === 'running' ? '工作中' : '已完成' }}
+                        <!-- 身份区：极简水平排版 -->
+                        <div class="ap-id-flat">
+                            <img 
+                                :src="`https://api.dicebear.com/9.x/notionists/svg?seed=${entry.agentName}`" 
+                                class="ap-avatar-flat"
+                            />
+                            <div class="ap-info-flat">
+                                <div class="ap-name-wrap">
+                                    <span class="ap-name-main">{{ entry.agentAlias }}</span>
+                                    <span class="ap-name-tag">{{ entry.agentName }}</span>
+                                </div>
+                                <div class="ap-status-line">
+                                    <span :class="['ap-indicator', entry.status === 'running' ? 'is-running' : 'is-done']"></span>
+                                    <span class="ap-status-text">{{ entry.status === 'running' ? '正在执行任务' : '执行已终结' }}</span>
+                                </div>
                             </div>
                         </div>
 
-                        <!-- 汇报气泡区 -->
-                        <div class="ap-bubble-area">
-                            <!-- 工具调用汇报 -->
-                            <div v-if="entry.tools.length > 0" class="ap-bubble">
-                                <div class="ap-bubble-label">📋 我正在使用以下工具：</div>
-                                <div class="ap-tool-list">
-                                    <div v-for="(tool, tidx) in entry.tools" :key="tidx" class="ap-tool-item">
-                                        <div :class="['ap-tool-dot', tool.status === 'running' ? 'ap-tool-running' : 'ap-tool-done']"></div>
-                                        <span class="ap-tool-name">{{ tool.alias }}</span>
-                                        <span v-if="tool.status === 'success'" class="ap-tool-check">✓ 已完成</span>
-                                        <span v-else class="ap-tool-working">
-                                            <span class="ap-dots-anim">···</span>
-                                        </span>
+                        <!-- 结构化任务流 -->
+                        <div class="ap-flow-flat">
+                            <!-- 工具调用 -->
+                            <div v-if="entry.tools.length > 0" class="ap-section-flat">
+                                <div class="ap-section-head">调用 / TOOLS</div>
+                                <div class="ap-tool-box-flat">
+                                    <div v-for="(tool, tidx) in entry.tools" :key="tidx" class="ap-tool-item-flat">
+                                        <span :class="['ap-tool-status', tool.status === 'running' ? 'is-tool-running' : 'is-tool-done']"></span>
+                                        <span class="ap-tool-label">{{ tool.alias }}</span>
+                                        <span v-if="tool.status === 'success'" class="ap-tool-result-tag">OK</span>
                                     </div>
                                 </div>
                             </div>
 
-                            <!-- 思考过程汇报 -->
-                            <div v-if="entry.thinking" class="ap-bubble ap-bubble-thinking">
-                                <div class="ap-bubble-label">💭 我的思路：</div>
-                                <div class="ap-thinking-content">
+                            <!-- 思考内容：弱化显示 & 完成后自动折叠 -->
+                            <div v-if="entry.thinking" class="ap-section-flat has-thought">
+                                <div class="ap-section-head flex justify-between items-center group">
+                                    <span>逻辑 / THINKING</span>
+                                    <button 
+                                        v-if="entry.status !== 'running'"
+                                        class="ap-toggle-btn"
+                                        @click="expandedThinking[entry.id || entry.agentName] = !expandedThinking[entry.id || entry.agentName]"
+                                    >
+                                        {{ expandedThinking[entry.id || entry.agentName] ? '收起更多记录' : '展开全文' }}
+                                    </button>
+                                </div>
+                                <div :class="['ap-thought-text-flat', { 'is-collapsed': entry.status !== 'running' && !expandedThinking[entry.id || entry.agentName] }]">
                                     {{ entry.thinking }}
-                                    <span v-if="entry.status === 'running'" class="ap-cursor"></span>
+                                    <span v-if="entry.status === 'running'" class="ap-cursor-flat">_</span>
                                 </div>
                             </div>
 
-                            <!-- 最终产出汇报 -->
-                            <div v-if="entry.result" class="ap-bubble ap-bubble-result">
-                                <div class="ap-bubble-label">✅ 汇报结果：</div>
-                                <div class="ap-result-content">{{ entry.result }}</div>
+                            <!-- 执行结果 -->
+                            <div v-if="entry.result" class="ap-section-flat has-result">
+                                <div class="ap-section-head">汇总 / REPORT</div>
+                                <div class="ap-result-text-flat">{{ entry.result }}</div>
                             </div>
 
-                            <!-- 空状态：刚进场 -->
-                            <div v-if="!entry.thinking && !entry.result && entry.tools.length === 0" class="ap-bubble ap-bubble-entering">
-                                <div class="ap-entering-text">
-                                    <span class="ap-wave">👋</span> 我来了，正在准备工作...
-                                </div>
+                            <!-- 启动占位 -->
+                            <div v-if="!entry.thinking && !entry.result && entry.tools.length === 0" class="ap-section-waiting">
+                                初始化环境中...
                             </div>
                         </div>
                     </div>
@@ -800,51 +822,40 @@ const formatTime = (date: Date | string) => {
     height: 100%;
 }
 
-/* ===== 聊天区域收缩动画 ===== */
+/* ===== 布局收缩 ===== */
 .chat-area-shrink {
-    flex: 0 0 56%;
+    flex: 0 0 54%;
     min-width: 0;
 }
 
-/* ===== Agent 面板整体 ===== */
+/* ===== Agent 面板 ===== */
 .agent-panel {
     flex: 1;
-    min-width: 320px;
-    max-width: 44%;
-    background: #f8f9fb;
-    border-left: 1px solid #e8ecf1;
+    min-width: 340px;
+    max-width: 46%;
+    background: #ffffff;
+    border-left: 1px solid #f0f0f0;
 }
 
-/* 面板入场/离场动画 */
-.agent-panel-enter-active {
-    animation: slideInRight 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.agent-panel-leave-active {
-    animation: slideOutRight 0.3s cubic-bezier(0.4, 0, 1, 1);
-}
+.agent-panel-enter-active { animation: slideIn 0.3s ease-out; }
+.agent-panel-leave-active { animation: slideOut 0.2s ease-in; }
 
-@keyframes slideInRight {
-    from { transform: translateX(100%); opacity: 0; }
-    to   { transform: translateX(0); opacity: 1; }
-}
-@keyframes slideOutRight {
-    from { transform: translateX(0); opacity: 1; }
-    to   { transform: translateX(100%); opacity: 0; }
-}
+@keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes slideOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(20px); opacity: 0; } }
 
-/* === 面板头部 === */
+/* === 面板头部：工牌卡片风格 === */
 .ap-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 16px;
+    padding: 14px 20px;
     background: #fff;
     border-bottom: 1px solid #eaeef3;
 }
 .ap-header-left {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
 }
 .ap-header-icon {
     width: 32px;
@@ -865,7 +876,6 @@ const formatTime = (date: Date | string) => {
 .ap-header-sub {
     font-size: 11px;
     color: #94a3b8;
-    font-family: 'Inter', sans-serif;
 }
 .ap-close-btn {
     width: 28px;
@@ -876,383 +886,108 @@ const formatTime = (date: Date | string) => {
     color: #94a3b8;
     cursor: pointer;
     font-size: 14px;
-    transition: all 0.2s;
     display: flex;
     align-items: center;
     justify-content: center;
+    transition: background 0.2s;
 }
 .ap-close-btn:hover {
     background: #f1f5f9;
     color: #475569;
 }
 
-/* === 滚动区 === */
-.ap-scroll {
-    flex: 1;
-    overflow-y: auto;
-    padding: 16px;
-}
+/* === 滚动与内容 === */
+.ap-scroll-flat { flex: 1; overflow-y: auto; padding: 24px; }
+.ap-empty-flat { text-align: center; margin-top: 100px; color: #ccc; font-size: 12px; }
 
-/* === 空状态 === */
-.ap-empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 60px 0;
-    gap: 16px;
-}
-.ap-empty-avatar {
-    width: 80px;
-    height: 80px;
-    background: #fff;
-    border: 1px solid #e8ecf1;
-    border-radius: 16px;
-    padding: 10px;
-    opacity: 0.5;
-}
-.ap-empty-avatar img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-}
-.ap-empty-text {
-    font-size: 13px;
-    color: #b0b8c9;
-}
+.ap-entry-flat { margin-bottom: 40px; transition: opacity 0.3s; }
 
-/* === Agent 汇报条目 === */
-.ap-entry {
-    margin-bottom: 20px;
-    transition: all 0.3s ease;
-}
-.ap-entry-highlight .ap-identity {
-    background: #fefce8;
-    border-color: #fde68a;
-}
+/* 身份区 */
+.ap-id-flat { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.ap-avatar-flat { width: 32px; height: 32px; border-radius: 6px; background: #f5f7f9; }
+.ap-info-flat { flex: 1; }
+.ap-name-wrap { display: flex; align-items: baseline; gap: 8px; }
+.ap-name-main { font-size: 15px; font-weight: 700; color: #111; }
+.ap-name-tag { font-size: 10px; color: #aaa; font-family: monospace; }
+.ap-status-line { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+.ap-indicator { width: 6px; height: 6px; border-radius: 50%; }
+.is-running { background: #00c853; animation: pulse 1.5s infinite; }
+.is-done { background: #e0e0e0; }
+@keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+.ap-status-text { font-size: 11px; color: #888; }
 
-/* === Agent 身份区 === */
-.ap-identity {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: #fff;
-    border: 1px solid #e8ecf1;
-    border-radius: 14px;
-    padding: 10px 14px;
-    margin-bottom: 8px;
-    transition: all 0.3s ease;
-}
-.ap-avatar-wrap {
-    position: relative;
-    flex-shrink: 0;
-}
-.ap-avatar-img {
-    width: 40px;
-    height: 40px;
-    border-radius: 10px;
-    background: #f8f9fb;
-    border: 1px solid #e8ecf1;
-    object-fit: contain;
-    image-rendering: auto;
-}
-/* 呼吸灯 */
-.ap-status-dot {
-    position: absolute;
-    bottom: -1px;
-    right: -1px;
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    border: 2px solid #fff;
-}
-.ap-dot-active {
-    background: #22c55e;
-    animation: breathe 2s ease-in-out infinite;
-}
-.ap-dot-done {
-    background: #94a3b8;
-}
-
-@keyframes breathe {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
-    50%      { box-shadow: 0 0 0 5px rgba(34, 197, 94, 0); }
-}
-
-.ap-name-area {
-    flex: 1;
-    min-width: 0;
-}
-.ap-name {
-    font-size: 14px;
-    font-weight: 700;
-    color: #1a202c;
-    letter-spacing: -0.3px;
-    line-height: 1.2;
-}
-.ap-role {
-    font-size: 11px;
-    color: #94a3b8;
-    font-family: 'JetBrains Mono', monospace;
-    letter-spacing: 0.3px;
-}
-
-/* 状态标签 */
-.ap-status-tag {
+/* 流程执行区 */
+.ap-flow-flat { border-left: 1px solid #f0f0f0; padding-left: 16px; margin-left: 15px; }
+.ap-section-flat { margin-bottom: 24px; }
+.ap-section-head {
     font-size: 10px;
+    color: #bbb;
     font-weight: 700;
-    padding: 3px 8px;
-    border-radius: 6px;
+    margin-bottom: 10px;
     letter-spacing: 0.5px;
-    flex-shrink: 0;
-}
-.ap-tag-working {
-    background: #ecfdf5;
-    color: #059669;
-    border: 1px solid #a7f3d0;
-}
-.ap-tag-done {
-    background: #f1f5f9;
-    color: #64748b;
-    border: 1px solid #e2e8f0;
 }
 
-/* === 汇报气泡区 === */
-.ap-bubble-area {
-    padding-left: 24px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    position: relative;
-}
-/* 左侧连接线 */
-.ap-bubble-area::before {
-    content: '';
-    position: absolute;
-    left: 19px;
-    top: 0;
-    bottom: 8px;
-    width: 1px;
-    background: repeating-linear-gradient(
-        to bottom,
-        #d1d9e6 0px,
-        #d1d9e6 4px,
-        transparent 4px,
-        transparent 8px
-    );
-}
+/* 工具 */
+.ap-tool-box-flat { display: flex; flex-wrap: wrap; gap: 8px; }
+.ap-tool-item-flat { display: flex; align-items: center; gap: 6px; background: #f8f8f8; padding: 4px 10px; border-radius: 4px; font-size: 11px; }
+.ap-tool-status { width: 8px; height: 2px; background: #ddd; }
+.is-tool-running { background: #f59e0b; width: 12px; }
+.is-tool-done { background: #111; width: 12px; }
+.ap-tool-label { color: #666; font-weight: 500; }
+.ap-tool-result-tag { font-size: 9px; color: #00c853; font-weight: 900; }
 
-/* 通用气泡 */
-.ap-bubble {
-    background: #fff;
-    border: 1px solid #e8ecf1;
-    border-radius: 0 12px 12px 12px;
-    padding: 10px 14px;
-    position: relative;
+/* 思考流（弱化显示 & 折叠） */
+.ap-section-flat.has-thought {
+    border-left: 2px solid #e2e8f0;
+    padding-left: 12px;
+    margin-left: -1px;
+}
+.ap-thought-text-flat {
     font-size: 13px;
+    color: #94a3b8; /* 字体颜色弱化 */
     line-height: 1.6;
-    color: #374151;
+    white-space: pre-wrap;
+    transition: max-height 0.4s ease-out;
+}
+.ap-thought-text-flat.is-collapsed {
+    max-height: 4.8em; /* 约三行高度 */
+    overflow: hidden;
+    mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+}
+.ap-toggle-btn {
+    font-size: 10px;
+    color: #3b82f6;
+    background: transparent;
+    border: 1px solid #dbeafe;
+    padding: 1px 6px;
+    border-radius: 4px;
+    cursor: pointer;
     transition: all 0.2s;
 }
-.ap-bubble:hover {
-    border-color: #cbd5e1;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-}
-.ap-bubble-label {
-    font-size: 11px;
-    font-weight: 700;
-    color: #64748b;
-    margin-bottom: 6px;
-}
+.ap-toggle-btn:hover { background: #eff6ff; }
+.ap-cursor-flat { color: #94a3b8; font-weight: 900; animation: blink 0.8s infinite; }
+@keyframes blink { 50% { opacity: 0; } }
 
-/* 工具列表 */
-.ap-tool-list {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+/* 结果流 */
+.ap-section-flat.has-result {
+    border-left: 2px solid #111;
+    padding-left: 12px;
+    margin-left: -1px;
 }
-.ap-tool-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    padding: 4px 8px;
-    background: #f8f9fb;
-    border-radius: 6px;
-}
-.ap-tool-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    flex-shrink: 0;
-}
-.ap-tool-running {
-    background: #f59e0b;
-    animation: breathe-amber 1.5s ease-in-out infinite;
-}
-.ap-tool-done {
-    background: #22c55e;
-}
+.ap-result-text-flat { font-size: 13px; color: #111; font-weight: 250; line-height: 1.6; }
 
-@keyframes breathe-amber {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
-    50%      { box-shadow: 0 0 0 3px rgba(245, 158, 11, 0); }
-}
+.ap-section-waiting { font-size: 12px; color: #ccc; font-style: italic; }
 
-.ap-tool-name {
-    flex: 1;
-    color: #374151;
-    font-weight: 500;
-}
-.ap-tool-check {
-    font-size: 10px;
-    color: #059669;
-    font-weight: 600;
-}
-.ap-tool-working {
-    font-size: 10px;
-    color: #94a3b8;
-}
-
-/* 思考气泡 */
-.ap-bubble-thinking {
-    background: #fffbeb;
-    border-color: #fde68a;
-}
-.ap-thinking-content {
-    font-size: 12px;
-    color: #78716c;
-    max-height: 160px;
-    overflow-y: auto;
-    white-space: pre-wrap;
-    word-break: break-all;
-    line-height: 1.7;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-}
-
-/* 打字光标 */
-.ap-cursor {
-    display: inline-block;
-    width: 2px;
-    height: 14px;
-    background: #92400e;
-    margin-left: 2px;
-    vertical-align: text-bottom;
-    animation: blink 0.8s steps(1) infinite;
-}
-@keyframes blink {
-    0%, 100% { opacity: 1; }
-    50%      { opacity: 0; }
-}
-
-/* 产出气泡 */
-.ap-bubble-result {
-    background: #f0fdf4;
-    border-color: #bbf7d0;
-}
-.ap-result-content {
-    font-size: 12px;
-    color: #1a202c;
-    max-height: 240px;
-    overflow-y: auto;
-    white-space: pre-wrap;
-    line-height: 1.7;
-}
-
-/* 进场占位 */
-.ap-bubble-entering {
-    background: #fff;
-    border-style: dashed;
-    border-color: #d1d9e6;
-    text-align: center;
-    padding: 14px;
-}
-.ap-entering-text {
-    font-size: 13px;
-    color: #94a3b8;
-    font-weight: 500;
-}
-.ap-wave {
-    display: inline-block;
-    animation: wave 1.8s ease-in-out infinite;
-    transform-origin: 70% 70%;
-}
-@keyframes wave {
-    0%, 100% { transform: rotate(0deg); }
-    15%      { transform: rotate(14deg); }
-    30%      { transform: rotate(-8deg); }
-    45%      { transform: rotate(14deg); }
-    60%      { transform: rotate(-4deg); }
-    75%      { transform: rotate(10deg); }
-    100%     { transform: rotate(0deg); }
-}
-
-/* 省略号动画 */
-.ap-dots-anim {
-    display: inline-block;
-    animation: dots-blink 1.4s steps(4, end) infinite;
-    font-weight: 700;
-    letter-spacing: 1px;
-}
-@keyframes dots-blink {
-    0%  { content: ''; opacity: 0.3; }
-    25% { opacity: 0.6; }
-    50% { opacity: 1; }
-    75% { opacity: 0.6; }
-    100%{ opacity: 0.3; }
-}
-
-/* ===== 原有样式 ===== */
-.session-item:hover .el-button {
-    opacity: 1;
-}
-
-.chat-input :deep(.el-textarea__inner) {
-    background-color: transparent;
-    border: none;
-    box-shadow: none;
-    padding-top: 8px;
-    padding-bottom: 8px;
-    font-size: 14px;
-}
-
-.btn-suggest {
-    padding: 6px 14px;
-    background: white;
-    border: 1px solid #E2E8F0;
-    border-radius: 10px;
-    font-size: 12px;
-    color: #475569;
-    transition: all 0.2s;
-}
-
-.btn-suggest:hover {
-    border-color: #174EA6;
-    color: #174EA6;
-    background: #f0f7ff;
-}
-
-.send-btn {
-    width: 36px;
-    height: 36px;
-    background-color: #174EA6;
-    border-color: #174EA6;
-}
-
-.send-btn:hover {
-    background-color: #1a5ac1;
-    border-color: #1a5ac1;
-}
-
-.animate-bounce {
-    animation: bounce 1s infinite;
-}
-
-@keyframes bounce {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-4px); }
-}
-
+/* ===== 原有样式适配 ===== */
+.session-item:hover .el-button { opacity: 1; }
+.chat-input :deep(.el-textarea__inner) { background-color: transparent; border: none; box-shadow: none; padding: 8px 0; font-size: 14px; }
+.btn-suggest { padding: 6px 14px; background: white; border: 1px solid #E2E8F0; border-radius: 10px; font-size: 12px; color: #475569; transition: all 0.2s; }
+.btn-suggest:hover { border-color: #174EA6; color: #174EA6; background: #f0f7ff; }
+.send-btn { width: 36px; height: 36px; background-color: #174EA6; border-color: #174EA6; }
+.send-btn:hover { background-color: #1a5ac1; border-color: #1a5ac1; }
+.animate-bounce { animation: bounce 1s infinite; }
+@keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
 .delay-150 { animation-delay: 0.15s; }
 .delay-300 { animation-delay: 0.3s; }
 </style>

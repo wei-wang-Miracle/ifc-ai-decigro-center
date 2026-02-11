@@ -4,7 +4,7 @@ import { RouterView, useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '../stores/user'
 import { useAppStore } from '../stores/app'
 import { ArrowRight, User, Lock, SwitchButton, Calendar, Stamp, List, OfficeBuilding, Monitor, ArrowDown, PriceTag, Box, Cpu, DataAnalysis, Fold, Expand, Promotion } from '@element-plus/icons-vue'
-import AIChat from '../components/AIChat.vue'
+
 
 const router = useRouter()
 const route = useRoute()
@@ -145,7 +145,7 @@ const breadcrumbs = computed(() => {
 
     <div class="flex-1 flex flex-col bg-slate-50 relative overflow-hidden">
         <!-- AI 助手挂件 -->
-        <AIChat />
+
         
         <!-- 头部: 带实时时钟和用户中心 -->
         <header class="h-16 bg-white/80 backdrop-blur-md border-b border-gray-100 flex items-center justify-between px-6 z-10 flex-shrink-0">

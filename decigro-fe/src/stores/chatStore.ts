@@ -46,6 +46,7 @@ export interface ChatMessage {
   status?: string;
   requireReview?: boolean;
   thoughts?: ThoughtItem[];
+  agentLog?: any[];
 }
 
 export const useChatStore = defineStore("chat", () => {
@@ -150,7 +151,8 @@ export const useChatStore = defineStore("chat", () => {
           role: item.role,
           content: item.content,
           createTime: new Date(item.create_time),
-          thoughts: item.thought_log ? JSON.parse(item.thought_log) : undefined
+          thoughts: item.thought_log ? JSON.parse(item.thought_log) : undefined,
+          agentLog: item.agent_log ? JSON.parse(item.agent_log) : undefined
         }));
       }
     } catch (error) {
@@ -202,12 +204,16 @@ export const useChatStore = defineStore("chat", () => {
     role: string;
     content: string;
     thoughts?: ThoughtItem[];
+    agentLog?: any[];
   }) {
     try {
       await request.post("/ai/chat/messages", {
         ...message,
         thoughtLog: message.thoughts
           ? JSON.stringify(message.thoughts)
+          : undefined,
+        agentLog: message.agentLog
+          ? JSON.stringify(message.agentLog)
           : undefined,
       });
     } catch (error) {
