@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, nextTick, onMounted, computed, reactive } from 'vue'
-import { Promotion, Warning, ChatLineRound, Plus, Delete, ChatDotSquare, Operation, Loading, ArrowDown, Close } from '@element-plus/icons-vue'
+import { Promotion, Warning, ChatLineRound, Plus, Delete, ChatDotSquare, Operation, Loading, ArrowDown } from '@element-plus/icons-vue'
 import aiRequest from '../../utils/aiRequest'
 import { useUserStore } from '../../stores/user'
 import { useChatStore, type ChatMessage } from '../../stores/chatStore'
@@ -695,98 +695,98 @@ const formatTime = (date: Date | string) => {
             </div>
         </div>
 
-        <!-- ====== 右侧 Agent 工作面板 ====== -->
+        <!-- ====== 右侧 Agent 工作面板（拟人化汇报风格）====== -->
         <transition name="agent-panel">
-            <div v-if="agentPanelVisible" class="agent-panel border-l border-gray-200 bg-slate-50 flex flex-col overflow-hidden">
-                <!-- 面板头部 -->
-                <div class="px-4 py-3 border-b bg-white flex items-center justify-between">
-                    <div class="flex items-center space-x-2">
-                        <div class="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center">
-                            <span class="text-sm">🤖</span>
+            <div v-if="agentPanelVisible" class="agent-panel flex flex-col overflow-hidden">
+                <!-- 面板头部：简洁的工牌条 -->
+                <div class="ap-header">
+                    <div class="ap-header-left">
+                        <div class="ap-header-icon">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                         </div>
                         <div>
-                            <h3 class="text-sm font-bold text-gray-800">Agent 工作台</h3>
-                            <p class="text-[10px] text-gray-400">智能体思考与执行过程</p>
+                            <div class="ap-header-title">协作面板</div>
+                            <div class="ap-header-sub">{{ agentWorkEntries.length }} 位同事参与中</div>
                         </div>
                     </div>
-                    <el-button :icon="Close" circle size="small" @click="closeAgentPanel" class="close-panel-btn" />
+                    <button class="ap-close-btn" @click="closeAgentPanel" title="关闭面板">✕</button>
                 </div>
 
-                <!-- 面板内容：Agent 工作条目列表 -->
-                <div ref="agentPanelScroll" class="flex-1 overflow-y-auto p-3 space-y-3">
-                    <div v-if="agentWorkEntries.length === 0" class="text-center text-gray-400 text-xs py-12">
-                        等待 Agent 进场...
+                <!-- 面板内容：拟人化对话流 -->
+                <div ref="agentPanelScroll" class="ap-scroll">
+                    <!-- 空状态 -->
+                    <div v-if="agentWorkEntries.length === 0" class="ap-empty">
+                        <div class="ap-empty-avatar">
+                            <img src="https://api.dicebear.com/9.x/notionists/svg?seed=waiting" alt="等待中" />
+                        </div>
+                        <p class="ap-empty-text">等待同事加入协作...</p>
                     </div>
 
+                    <!-- Agent 汇报条目 -->
                     <div 
                         v-for="entry in agentWorkEntries" 
                         :key="entry.id"
                         :id="`agent-entry-${entry.agentAlias}`"
-                        :class="[
-                            'agent-work-card rounded-xl p-3 border transition-all duration-300',
-                            highlightedAgent === entry.agentAlias 
-                                ? 'border-indigo-400 bg-indigo-50 ring-2 ring-indigo-200 shadow-md' 
-                                : 'border-gray-200 bg-white shadow-sm',
-                            entry.status === 'running' ? 'agent-card-active' : ''
-                        ]"
+                        :class="['ap-entry', { 'ap-entry-highlight': highlightedAgent === entry.agentAlias }]"
                     >
-                        <!-- Agent 头部 -->
-                        <div class="flex items-center justify-between mb-2">
-                            <div class="flex items-center space-x-2">
-                                <div :class="['w-6 h-6 rounded-full flex items-center justify-center text-xs',
-                                    entry.status === 'running' ? 'bg-indigo-500 text-white' : 'bg-green-500 text-white']">
-                                    <span v-if="entry.status === 'running'" class="animate-pulse">⚡</span>
-                                    <span v-else>✓</span>
+                        <!-- Agent 身份区：头像 + 名称 + 状态 -->
+                        <div class="ap-identity">
+                            <div class="ap-avatar-wrap">
+                                <img 
+                                    :src="`https://api.dicebear.com/9.x/notionists/svg?seed=${entry.agentName}`" 
+                                    :alt="entry.agentAlias"
+                                    class="ap-avatar-img"
+                                />
+                                <!-- 呼吸灯状态指示 -->
+                                <div :class="['ap-status-dot', entry.status === 'running' ? 'ap-dot-active' : 'ap-dot-done']"></div>
+                            </div>
+                            <div class="ap-name-area">
+                                <div class="ap-name">{{ entry.agentAlias }}</div>
+                                <div class="ap-role">{{ entry.agentName }}</div>
+                            </div>
+                            <div :class="['ap-status-tag', entry.status === 'running' ? 'ap-tag-working' : 'ap-tag-done']">
+                                {{ entry.status === 'running' ? '工作中' : '已完成' }}
+                            </div>
+                        </div>
+
+                        <!-- 汇报气泡区 -->
+                        <div class="ap-bubble-area">
+                            <!-- 工具调用汇报 -->
+                            <div v-if="entry.tools.length > 0" class="ap-bubble">
+                                <div class="ap-bubble-label">📋 我正在使用以下工具：</div>
+                                <div class="ap-tool-list">
+                                    <div v-for="(tool, tidx) in entry.tools" :key="tidx" class="ap-tool-item">
+                                        <div :class="['ap-tool-dot', tool.status === 'running' ? 'ap-tool-running' : 'ap-tool-done']"></div>
+                                        <span class="ap-tool-name">{{ tool.alias }}</span>
+                                        <span v-if="tool.status === 'success'" class="ap-tool-check">✓ 已完成</span>
+                                        <span v-else class="ap-tool-working">
+                                            <span class="ap-dots-anim">···</span>
+                                        </span>
+                                    </div>
                                 </div>
-                                <span class="text-sm font-semibold text-gray-800">{{ entry.agentAlias }}</span>
                             </div>
-                            <el-tag 
-                                :type="entry.status === 'running' ? 'primary' : 'success'" 
-                                size="small" 
-                                effect="dark"
-                                round
-                            >
-                                {{ entry.status === 'running' ? '执行中' : '已完成' }}
-                            </el-tag>
-                        </div>
 
-                        <!-- 工具调用 -->
-                        <div v-if="entry.tools.length > 0" class="mb-2">
-                            <div class="text-[10px] text-gray-500 font-medium mb-1 uppercase tracking-wider">工具调用</div>
-                            <div class="space-y-1">
-                                <div v-for="(tool, tidx) in entry.tools" :key="tidx" 
-                                    class="flex items-center text-xs py-1 px-2 rounded bg-gray-50">
-                                    <div :class="['w-1.5 h-1.5 rounded-full mr-2',
-                                        tool.status === 'running' ? 'bg-amber-500 animate-pulse' : 'bg-green-500']"></div>
-                                    <span class="text-gray-700">{{ tool.alias }}</span>
-                                    <span v-if="tool.status === 'success'" class="ml-auto text-green-600">✓</span>
-                                    <el-icon v-else class="ml-auto animate-spin text-gray-400"><Loading /></el-icon>
+                            <!-- 思考过程汇报 -->
+                            <div v-if="entry.thinking" class="ap-bubble ap-bubble-thinking">
+                                <div class="ap-bubble-label">💭 我的思路：</div>
+                                <div class="ap-thinking-content">
+                                    {{ entry.thinking }}
+                                    <span v-if="entry.status === 'running'" class="ap-cursor"></span>
                                 </div>
                             </div>
-                        </div>
 
-                        <!-- 思考过程 -->
-                        <div v-if="entry.thinking" class="mb-2">
-                            <div class="text-[10px] text-gray-500 font-medium mb-1 uppercase tracking-wider">思考过程</div>
-                            <div class="text-xs text-gray-600 bg-gradient-to-br from-slate-50 to-indigo-50/30 p-2 rounded-lg max-h-40 overflow-y-auto font-mono leading-relaxed whitespace-pre-wrap break-all">
-                                {{ entry.thinking }}
-                                <span v-if="entry.status === 'running'" class="inline-block w-1.5 h-3 bg-indigo-400 animate-pulse ml-0.5 align-middle"></span>
+                            <!-- 最终产出汇报 -->
+                            <div v-if="entry.result" class="ap-bubble ap-bubble-result">
+                                <div class="ap-bubble-label">✅ 汇报结果：</div>
+                                <div class="ap-result-content">{{ entry.result }}</div>
                             </div>
-                        </div>
 
-                        <!-- 产出结果 -->
-                        <div v-if="entry.result">
-                            <div class="text-[10px] text-gray-500 font-medium mb-1 uppercase tracking-wider">执行产出</div>
-                            <div class="text-xs text-gray-700 bg-white border border-gray-100 p-2 rounded-lg max-h-60 overflow-y-auto whitespace-pre-wrap leading-relaxed">
-                                {{ entry.result }}
+                            <!-- 空状态：刚进场 -->
+                            <div v-if="!entry.thinking && !entry.result && entry.tools.length === 0" class="ap-bubble ap-bubble-entering">
+                                <div class="ap-entering-text">
+                                    <span class="ap-wave">👋</span> 我来了，正在准备工作...
+                                </div>
                             </div>
-                        </div>
-
-                        <!-- 空状态 -->
-                        <div v-if="!entry.thinking && !entry.result && entry.tools.length === 0" 
-                            class="text-center text-gray-400 text-xs py-4">
-                            <el-icon class="animate-spin mb-1"><Loading /></el-icon>
-                            <p>Agent 正在启动...</p>
                         </div>
                     </div>
                 </div>
@@ -802,74 +802,404 @@ const formatTime = (date: Date | string) => {
 
 /* ===== 聊天区域收缩动画 ===== */
 .chat-area-shrink {
-    /* 9:16 ≈ 56.25%，减去左侧侧边栏后的比例 */
     flex: 0 0 56%;
     min-width: 0;
 }
 
-/* ===== Agent 面板 ===== */
+/* ===== Agent 面板整体 ===== */
 .agent-panel {
     flex: 1;
     min-width: 320px;
     max-width: 44%;
+    background: #f8f9fb;
+    border-left: 1px solid #e8ecf1;
 }
 
 /* 面板入场/离场动画 */
 .agent-panel-enter-active {
     animation: slideInRight 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
-
 .agent-panel-leave-active {
     animation: slideOutRight 0.3s cubic-bezier(0.4, 0, 1, 1);
 }
 
 @keyframes slideInRight {
-    from {
-        transform: translateX(100%);
-        opacity: 0;
-    }
-    to {
-        transform: translateX(0);
-        opacity: 1;
-    }
+    from { transform: translateX(100%); opacity: 0; }
+    to   { transform: translateX(0); opacity: 1; }
 }
-
 @keyframes slideOutRight {
-    from {
-        transform: translateX(0);
-        opacity: 1;
-    }
-    to {
-        transform: translateX(100%);
-        opacity: 0;
-    }
+    from { transform: translateX(0); opacity: 1; }
+    to   { transform: translateX(100%); opacity: 0; }
 }
 
-/* 活跃 Agent 卡片左侧发光边框 */
-.agent-card-active {
-    border-left: 3px solid #6366f1;
-    background: linear-gradient(135deg, #f8faff 0%, #eef2ff 100%);
+/* === 面板头部 === */
+.ap-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    background: #fff;
+    border-bottom: 1px solid #eaeef3;
 }
-
-/* 高亮联动时的缩放效果 */
-.agent-work-card {
-    transition: all 0.3s ease;
+.ap-header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
-
-.agent-work-card:hover {
-    box-shadow: 0 2px 12px rgba(99, 102, 241, 0.15);
+.ap-header-icon {
+    width: 32px;
+    height: 32px;
+    background: #1a1a1a;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
 }
-
-/* 关闭按钮 */
-.close-panel-btn {
+.ap-header-title {
+    font-size: 14px;
+    font-weight: 800;
+    color: #1a202c;
+    letter-spacing: -0.3px;
+}
+.ap-header-sub {
+    font-size: 11px;
+    color: #94a3b8;
+    font-family: 'Inter', sans-serif;
+}
+.ap-close-btn {
+    width: 28px;
+    height: 28px;
     border: none;
     background: transparent;
+    border-radius: 6px;
+    color: #94a3b8;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.ap-close-btn:hover {
+    background: #f1f5f9;
+    color: #475569;
+}
+
+/* === 滚动区 === */
+.ap-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+}
+
+/* === 空状态 === */
+.ap-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 0;
+    gap: 16px;
+}
+.ap-empty-avatar {
+    width: 80px;
+    height: 80px;
+    background: #fff;
+    border: 1px solid #e8ecf1;
+    border-radius: 16px;
+    padding: 10px;
+    opacity: 0.5;
+}
+.ap-empty-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+.ap-empty-text {
+    font-size: 13px;
+    color: #b0b8c9;
+}
+
+/* === Agent 汇报条目 === */
+.ap-entry {
+    margin-bottom: 20px;
+    transition: all 0.3s ease;
+}
+.ap-entry-highlight .ap-identity {
+    background: #fefce8;
+    border-color: #fde68a;
+}
+
+/* === Agent 身份区 === */
+.ap-identity {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #fff;
+    border: 1px solid #e8ecf1;
+    border-radius: 14px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    transition: all 0.3s ease;
+}
+.ap-avatar-wrap {
+    position: relative;
+    flex-shrink: 0;
+}
+.ap-avatar-img {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: #f8f9fb;
+    border: 1px solid #e8ecf1;
+    object-fit: contain;
+    image-rendering: auto;
+}
+/* 呼吸灯 */
+.ap-status-dot {
+    position: absolute;
+    bottom: -1px;
+    right: -1px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid #fff;
+}
+.ap-dot-active {
+    background: #22c55e;
+    animation: breathe 2s ease-in-out infinite;
+}
+.ap-dot-done {
+    background: #94a3b8;
+}
+
+@keyframes breathe {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+    50%      { box-shadow: 0 0 0 5px rgba(34, 197, 94, 0); }
+}
+
+.ap-name-area {
+    flex: 1;
+    min-width: 0;
+}
+.ap-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: #1a202c;
+    letter-spacing: -0.3px;
+    line-height: 1.2;
+}
+.ap-role {
+    font-size: 11px;
+    color: #94a3b8;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.3px;
+}
+
+/* 状态标签 */
+.ap-status-tag {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 6px;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+}
+.ap-tag-working {
+    background: #ecfdf5;
+    color: #059669;
+    border: 1px solid #a7f3d0;
+}
+.ap-tag-done {
+    background: #f1f5f9;
+    color: #64748b;
+    border: 1px solid #e2e8f0;
+}
+
+/* === 汇报气泡区 === */
+.ap-bubble-area {
+    padding-left: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    position: relative;
+}
+/* 左侧连接线 */
+.ap-bubble-area::before {
+    content: '';
+    position: absolute;
+    left: 19px;
+    top: 0;
+    bottom: 8px;
+    width: 1px;
+    background: repeating-linear-gradient(
+        to bottom,
+        #d1d9e6 0px,
+        #d1d9e6 4px,
+        transparent 4px,
+        transparent 8px
+    );
+}
+
+/* 通用气泡 */
+.ap-bubble {
+    background: #fff;
+    border: 1px solid #e8ecf1;
+    border-radius: 0 12px 12px 12px;
+    padding: 10px 14px;
+    position: relative;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #374151;
+    transition: all 0.2s;
+}
+.ap-bubble:hover {
+    border-color: #cbd5e1;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+.ap-bubble-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: #64748b;
+    margin-bottom: 6px;
+}
+
+/* 工具列表 */
+.ap-tool-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.ap-tool-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    padding: 4px 8px;
+    background: #f8f9fb;
+    border-radius: 6px;
+}
+.ap-tool-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.ap-tool-running {
+    background: #f59e0b;
+    animation: breathe-amber 1.5s ease-in-out infinite;
+}
+.ap-tool-done {
+    background: #22c55e;
+}
+
+@keyframes breathe-amber {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+    50%      { box-shadow: 0 0 0 3px rgba(245, 158, 11, 0); }
+}
+
+.ap-tool-name {
+    flex: 1;
+    color: #374151;
+    font-weight: 500;
+}
+.ap-tool-check {
+    font-size: 10px;
+    color: #059669;
+    font-weight: 600;
+}
+.ap-tool-working {
+    font-size: 10px;
     color: #94a3b8;
 }
 
-.close-panel-btn:hover {
-    color: #475569;
-    background: #f1f5f9;
+/* 思考气泡 */
+.ap-bubble-thinking {
+    background: #fffbeb;
+    border-color: #fde68a;
+}
+.ap-thinking-content {
+    font-size: 12px;
+    color: #78716c;
+    max-height: 160px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    line-height: 1.7;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* 打字光标 */
+.ap-cursor {
+    display: inline-block;
+    width: 2px;
+    height: 14px;
+    background: #92400e;
+    margin-left: 2px;
+    vertical-align: text-bottom;
+    animation: blink 0.8s steps(1) infinite;
+}
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0; }
+}
+
+/* 产出气泡 */
+.ap-bubble-result {
+    background: #f0fdf4;
+    border-color: #bbf7d0;
+}
+.ap-result-content {
+    font-size: 12px;
+    color: #1a202c;
+    max-height: 240px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    line-height: 1.7;
+}
+
+/* 进场占位 */
+.ap-bubble-entering {
+    background: #fff;
+    border-style: dashed;
+    border-color: #d1d9e6;
+    text-align: center;
+    padding: 14px;
+}
+.ap-entering-text {
+    font-size: 13px;
+    color: #94a3b8;
+    font-weight: 500;
+}
+.ap-wave {
+    display: inline-block;
+    animation: wave 1.8s ease-in-out infinite;
+    transform-origin: 70% 70%;
+}
+@keyframes wave {
+    0%, 100% { transform: rotate(0deg); }
+    15%      { transform: rotate(14deg); }
+    30%      { transform: rotate(-8deg); }
+    45%      { transform: rotate(14deg); }
+    60%      { transform: rotate(-4deg); }
+    75%      { transform: rotate(10deg); }
+    100%     { transform: rotate(0deg); }
+}
+
+/* 省略号动画 */
+.ap-dots-anim {
+    display: inline-block;
+    animation: dots-blink 1.4s steps(4, end) infinite;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+@keyframes dots-blink {
+    0%  { content: ''; opacity: 0.3; }
+    25% { opacity: 0.6; }
+    50% { opacity: 1; }
+    75% { opacity: 0.6; }
+    100%{ opacity: 0.3; }
 }
 
 /* ===== 原有样式 ===== */

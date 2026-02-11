@@ -13,7 +13,7 @@ import json
 import asyncio
 
 # from ..graph import create_workflow_graph, create_initial_state, AgentState
-# from ..graph.nodes.review import handle_review_decision
+# from ..graph.nodes.human_review_node import handle_review_decision
 
 
 # ========================================
@@ -509,7 +509,7 @@ async def submit_review(task_id: str, request: ReviewRequest):
         raise HTTPException(status_code=400, detail="驳回时必须提供 feedback")
     
     try:
-        from ..graph.nodes.review import handle_review_decision
+        from ..graph.nodes.human_review_node import handle_review_decision
         
         # 构建更新状态
         update_state = handle_review_decision(
