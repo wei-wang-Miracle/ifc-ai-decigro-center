@@ -147,9 +147,11 @@ CREATE TABLE agent_cards (
     agent_name VARCHAR(100) PRIMARY KEY,
     -- 核心路由描述，给 Manager/Planner 做语义匹配用
     agent_description TEXT NOT NULL,
-    -- 标签：使用 PostgreSQL 原生数组类型，支持 GIN 索引加速检索
+    -- 别名/名称
+    agent_alias VARCHAR(100),
+    -- 标签：使用 JSONB 格式，与 Java 端的 List<String> (Fastjson2TypeHandler) 保持一致
     -- 对应需求: ['finance', 'external_api']
-    agent_tags TEXT [] DEFAULT '{}',
+    agent_tags JSONB DEFAULT '[]'::jsonb,
     -- 2. 内核配置 (Core Configuration)
     -- System Prompt: Agent 的灵魂
     system_prompt TEXT NOT NULL,
@@ -159,7 +161,7 @@ CREATE TABLE agent_cards (
     -- NULL: 表示默认继承用户当前会话可用的所有工具 (All Access)
     -- Empty Array '{}': 表示不使用任何工具 (Pure Chat)
     -- Array ['tool_a']: 仅允许使用指定工具 (Allowlist)
-    bound_tools TEXT [],
+    bound_tools JSONB DEFAULT '[]'::jsonb,
     -- 推理框架：NULL 则使用系统默认 (e.g. Direct/CoT)，否则指定如 'ReAct'
     reasoning_framework VARCHAR(50),
     -- 3. 元数据 (Meta Information)
@@ -177,6 +179,7 @@ CREATE TABLE agent_cards (
 -- 添加字段注释 (Data Dictionary)
 COMMENT ON TABLE agent_cards IS 'Agent 注册与配置表';
 COMMENT ON COLUMN agent_cards.agent_name IS '唯一标识 (ID)，建议 snake_case';
+COMMENT ON COLUMN agent_cards.agent_alias IS '智能体别名/名称';
 COMMENT ON COLUMN agent_cards.agent_description IS '给 Planner 看的路由描述';
 COMMENT ON COLUMN agent_cards.bound_tools IS 'NULL=全部工具, {}=无工具, [names]=指定工具';
 -- =================================================================
@@ -219,7 +222,9 @@ CREATE TABLE IF NOT EXISTS ai_chat_message (
     content TEXT NOT NULL,
     -- 消息内容
     thought_log TEXT,
-    -- 思考过程 (JSON字符串)
+    -- 思考过程 (JSON 字符串)
+    agent_log TEXT,
+    -- 智能体动作/日志 (JSON 字符串)
     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_message_session FOREIGN KEY (session_id) REFERENCES ai_chat_session(session_id) ON DELETE CASCADE
 );

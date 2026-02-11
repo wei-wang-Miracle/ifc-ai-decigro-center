@@ -9,8 +9,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import com.ifc.decigro.buskernel.common.annotation.ToolCard;
+import com.ifc.decigro.buskernel.dto.MessageResponse;
+import com.ifc.decigro.buskernel.dto.SessionResponse;
+import com.ifc.decigro.buskernel.dto.ToolGetMessagesRequest;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * AI 聊天会话控制器
@@ -146,6 +151,83 @@ public class AiChatController {
         } catch (Exception e) {
             log.error("更新会话失败", e);
             return Result.fail("更新会话失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Tool: 获取当前用户的会话列表
+     * POST /api/dg/ai/chat/tool/sessions
+     */
+    @PostMapping("/tool/sessions")
+    @ToolCard(tool_name = "get_current_user_sessions", summary = "获取当前用户的会话列表", description = "获取当前登录用户的所有历史会话列表。当需要查找、回顾或管理当前用户的对话历史时使用。")
+    public Result<List<SessionResponse>> toolListSessions(
+            @RequestHeader("X-Auth-Token") String token) {
+        try {
+            String[] parts = tokenProvider.validateAndParse(token);
+            String userId = parts[3];
+
+            List<Map<String, Object>> list = aiChatService.listSessions(userId);
+            List<SessionResponse> result = list.stream().map(map -> {
+                SessionResponse dto = new SessionResponse();
+                dto.setSessionId((String) map.get("session_id"));
+                dto.setUserId((String) map.get("user_id"));
+                dto.setSessionTitle((String) map.get("session_title"));
+                // 安全处理时间类型转换
+                Object createTime = map.get("create_time");
+                if (createTime instanceof java.sql.Timestamp) {
+                    dto.setCreateTime(((java.sql.Timestamp) createTime).toLocalDateTime());
+                } else if (createTime instanceof java.time.LocalDateTime) {
+                    dto.setCreateTime((java.time.LocalDateTime) createTime);
+                }
+
+                Object updateTime = map.get("update_time");
+                if (updateTime instanceof java.sql.Timestamp) {
+                    dto.setUpdateTime(((java.sql.Timestamp) updateTime).toLocalDateTime());
+                } else if (updateTime instanceof java.time.LocalDateTime) {
+                    dto.setUpdateTime((java.time.LocalDateTime) updateTime);
+                }
+                return dto;
+            }).collect(Collectors.toList());
+            return Result.success(result);
+        } catch (Exception e) {
+            log.error("Tool获取会话列表失败", e);
+            return Result.fail("获取会话列表失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Tool: 获取指定会话的消息记录
+     * POST /api/dg/ai/chat/tool/messages
+     */
+    @PostMapping("/tool/messages")
+    @ToolCard(tool_name = "get_session_messages", summary = "获取指定会话的消息记录", description = "根据会话ID获取该会话的所有详细消息记录。当需要深入分析特定对话的内容、上下文或执行过程时使用。")
+    public Result<List<MessageResponse>> toolGetMessages(
+            @RequestBody ToolGetMessagesRequest request) {
+        try {
+            List<Map<String, Object>> list = aiChatService.getMessages(request.getSessionId());
+            List<MessageResponse> result = list.stream().map(map -> {
+                MessageResponse dto = new MessageResponse();
+                dto.setId((Long) map.get("id"));
+                dto.setSessionId((String) map.get("session_id"));
+                dto.setTaskId((String) map.get("task_id"));
+                dto.setTraceId((String) map.get("trace_id"));
+                dto.setRole((String) map.get("role"));
+                dto.setContent((String) map.get("content"));
+                dto.setThoughtLog((String) map.get("thought_log"));
+                dto.setAgentLog((String) map.get("agent_log"));
+
+                Object createTime = map.get("create_time");
+                if (createTime instanceof java.sql.Timestamp) {
+                    dto.setCreateTime(((java.sql.Timestamp) createTime).toLocalDateTime());
+                } else if (createTime instanceof java.time.LocalDateTime) {
+                    dto.setCreateTime((java.time.LocalDateTime) createTime);
+                }
+                return dto;
+            }).collect(Collectors.toList());
+            return Result.success(result);
+        } catch (Exception e) {
+            log.error("Tool获取消息列表失败", e);
+            return Result.fail("获取消息列表失败: " + e.getMessage());
         }
     }
 }
