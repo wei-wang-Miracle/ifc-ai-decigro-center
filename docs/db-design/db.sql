@@ -218,6 +218,8 @@ CREATE TABLE IF NOT EXISTS ai_chat_message (
     -- 'user' | 'assistant'
     content TEXT NOT NULL,
     -- 消息内容
+    thought_log TEXT,
+    -- 思考过程 (JSON字符串)
     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_message_session FOREIGN KEY (session_id) REFERENCES ai_chat_session(session_id) ON DELETE CASCADE
 );

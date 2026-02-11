@@ -12,6 +12,7 @@ from langgraph.types import Command
 from ..state import AgentState, IntentType, PlanStep, ReviewStatus, StepStatus
 from ...config import get_settings
 from ...registry import get_agent_registry
+from langchain_core.runnables import RunnableConfig
 from ...audit import start_node_trace, finish_node_trace
 
 
@@ -48,9 +49,9 @@ def _get_fallback_agent(agent_names: list[str]) -> str | None:
     return agent_names[0]
 
 
-def _select_agent_for_step(step: PlanStep, token: str) -> str | None:
+async def _select_agent_for_step(step: PlanStep, token: str, config: RunnableConfig = None) -> str | None:
     """
-    功能: 为任务步骤选择最合适的 Agent
+    功能: 为任务步骤选择最合适的 Agent (Async)
     参数: 
         step - 当前计划步骤
         token - 用户 Token
@@ -81,6 +82,7 @@ def _select_agent_for_step(step: PlanStep, token: str) -> str | None:
         api_key=settings.openai_api_key,
         base_url=settings.openai_api_base,
         temperature=0.1,  # 调度推荐低温度
+        streaming=True
     )
     
     prompt = AGENT_SELECTION_PROMPT.format(
@@ -89,7 +91,7 @@ def _select_agent_for_step(step: PlanStep, token: str) -> str | None:
     )
     
     try:
-        response = llm.invoke(prompt)
+        response = await llm.ainvoke(prompt, config=config)
         agent_name = response.content.strip()
         
         # 验证返回的 Agent 是否存在
@@ -102,7 +104,7 @@ def _select_agent_for_step(step: PlanStep, token: str) -> str | None:
         return _get_fallback_agent(agent_names)
 
 
-def dispatcher_node(state: AgentState) -> Command:
+async def dispatcher_node(state: AgentState, config: RunnableConfig) -> Command:
     """
     功能: 调度中心节点 - 负责路由决策和 Agent 选择
     """
@@ -149,7 +151,7 @@ def dispatcher_node(state: AgentState) -> Command:
         if plan and current_index < len(plan):
             current_step = plan[current_index]
             token = state.token
-            selected_agent = _select_agent_for_step(current_step, token)
+            selected_agent = await _select_agent_for_step(current_step, token, config=config)
             if not selected_agent or selected_agent == "None":
                 print(f"[Dispatcher] 警告: 无法为步骤 {current_step.step_id} 选择 Agent")
             else:

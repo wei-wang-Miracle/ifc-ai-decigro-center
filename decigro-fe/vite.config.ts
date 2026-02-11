@@ -12,7 +12,13 @@ export default defineConfig({
         },
         '/api/v1/workflow': {
             target: 'http://127.0.0.1:8001',
-            changeOrigin: true
+            changeOrigin: true,
+            configure: (proxy, _options) => {
+                proxy.on('proxyRes', (proxyRes, _req, _res) => {
+                    proxyRes.headers['x-accel-buffering'] = 'no';
+                    proxyRes.headers['cache-control'] = 'no-cache';
+                });
+            }
         }
     }
   }

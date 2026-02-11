@@ -51,8 +51,8 @@ class AgentConfig:
     @property
     def alias(self) -> str:
         if self._detail:
-            return self._detail.get("agent_alias", self.name)
-        return self.name
+            return self._detail.get("agent_alias", self._summary.get("agent_alias", self.name))
+        return self._summary.get("agent_alias", self.name)
 
     @property
     def system_prompt(self) -> str:
@@ -161,6 +161,7 @@ class AgentRegistry:
             if name:
                 summary = {
                     "agent_name": name,
+                    "agent_alias": record.get("agentAlias", name),
                     "agent_description": record.get("agentDescription"),
                     "agent_tags": record.get("agentTags"),
                 }

@@ -12,4 +12,5 @@ public class SaveMessageRequest {
     private String traceId;
     private String role; // "user" 或 "assistant"
     private String content;
+    private String thoughtLog; // 思考过程 (JSON字符串)
 }

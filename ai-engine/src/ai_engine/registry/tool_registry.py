@@ -49,6 +49,7 @@ class ToolRegistry:
             if name:
                 user_summaries[name] = {
                     "tool_name": name,
+                    "tool_alias": record.get("toolAlias", name),
                     "tool_description": record.get("toolDescription"),
                     "tool_tags": record.get("toolTags"),
                 }

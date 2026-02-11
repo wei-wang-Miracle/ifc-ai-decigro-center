@@ -11,6 +11,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.types import Command
 
 from ..state import AgentState, IntentObject, IntentType
+from langchain_core.runnables import RunnableConfig
 from ...config import get_settings
 from ...registry import get_tool_registry, get_agent_registry
 from ...audit import start_node_trace, finish_node_trace, build_agent_snapshot
@@ -52,12 +53,13 @@ def _get_llm() -> ChatOpenAI:
         api_key=settings.openai_api_key,
         base_url=settings.openai_api_base,
         temperature=settings.llm_temperature,
+        streaming=True
     )
 
 
 
 
-def intent_recognition_node(state: AgentState) -> dict[str, Any]:
+async def intent_recognition_node(state: AgentState, config: RunnableConfig) -> Command:
     """
     功能: 意图识别节点 - LangGraph 节点函数
     参数: state - 当前状态
@@ -106,7 +108,7 @@ def intent_recognition_node(state: AgentState) -> dict[str, Any]:
         structured_llm = llm.with_structured_output(IntentObject)
         
         # 获得结构化意图对象
-        intent = structured_llm.invoke([HumanMessage(content=prompt)])
+        intent = await structured_llm.ainvoke([HumanMessage(content=prompt)], config=config)
         
         print(f"[IntentNode] 识别结果: type={intent.intent_type.value}, confidence={intent.confidence}")
         
@@ -152,5 +154,5 @@ def intent_recognition_node(state: AgentState) -> dict[str, Any]:
                 "error": f"意图识别失败: {str(e)}",
                 "node_traces": state.node_traces + [nt],
             },
-            goto="__end__"
+            goto="responder"
         )

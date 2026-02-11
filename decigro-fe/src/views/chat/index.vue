@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, nextTick, onMounted, computed } from 'vue'
-import { Promotion, Warning, ChatLineRound, Plus, Delete, ChatDotSquare } from '@element-plus/icons-vue'
+import { ref, nextTick, onMounted, computed, reactive } from 'vue'
+import { Promotion, Warning, ChatLineRound, Plus, Delete, ChatDotSquare, Operation, Loading, ArrowDown } from '@element-plus/icons-vue'
 import aiRequest from '../../utils/aiRequest'
 import { useUserStore } from '../../stores/user'
 import { useChatStore, type ChatMessage } from '../../stores/chatStore'
@@ -13,6 +13,8 @@ const appStore = useAppStore()
 const inputMessage = ref('')
 const isLoading = ref(false)
 const scrollContainer = ref<HTMLElement | null>(null)
+// 控制思考过程展开/收起
+const showThoughts = ref<Record<string, boolean>>({})
 
 // 计算属性：使用 store 中的消息
 const messages = computed(() => chatStore.messages)
@@ -87,13 +89,13 @@ const handleSend = async () => {
     inputMessage.value = ''
     
     // 添加用户消息
-    const userMessage: ChatMessage = {
+    const userMessage = reactive<ChatMessage>({
         sessionId: chatStore.currentSessionId!,
         taskId: chatStore.currentTaskId || undefined,
         role: 'user',
         content: userQuery,
         createTime: new Date()
-    }
+    })
     chatStore.addMessage(userMessage)
 
     // 异步持久化用户消息到数据库（通过 bus-kernel）
@@ -112,48 +114,187 @@ const handleSend = async () => {
     isLoading.value = true
     scrollToBottom()
 
+    // 添加 AI 消息占位
+    const aiMessage = reactive<ChatMessage>({
+        sessionId: chatStore.currentSessionId!,
+        taskId: undefined, // 暂时未定
+        traceId: undefined,
+        role: 'assistant',
+        content: '',
+        createTime: new Date(),
+        status: 'running',
+        requireReview: false,
+        thoughts: []
+    })
+    chatStore.addMessage(aiMessage)
+    
+    isLoading.value = true
+    scrollToBottom()
+
     try {
-        const res = await aiRequest.post('/chat', {
-            query: userQuery,
-            user_id: userStore.userInfo.userId || userStore.userInfo.username || 'guest',
-            session_id: chatStore.currentSessionId,
-            task_id: chatStore.currentTaskId // 传递当前任务 ID（如果有）
-        }) as any
-
-        // 更新任务 ID
-        if (res.task_id) {
-            chatStore.setTaskId(res.task_id)
-        }
-
-        // 添加 AI 回复
-        const aiMessage: ChatMessage = {
-            sessionId: chatStore.currentSessionId!,
-            taskId: res.task_id,
-            traceId: res.trace_id,
-            role: 'assistant',
-            content: res.message,
-            createTime: new Date(),
-            status: res.status,
-            requireReview: res.require_review
-        }
-        chatStore.addMessage(aiMessage)
-
-        // 异步持久化 AI 回复到数据库（通过 bus-kernel）
-        chatStore.saveMessageToServer({
-            sessionId: chatStore.currentSessionId!,
-            taskId: res.task_id,
-            traceId: res.trace_id,
-            role: 'assistant',
-            content: res.message
+        // 使用 fetch 获取流式响应
+        const response = await fetch('/api/v1/workflow/chat/stream', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Auth-Token': userStore.token || ''
+            },
+            body: JSON.stringify({
+                query: userQuery,
+                user_id: userStore.userInfo.userId || userStore.userInfo.username || 'guest',
+                session_id: chatStore.currentSessionId,
+                task_id: chatStore.currentTaskId // 传递当前任务 ID（如果有）
+            })
         })
 
-        // 如果任务完成，清理任务 ID
-        if (res.status === 'completed') {
-            chatStore.clearTaskId()
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`)
         }
+        
+        const reader = response.body?.getReader()
+        const decoder = new TextDecoder()
+        
+        if (!reader) throw new Error('ReadableStream not supported')
+
+        let partialLine = ''
+        
+        while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            
+            const chunk = decoder.decode(value, { stream: true })
+            const lines = (partialLine + chunk).split('\n\n')
+            partialLine = lines.pop() || ''
+            
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const dataStr = line.slice(6)
+                    if (dataStr === '[DONE]') continue
+                    
+                        try {
+                            const event = JSON.parse(dataStr)
+                            console.log('[SSE Event]', event)
+                            
+                            // 处理不同类型的事件
+                            if (event.type === 'meta') {
+                                aiMessage.taskId = event.task_id
+                                aiMessage.traceId = event.trace_id
+                                // 确保 taskId 用于消息映射
+                                chatStore.setTaskId(event.task_id)
+                            } else if (event.type === 'thinking') {
+                                // 简单显示“正在思考”
+                            } else if (event.type === 'node_start') {
+                                // 先结束上一个节点的 running 状态
+                                if (aiMessage.thoughts && aiMessage.thoughts.length > 0) {
+                                    const last = aiMessage.thoughts[aiMessage.thoughts.length - 1]
+                                    if (last.status === 'running') last.status = 'success'
+                                }
+                                
+                                aiMessage.thoughts?.push({
+                                    id: `node-${Date.now()}-${Math.random()}`,
+                                    type: 'node_start',
+                                    title: event.display_name || event.node,
+                                    status: 'running',
+                                    timestamp: Date.now(),
+                                    content: ''
+                                })
+                            } else if (event.type === 'agent_start') {
+                                if (aiMessage.thoughts && aiMessage.thoughts.length > 0) {
+                                    const last = aiMessage.thoughts[aiMessage.thoughts.length - 1]
+                                    if (last.status === 'running') last.status = 'success'
+                                }
+
+                                aiMessage.thoughts?.push({
+                                    id: `agent-${Date.now()}-${Math.random()}`,
+                                    type: 'agent_start',
+                                    title: `Agent: ${event.agent_alias || event.agent}`,
+                                    status: 'running',
+                                    timestamp: Date.now(),
+                                    content: ''
+                                })
+                                scrollToBottom()
+                            } else if (event.type === 'tool_start') {
+                                aiMessage.thoughts?.push({
+                                    id: `tool-${Date.now()}-${Math.random()}`,
+                                    type: 'tool_start',
+                                    title: `执行工具: ${event.tool_alias || event.tool}`,
+                                    status: 'running',
+                                    timestamp: Date.now()
+                                })
+                            } else if (event.type === 'tool_end') {
+                                // 找到对应的 tool_start 并更新
+                                const thought = aiMessage.thoughts?.slice().reverse().find(t => t.type === 'tool_start' && t.title.includes(event.tool_alias || event.tool))
+                                if (thought) {
+                                    thought.status = 'success'
+                                    // 节点的输出结果存于日志或内部状态，依用户要求“不必展示节点的输出结果”
+                                    console.log(`[Tool Result] ${event.tool}:`, event.output)
+                                }
+                            } else if (event.type === 'node_result') {
+                                // 节点执行结果：标记当前节点为成功，并记录日志，不展示在 UI 思考过程内容中
+                                const nodeThought = aiMessage.thoughts?.slice().reverse().find(t => t.status === 'running')
+                                if (nodeThought) {
+                                    nodeThought.status = 'success'
+                                }
+                                console.log(`[Node Result] ${event.node}:`, event.output)
+                            } else if (event.type === 'token') {
+                                const { content, reasoning, is_thought, is_json } = event
+                                
+                                // 规则 1: 如果是 JSON 数据，标记为 is_thought 也不在 UI 思考框中追加
+                                if (is_json) continue
+
+                                if (is_thought) {
+                                    // 规则 2: 思考过程流 -> 进入思考步骤详情
+                                    const agentThought = aiMessage.thoughts?.slice().reverse().find(t => t.status === 'running')
+                                    if (agentThought) {
+                                        if (!agentThought.content) agentThought.content = ''
+                                        if (reasoning) agentThought.content += reasoning
+                                        else if (content) agentThought.content += content
+                                    }
+                                    continue
+                                }
+
+                                // 规则 3: 非思考过程 (is_thought === false) -> 直接进入聊天正文
+                                if (content) {
+                                    aiMessage.content += content
+                                    scrollToBottom()
+                                }
+                            } else if (event.type === 'result') {
+                                if (event.message) {
+                                    aiMessage.content = event.message
+                                }
+                                aiMessage.status = event.status
+                                aiMessage.requireReview = event.require_review
+                                
+                                 // 异步持久化 AI 回复到数据库
+                                chatStore.saveMessageToServer({
+                                    sessionId: chatStore.currentSessionId!,
+                                    taskId: event.task_id,
+                                    traceId: aiMessage.traceId,
+                                    role: 'assistant',
+                                    content: event.message,
+                                    thoughts: aiMessage.thoughts
+                                })
+
+                                if (event.status === 'completed') {
+                                    chatStore.clearTaskId()
+                                }
+                            }
+                            
+                            scrollToBottom()
+                        } catch (e) {
+                            console.warn('Parse SSE error:', e)
+                        }
+                }
+            }
+        }
+        
     } catch (error) {
         console.error('Chat error:', error)
         ElMessage.error('发送消息失败')
+        
+        // 更新消息状态为失败
+        aiMessage.content = '抱歉，响应过程中出现错误。'
+        aiMessage.status = 'failed'
     } finally {
         isLoading.value = false
         scrollToBottom()
@@ -286,12 +427,41 @@ const formatTime = (date: Date | string) => {
 
                         <!-- 气泡 -->
                         <div class="space-y-1">
-                            <div :class="['px-4 py-3 rounded-2xl text-sm shadow-sm', 
+                            <div :class="['px-4 py-3 rounded-2xl text-sm shadow-sm relative', 
                                 msg.role === 'user' 
                                     ? 'bg-brand-600 text-white rounded-tr-none' 
                                     : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none']"
                             >
-                                <div class="whitespace-pre-wrap leading-relaxed">{{ msg.content }}</div>
+                                <!-- 思考过程展示 -->
+                                <div v-if="msg.thoughts && msg.thoughts.length > 0" class="mb-3 border-b border-dashed border-gray-200 pb-2">
+                                    <div 
+                                        class="flex items-center text-xs text-gray-500 cursor-pointer hover:text-brand-600 select-none"
+                                        @click="showThoughts[msg.id || idx] = !showThoughts[msg.id || idx]"
+                                    >
+                                        <el-icon class="mr-1 animate-spin" v-if="msg.status === 'running'"><Loading /></el-icon>
+                                        <el-icon class="mr-1" v-else><Operation /></el-icon>
+                                        <span>思考过程 ({{ msg.thoughts.length }} 步骤)</span>
+                                        <el-icon class="ml-1 transition-transform" :class="{ 'rotate-180': showThoughts[msg.id || idx] }"><ArrowDown /></el-icon>
+                                    </div>
+                                    
+                                    <div v-show="showThoughts[msg.id || idx] || msg.status === 'running'" class="mt-2 text-xs space-y-2 bg-slate-50 p-2 rounded max-h-60 overflow-y-auto">
+                                        <div v-for="thought in msg.thoughts" :key="thought.id" class="flex items-start">
+                                            <div class="mr-2 mt-0.5">
+                                                <div v-if="thought.status === 'running'" class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
+                                                <div v-else-if="thought.type === 'node_start'" class="w-2 h-2 rounded-full bg-purple-400"></div>
+                                                <div v-else-if="thought.type === 'agent_start'" class="w-2 h-2 rounded-full bg-indigo-400"></div>
+                                                <div v-else-if="thought.type === 'tool_start'" class="w-2 h-2 rounded-full bg-amber-400"></div>
+                                                <div v-else class="w-2 h-2 rounded-full bg-green-400"></div>
+                                            </div>
+                                            <div class="flex-1">
+                                                <div class="font-medium text-gray-700">{{ thought.title }}</div>
+                                                <div v-if="thought.content" class="text-gray-400 mt-1 font-mono text-[10px] whitespace-pre-wrap break-all">{{ thought.content }}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="whitespace-pre-wrap leading-relaxed min-h-[1.5em]">{{ msg.content || (msg.status === 'running' ? '...' : '') }}</div>
                                 
                                 <!-- 审核区域 -->
                                 <div v-if="msg.requireReview" class="mt-4 pt-4 border-t border-dashed border-slate-100">

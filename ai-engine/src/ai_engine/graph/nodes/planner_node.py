@@ -12,6 +12,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.types import Command
 
 from ..state import AgentState, PlanStep, StepStatus
+from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 from ...audit import start_node_trace, finish_node_trace, build_agent_snapshot
 
@@ -83,7 +84,7 @@ def _build_context(state: AgentState) -> str:
     return "\n\n".join(context_parts) if context_parts else ""
 
 
-def planner_node(state: AgentState) -> dict[str, Any]:
+async def planner_node(state: AgentState, config: RunnableConfig) -> Command:
     """
     功能: 规划节点 - LangGraph 节点函数
     参数: state - 当前状态
@@ -138,11 +139,12 @@ def planner_node(state: AgentState) -> dict[str, Any]:
             api_key=settings.openai_api_key,
             base_url=settings.openai_api_base,
             temperature=settings.llm_temperature,
+            streaming=True
         )
         
         # 使用 structured_output
         structured_llm = llm.with_structured_output(PlanOutput)
-        response = structured_llm.invoke(prompt)
+        response = await structured_llm.ainvoke(prompt, config=config)
         
         plan = response.steps
         
@@ -179,5 +181,5 @@ def planner_node(state: AgentState) -> dict[str, Any]:
                 "error": f"任务规划失败: {str(e)}",
                 "node_traces": state.node_traces + [nt],
             },
-            goto="dispatcher"
+            goto="responder"
         )

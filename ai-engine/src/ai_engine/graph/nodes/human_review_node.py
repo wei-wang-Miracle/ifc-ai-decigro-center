@@ -11,7 +11,7 @@ from langgraph.types import Command
 from ..state import AgentState, ReviewStatus
 
 
-def human_review_node(state: AgentState) -> dict[str, Any]:
+async def human_review_node(state: AgentState) -> Command:
     """
     功能: 人工审核节点 - LangGraph 节点函数
     参数: state - 当前状态

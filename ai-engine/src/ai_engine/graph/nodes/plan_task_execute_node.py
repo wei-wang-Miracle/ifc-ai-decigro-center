@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
 
 from langgraph.types import Command
@@ -19,26 +20,29 @@ from ...audit import (
     start_node_trace, finish_node_trace,
     build_agent_snapshot, build_tool_snapshot,
 )
+from langchain_core.callbacks.manager import adispatch_custom_event
 
 
-def _execute_with_tool_loop(
+async def _execute_with_tool_loop(
     llm_with_tools: Any,
     messages: list[Any],
     tool_registry: Any,
     token: str,
+    config: RunnableConfig = None,
     max_iterations: int = 5
-) -> tuple[str, list[str], bool]:
+) -> tuple[str, list[str], bool, list[dict]]:
     """
-    功能: 通用的工具调用循环
-    返回: (最终输出, 调用的工具列表, 是否需要审核)
+    功能: 通用的工具调用循环 (Async)
+    返回: (最终输出, 调用的工具列表, 是否需要审核, 工具快照列表)
     """
     tools_called = []
     tool_trace_snapshots = []  # 工具调用快照列表（审计用）
     require_review = False
     final_output = ""
     
+    
     for _ in range(max_iterations):
-        response = llm_with_tools.invoke(messages)
+        response = await llm_with_tools.ainvoke(messages, config=config)
         messages.append(response)
         
         # 检查是否有工具调用
@@ -62,7 +66,7 @@ def _execute_with_tool_loop(
             if tool:
                 try:
                     tool_args = tool_call.get("args", {})
-                    tool_result = tool.invoke(tool_args)
+                    tool_result = await tool.ainvoke(tool_args, config=config)
                     print(f"[Executor] 工具 '{tool_name}' 执行成功")
                     
                     messages.append(ToolMessage(
@@ -108,18 +112,20 @@ def _execute_with_tool_loop(
     return final_output, tools_called, require_review, tool_trace_snapshots
 
 
-def _execute_step_with_agent(
+async def _execute_step_with_agent(
     step: PlanStep,
     agent_name: str,
     query: str,
     token: str,
+    config: RunnableConfig = None,
 ) -> StepResult:
     """
-    功能: 使用指定 Agent 执行步骤
+    功能: 使用指定 Agent 执行步骤 (Async)
     参数:
         step - 当前计划步骤
         agent_name - Agent 名称
         query - 用户原始查询
+        config - 运行时配置
     返回: StepResult 执行结果
     """
     agent_registry = get_agent_registry()
@@ -132,7 +138,7 @@ def _execute_step_with_agent(
     if agent_config is None:
         # 如果指定的 Agent 不存在，使用默认方式执行
         print(f"[Executor] Agent '{agent_name}' 不存在，使用默认执行方式")
-        return _execute_step_default(step, query, token)
+        return await _execute_step_default(step, query, token, config)
     
     # 获取 Agent 可用的工具
     tools = agent_config.get_tools(token)
@@ -146,6 +152,7 @@ def _execute_step_with_agent(
         api_key=settings.openai_api_key,
         base_url=settings.openai_api_base,
         temperature=settings.llm_temperature,
+        streaming=True
     )
     
     # 如果有工具，绑定工具
@@ -172,11 +179,12 @@ def _execute_step_with_agent(
         ]
         
         # 进入工具循环
-        output, tools_called, require_review, tool_trace_snapshots = _execute_with_tool_loop(
+        output, tools_called, require_review, tool_trace_snapshots = await _execute_with_tool_loop(
             llm_with_tools=llm_with_tools,
             messages=messages,
             tool_registry=tool_registry,
-            token=token
+            token=token,
+            config=config
         )
         
         return StepResult(
@@ -196,13 +204,19 @@ def _execute_step_with_agent(
         ), [], system_message
 
 
-def _execute_step_default(step: PlanStep, query: str, token: str) -> StepResult:
+async def _execute_step_default(
+    step: PlanStep, 
+    query: str, 
+    token: str,
+    config: RunnableConfig = None
+) -> StepResult:
     """
-    功能: 使用默认方式执行步骤（无特定 Agent）
+    功能: 使用默认方式执行步骤（无特定 Agent）(Async)
     参数:
         step - 当前计划步骤
         query - 用户原始查询
         token - 用户身份 Token
+        config - 运行时配置
     返回: StepResult 执行结果
     """
     settings = get_settings()
@@ -217,6 +231,7 @@ def _execute_step_default(step: PlanStep, query: str, token: str) -> StepResult:
         api_key=settings.openai_api_key,
         base_url=settings.openai_api_base,
         temperature=settings.llm_temperature,
+        streaming=True
     )
     
     if tools:
@@ -240,11 +255,12 @@ def _execute_step_default(step: PlanStep, query: str, token: str) -> StepResult:
         ]
         
         # 默认模式也进入工具循环
-        output, tools_called, require_review, tool_trace_snapshots = _execute_with_tool_loop(
+        output, tools_called, require_review, tool_trace_snapshots = await _execute_with_tool_loop(
             llm_with_tools=llm_with_tools,
             messages=messages,
             tool_registry=tool_registry,
-            token=token
+            token=token,
+            config=config
         )
         
         return StepResult(
@@ -264,11 +280,14 @@ def _execute_step_default(step: PlanStep, query: str, token: str) -> StepResult:
 
 
 
-def plan_task_execute_node(state: AgentState) -> dict[str, Any]:
+async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> Command:
     """
-    功能: 执行节点 - LangGraph 节点函数
-    参数: state - 当前状态
+    功能: 执行节点 - LangGraph 节点函数 (Async)
+    参数: 
+        state - 当前状态
+        config - 运行时配置
     返回: 状态更新字典
+
     
     职责:
     1. 获取当前待执行的步骤
@@ -306,6 +325,13 @@ def plan_task_execute_node(state: AgentState) -> dict[str, Any]:
     token = state.token
     print(f"[Executor] 执行步骤 {current_step.step_id} (Token: {token[:10] if token else 'None'}...): {current_step.description}")
     
+    # 发送 Agent 开始事件
+    agent_registry = get_agent_registry()
+    agent_config = agent_registry.get_agent(selected_agent, token)
+    agent_alias = agent_config.alias if agent_config else selected_agent
+    
+    await adispatch_custom_event("agent_start", {"agent": selected_agent, "alias": agent_alias}, config=config)
+
     # 更新步骤状态
     current_step.status = StepStatus.IN_PROGRESS
     
@@ -314,11 +340,12 @@ def plan_task_execute_node(state: AgentState) -> dict[str, Any]:
 
     # 执行步骤
     token = state.token
-    result, tool_trace_snapshots, used_system_prompt = _execute_step_with_agent(
+    result, tool_trace_snapshots, used_system_prompt = await _execute_step_with_agent(
         step=current_step,
         agent_name=selected_agent,
         query=query,
         token=token,
+        config=config,
     )
     
     # 审计：构建 Agent 快照（包含工具调用详情、system_prompt 和 agent_result）
