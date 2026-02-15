@@ -1,12 +1,8 @@
 package com.ifc.decigro.buskernel.service.impl;
 
-import com.ifc.decigro.buskernel.entity.SysRole;
-import com.ifc.decigro.buskernel.entity.SysUser;
 import com.ifc.decigro.buskernel.entity.ToolCard;
 import com.ifc.decigro.buskernel.entity.vo.ToolCardSummaryVO;
 import com.ifc.decigro.buskernel.mapper.ToolCardMapper;
-import com.ifc.decigro.buskernel.service.SysRoleService;
-import com.ifc.decigro.buskernel.service.SysUserService;
 import com.ifc.decigro.buskernel.service.ToolCardService;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
@@ -14,11 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 import static com.ifc.decigro.buskernel.entity.table.ToolCardTableDef.TOOL_CARD;
 
@@ -31,12 +23,6 @@ public class ToolCardServiceImpl implements ToolCardService {
 
     @Autowired
     private ToolCardMapper toolCardMapper;
-
-    @Autowired
-    private SysUserService sysUserService;
-
-    @Autowired
-    private SysRoleService sysRoleService;
 
     /**
      * 分页查询工具列表
@@ -117,41 +103,17 @@ public class ToolCardServiceImpl implements ToolCardService {
 
     /**
      * 实现获取可用工具列表
+     * 规则: isOnline = true AND toolPrivileges = 'public'
+     * (注意: 根据用户要求，已删除用户/角色的个性化 toolList 逻辑，改为由 Agent 驱动，此处仅返回公开工具)
      */
     @Override
     public List<ToolCardSummaryVO> getAvailableTools(String username) {
-        // 第一步：获取当前用户及其角色分配的工具列表
-        Set<String> allowedToolNames = new HashSet<>();
-        SysUser user = sysUserService.getByUsername(username);
-        if (user != null) {
-            // 添加用户自身的工具列表
-            if (user.getToolList() != null) {
-                allowedToolNames.addAll(user.getToolList());
-            }
-            // 添加用户角色的工具列表
-            if (user.getRoleId() != null) {
-                SysRole role = sysRoleService.getById(user.getRoleId());
-                if (role != null && role.getToolList() != null) {
-                    allowedToolNames.addAll(role.getToolList());
-                }
-            }
-        }
-
-        // 第二步：构建查询条件
-        // 规则：isOnline = true AND (toolPrivileges = 'public' OR toolName IN
-        // allowedToolNames)
-        com.mybatisflex.core.query.QueryCondition privilegeCondition = TOOL_CARD.TOOL_PRIVILEGES.eq("public");
-        if (!allowedToolNames.isEmpty()) {
-            privilegeCondition = privilegeCondition.or(TOOL_CARD.TOOL_NAME.in(allowedToolNames));
-        }
-
         QueryWrapper queryWrapper = QueryWrapper.create()
                 .select(TOOL_CARD.TOOL_NAME, TOOL_CARD.TOOL_ALIAS, TOOL_CARD.TOOL_DESCRIPTION, TOOL_CARD.TOOL_TAGS)
                 .from(TOOL_CARD)
                 .where(TOOL_CARD.IS_ONLINE.eq(true))
-                .and(privilegeCondition);
+                .and(TOOL_CARD.TOOL_PRIVILEGES.eq("public"));
 
-        // 第三步：执行查询并映射到 VO
         return toolCardMapper.selectListByQueryAs(queryWrapper, ToolCardSummaryVO.class);
     }
 
@@ -160,46 +122,16 @@ public class ToolCardServiceImpl implements ToolCardService {
      */
     @Override
     public ToolCard getToolDetail(String toolName, String username) {
-        // 第一步：获取工具基本信息
         ToolCard toolCard = toolCardMapper.selectOneById(toolName);
         if (toolCard == null) {
             throw new RuntimeException("工具不存在: " + toolName);
         }
 
-        // 第二步：校验是否上线
         if (Boolean.FALSE.equals(toolCard.getIsOnline())) {
             throw new RuntimeException("工具未上线: " + toolName);
         }
 
-        // 第三步：校验权限
-        // 如果是公开工具，直接返回
-        if ("public".equals(toolCard.getToolPrivileges())) {
-            return toolCard;
-        }
-
-        // 如果是受限工具，检查用户是否有权访问
-        SysUser user = sysUserService.getByUsername(username);
-        if (user == null) {
-            throw new RuntimeException("用户不存在或未登录");
-        }
-
-        boolean hasAccess = false;
-        // 检查用户个人列表
-        if (user.getToolList() != null && user.getToolList().contains(toolName)) {
-            hasAccess = true;
-        }
-        // 检查角色列表
-        if (!hasAccess && user.getRoleId() != null) {
-            SysRole role = sysRoleService.getById(user.getRoleId());
-            if (role != null && role.getToolList() != null && role.getToolList().contains(toolName)) {
-                hasAccess = true;
-            }
-        }
-
-        if (!hasAccess) {
-            throw new RuntimeException("用户无权访问该工具: " + toolName);
-        }
-
+        // 目前仅允许公开工具或通过 Agent 间接访问 (此处简化为仅校验上线状态)
         return toolCard;
     }
 

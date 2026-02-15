@@ -1,14 +1,10 @@
 package com.ifc.decigro.buskernel.entity;
 
-import com.mybatisflex.annotation.Column;
 import com.mybatisflex.annotation.Id;
 import com.mybatisflex.annotation.KeyType;
 import com.mybatisflex.annotation.Table;
-import com.ifc.decigro.buskernel.common.handler.Fastjson2TypeHandler;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
-
-import java.util.List;
 
 /**
  * 用户表
@@ -74,12 +70,6 @@ public class SysUser extends BaseEntity {
      * 当前角色 ID
      */
     private Long roleId;
-
-    /**
-     * 个性化工具 (覆盖角色配置)
-     */
-    @Column(typeHandler = Fastjson2TypeHandler.class)
-    private List<String> toolList;
 
     /**
      * 账户状态 (1:启用, 0:禁用)

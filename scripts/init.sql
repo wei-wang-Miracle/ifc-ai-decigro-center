@@ -4,7 +4,7 @@
 CREATE TABLE IF NOT EXISTS sys_tenant (
     tenant_code VARCHAR(32) PRIMARY KEY,
     tenant_name VARCHAR(100) NOT NULL,
-    tool_list JSONB DEFAULT '[]'::jsonb,
+    agent_list JSONB DEFAULT '[]'::jsonb,
     is_enabled BOOLEAN DEFAULT TRUE,
     created_time TIMESTAMP DEFAULT NOW(),
     updated_time TIMESTAMP DEFAULT NOW()
@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS sys_role (
     role_id BIGSERIAL PRIMARY KEY,
     role_name VARCHAR(50) NOT NULL,
     role_desc VARCHAR(255),
-    tool_list JSONB,
+    agent_list JSONB,
     is_enabled BOOLEAN DEFAULT TRUE,
     created_time TIMESTAMP DEFAULT NOW(),
     updated_time TIMESTAMP DEFAULT NOW()
@@ -40,7 +40,6 @@ CREATE TABLE IF NOT EXISTS sys_user (
     avatar_path VARCHAR(255),
     dept_id BIGINT,
     role_id BIGINT,
-    tool_list JSONB,
     is_enabled BOOLEAN DEFAULT TRUE,
     created_time TIMESTAMP DEFAULT NOW(),
     updated_time TIMESTAMP DEFAULT NOW()

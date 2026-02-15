@@ -11,12 +11,12 @@ const loading = ref(false)
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
 
-const allTools = ref<any[]>([])
+const allAgents = ref<any[]>([])
 
 const form = reactive<any>({
     tenantCode: '',
     tenantName: '',
-    toolList: [],
+    agentList: [],
     isEnabled: true
 })
 
@@ -39,10 +39,11 @@ const fetchData = async () => {
     }
 }
 
-const fetchAllTools = async () => {
+const fetchAllAgents = async () => {
     try {
-        const res: any = await request.get('/tool/list-all')
-        allTools.value = res || []
+        // 分页接口，此处获取较大的 size 以列出所有 Agent 用于选择
+        const res: any = await request.get('/agent/page?size=100')
+        allAgents.value = res.records || []
     } catch (e) {
         console.error(e)
     }
@@ -58,6 +59,8 @@ const handleAdd = () => {
 const handleEdit = (row: any) => {
     dialogTitle.value = '修改租户信息'
     Object.assign(form, row)
+    // 确保 agentList 是数组
+    if (!form.agentList) form.agentList = []
     dialogVisible.value = true
 }
 
@@ -112,7 +115,7 @@ const resetForm = () => {
     Object.assign(form, {
         tenantCode: '',
         tenantName: '',
-        toolList: [],
+        agentList: [],
         isEnabled: true
     })
     ruleFormRef.value?.resetFields()
@@ -120,7 +123,7 @@ const resetForm = () => {
 
 onMounted(() => {
     fetchData()
-    fetchAllTools()
+    fetchAllAgents()
 })
 </script>
 
@@ -159,10 +162,10 @@ onMounted(() => {
                   </el-tag>
               </template>
           </el-table-column>
-          <el-table-column label="可用工具数" width="120" align="center">
+          <el-table-column label="关联智能体" width="120" align="center">
               <template #default="scope">
                   <el-tag type="info" effect="plain" round>
-                      {{ (scope.row.toolList || []).length }}
+                      {{ (scope.row.agentList || []).length }}
                   </el-tag>
               </template>
           </el-table-column>
@@ -190,13 +193,13 @@ onMounted(() => {
             <el-form-item label="状态">
                 <el-switch v-model="form.isEnabled" active-text="服务中" inactive-text="已停服" />
             </el-form-item>
-            <el-form-item label="可用工具">
-                <el-select v-model="form.toolList" multiple filterable placeholder="选择租户可用工具" class="w-full">
+            <el-form-item label="智能体权限">
+                <el-select v-model="form.agentList" multiple filterable placeholder="选择租户可用的智能体" class="w-full">
                     <el-option
-                        v-for="item in allTools"
-                        :key="item.toolName"
-                        :label="`${item.toolName}${item.toolAlias ? ' (' + item.toolAlias + ')' : ''}`"
-                        :value="item.toolName" />
+                        v-for="item in allAgents"
+                        :key="item.agentName"
+                        :label="`${item.agentName}${item.agentAlias ? ' (' + item.agentAlias + ')' : ''}`"
+                        :value="item.agentName" />
                 </el-select>
             </el-form-item>
         </el-form>

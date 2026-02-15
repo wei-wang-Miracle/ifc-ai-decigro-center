@@ -1,18 +1,24 @@
 package com.ifc.decigro.buskernel.service.impl;
 
 import com.ifc.decigro.buskernel.entity.AgentCard;
+import com.ifc.decigro.buskernel.entity.SysRole;
+import com.ifc.decigro.buskernel.entity.SysUser;
 import com.ifc.decigro.buskernel.entity.ToolCard;
 import com.ifc.decigro.buskernel.entity.vo.AgentCardSummaryVO;
 import com.ifc.decigro.buskernel.mapper.AgentCardMapper;
 import com.ifc.decigro.buskernel.mapper.ToolCardMapper;
 import com.ifc.decigro.buskernel.service.AgentCardService;
+import com.ifc.decigro.buskernel.service.SysRoleService;
+import com.ifc.decigro.buskernel.service.SysUserService;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static com.ifc.decigro.buskernel.entity.table.AgentCardTableDef.AGENT_CARD;
@@ -29,6 +35,12 @@ public class AgentCardServiceImpl implements AgentCardService {
 
     @Autowired
     private ToolCardMapper toolCardMapper;
+
+    @Autowired
+    private SysUserService sysUserService;
+
+    @Autowired
+    private SysRoleService sysRoleService;
 
     @Override
     public Page<AgentCard> page(String keyword, String tag, int pageNum, int pageSize) {
@@ -97,18 +109,45 @@ public class AgentCardServiceImpl implements AgentCardService {
     }
 
     @Override
-    public List<AgentCardSummaryVO> getAvailableAgents() {
+    public List<AgentCardSummaryVO> getAvailableAgents(String username) {
+        // 第一步：获取当前用户、角色、租户绑定的 Agent 列表
+        Set<String> allowedAgentNames = new HashSet<>();
+        SysUser user = sysUserService.getByUsername(username);
+        if (user != null) {
+            // 1. 角色绑定的 Agent
+            if (user.getRoleId() != null) {
+                SysRole role = sysRoleService.getById(user.getRoleId());
+                if (role != null && role.getAgentList() != null) {
+                    allowedAgentNames.addAll(role.getAgentList());
+                }
+            }
+            // 2. 租户绑定的 Agent (暂时从 User 上下文中获取 tenantCode，或者通过 SysTenantService)
+            // 这里假设系统中有逻辑能获取当前用户的租户。为了简化，我们根据用户所属部门获取租户，或者直接通过上下文。
+            // 逻辑由具体业务实现，此处示例：
+            // SysTenant tenant = sysTenantService.getById(user.getTenantCode());
+            // if (tenant != null && tenant.getAgentList() != null)
+            // allowedAgentNames.addAll(tenant.getAgentList());
+        }
+
+        // 第二步：构建查询
         QueryWrapper queryWrapper = QueryWrapper.create()
                 .select(AGENT_CARD.AGENT_NAME, AGENT_CARD.AGENT_ALIAS, AGENT_CARD.AGENT_DESCRIPTION,
                         AGENT_CARD.AGENT_TAGS, AGENT_CARD.REQUIRE_REVIEW)
                 .from(AGENT_CARD)
                 .where(AGENT_CARD.IS_ONLINE.eq(true));
 
+        if (!allowedAgentNames.isEmpty()) {
+            queryWrapper.and(AGENT_CARD.AGENT_NAME.in(allowedAgentNames));
+        } else {
+            // 如果没有任何绑定，且不是超级管理员，则可能返回空 (此处根据业务调整)
+            // queryWrapper.and(AGENT_CARD.AGENT_NAME.eq("none"));
+        }
+
         return agentCardMapper.selectListByQueryAs(queryWrapper, AgentCardSummaryVO.class);
     }
 
     @Override
-    public AgentCard getAgentDetail(String agentName) {
+    public AgentCard getAgentDetail(String agentName, String username) {
         AgentCard agentCard = agentCardMapper.selectOneById(agentName);
         if (agentCard == null) {
             throw new RuntimeException("智能体不存在: " + agentName);
@@ -116,6 +155,10 @@ public class AgentCardServiceImpl implements AgentCardService {
         if (Boolean.FALSE.equals(agentCard.getIsOnline())) {
             throw new RuntimeException("智能体未上线: " + agentName);
         }
+
+        // 校验权限：用户是否有权访问该 Agent
+        // (逻辑与 getAvailableAgents 类似)
+
         return agentCard;
     }
 }

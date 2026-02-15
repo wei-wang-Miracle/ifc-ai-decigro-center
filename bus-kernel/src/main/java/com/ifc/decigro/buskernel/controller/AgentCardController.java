@@ -1,13 +1,13 @@
 package com.ifc.decigro.buskernel.controller;
 
 import com.ifc.decigro.buskernel.common.api.Result;
+import com.ifc.decigro.buskernel.common.auth.TokenProvider;
 import com.ifc.decigro.buskernel.entity.AgentCard;
 import com.ifc.decigro.buskernel.entity.dto.AgentCardDetailRequest;
 import com.ifc.decigro.buskernel.entity.vo.AgentCardSummaryVO;
 import com.ifc.decigro.buskernel.service.AgentCardService;
 import com.mybatisflex.core.paginate.Page;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -24,6 +24,9 @@ public class AgentCardController {
 
     @Autowired
     private AgentCardService agentCardService;
+
+    @Autowired
+    private TokenProvider tokenProvider;
 
     @GetMapping("/page")
     @Operation(summary = "分页查询智能体列表")
@@ -88,8 +91,10 @@ public class AgentCardController {
      */
     @PostMapping("/available")
     @Operation(summary = "获取可用智能体列表", description = "用于 AI 引擎加载阶段，获取智能体介绍，符合渐进式加载思想")
-    public Result<List<AgentCardSummaryVO>> getAvailableAgents() {
-        return Result.success(agentCardService.getAvailableAgents());
+    public Result<List<AgentCardSummaryVO>> getAvailableAgents(@RequestHeader("X-Auth-Token") String token) {
+        String[] parts = tokenProvider.validateAndParse(token);
+        String username = parts[3];
+        return Result.success(agentCardService.getAvailableAgents(username));
     }
 
     /**
@@ -98,7 +103,11 @@ public class AgentCardController {
      */
     @PostMapping("/detail")
     @Operation(summary = "获取智能体详情", description = "用于 AI 引擎调用阶段，获取智能体使用详情，包含提示词、工具列表等")
-    public Result<AgentCard> getAgentDetail(@RequestBody AgentCardDetailRequest request) {
-        return Result.success(agentCardService.getAgentDetail(request.getAgentName()));
+    public Result<AgentCard> getAgentDetail(
+            @RequestHeader("X-Auth-Token") String token,
+            @RequestBody AgentCardDetailRequest request) {
+        String[] parts = tokenProvider.validateAndParse(token);
+        String username = parts[3];
+        return Result.success(agentCardService.getAgentDetail(request.getAgentName(), username));
     }
 }

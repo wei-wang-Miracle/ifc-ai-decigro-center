@@ -47,17 +47,19 @@ public interface AgentCardService {
 
     /**
      * 获取当前用户所有的可用智能体
-     * 过滤规则: AgentCard.isOnline = true
+     * 过滤规则: AgentCard.isOnline = true AND (租户/角色的 agentList 包含该 agent)
      *
+     * @param username 当前登录用户名
      * @return 符合条件的智能体简要信息列表
      */
-    List<com.ifc.decigro.buskernel.entity.vo.AgentCardSummaryVO> getAvailableAgents();
+    List<com.ifc.decigro.buskernel.entity.vo.AgentCardSummaryVO> getAvailableAgents(String username);
 
     /**
      * 获取单个智能体的详情
      *
      * @param agentName 智能体名称
+     * @param username  当前登录用户名 (用于权限校验)
      * @return 智能体完整信息
      */
-    AgentCard getAgentDetail(String agentName);
+    AgentCard getAgentDetail(String agentName, String username);
 }

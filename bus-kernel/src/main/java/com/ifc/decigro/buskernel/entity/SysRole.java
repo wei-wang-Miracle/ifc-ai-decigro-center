@@ -36,11 +36,11 @@ public class SysRole extends BaseEntity {
     private String roleDesc;
 
     /**
-     * 工具列表
-     * JSONB 存储，对应 PRD 工具分配
+     * 智能体列表
+     * JSONB 存储，对应 PRD 智能体分配
      */
     @Column(typeHandler = Fastjson2TypeHandler.class)
-    private List<String> toolList;
+    private List<String> agentList;
 
     /**
      * 是否有效

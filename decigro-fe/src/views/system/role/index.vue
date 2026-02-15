@@ -11,13 +11,13 @@ const loading = ref(false)
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
 
-const allTools = ref<any[]>([])
+const allAgents = ref<any[]>([])
 
 const form = reactive<any>({
     roleId: null,
     roleName: '',
     roleDesc: '',
-    toolList: [],
+    agentList: [],
     isEnabled: true
 })
 
@@ -40,10 +40,10 @@ const fetchData = async () => {
     }
 }
 
-const fetchAllTools = async () => {
+const fetchAllAgents = async () => {
     try {
-        const res: any = await request.get('/tool/list-all')
-        allTools.value = res || []
+        const res: any = await request.get('/agent/page?size=100')
+        allAgents.value = res.records || []
     } catch (e) {
         console.error(e)
     }
@@ -59,8 +59,8 @@ const handleAdd = () => {
 const handleEdit = (row: any) => {
     dialogTitle.value = '修改系统角色'
     Object.assign(form, row)
-    // 确保 toolList 是数组
-    if (!form.toolList) form.toolList = []
+    // 确保 agentList 是数组
+    if (!form.agentList) form.agentList = []
     dialogVisible.value = true
 }
 
@@ -116,7 +116,7 @@ const resetForm = () => {
         roleId: null,
         roleName: '',
         roleDesc: '',
-        toolList: [],
+        agentList: [],
         isEnabled: true
     })
     ruleFormRef.value?.resetFields()
@@ -124,7 +124,7 @@ const resetForm = () => {
 
 onMounted(() => {
     fetchData()
-    fetchAllTools()
+    fetchAllAgents()
 })
 </script>
 
@@ -138,7 +138,7 @@ onMounted(() => {
             </div>
             <div>
                 <h3 class="text-lg font-bold text-gray-800">角色管理</h3>
-                <p class="text-xs text-gray-400">定义系统操作权限组及其关联工具集</p>
+                <p class="text-xs text-gray-400">定义系统操作权限组及其关联智能体集</p>
             </div>
         </div>
         <div class="flex space-x-2">
@@ -157,13 +157,13 @@ onMounted(() => {
               </template>
           </el-table-column>
           <el-table-column prop="roleDesc" label="权限描述信息" min-width="250" show-overflow-tooltip />
-          <el-table-column label="分配工具" min-width="200">
+          <el-table-column label="分配智能体" min-width="200">
               <template #default="scope">
                   <div class="flex flex-wrap gap-1">
-                      <el-tag v-for="tool in scope.row.toolList" :key="tool" size="small" effect="plain" round>
-                          {{ allTools.find(o => o.toolName === tool)?.toolAlias || tool }}
+                      <el-tag v-for="agent in scope.row.agentList" :key="agent" size="small" effect="plain" round>
+                          {{ allAgents.find(o => o.agentName === agent)?.agentAlias || agent }}
                       </el-tag>
-                      <span v-if="!scope.row.toolList?.length" class="text-gray-400 text-xs">未分配</span>
+                      <span v-if="!scope.row.agentList?.length" class="text-gray-400 text-xs">未分配</span>
                   </div>
               </template>
           </el-table-column>
@@ -195,13 +195,13 @@ onMounted(() => {
             <el-form-item label="角色描述" prop="roleDesc">
                 <el-input v-model="form.roleDesc" type="textarea" placeholder="描述角色的职权访问范围" />
             </el-form-item>
-            <el-form-item label="分配工具" prop="toolList">
-                <el-select v-model="form.toolList" multiple filterable placeholder="请选择可选工具" class="w-full">
+            <el-form-item label="分配智能体" prop="agentList">
+                <el-select v-model="form.agentList" multiple filterable placeholder="请选择可选智能体" class="w-full">
                     <el-option 
-                        v-for="item in allTools" 
-                        :key="item.toolName" 
-                        :label="`${item.toolName}${item.toolAlias ? ' (' + item.toolAlias + ')' : ''}`" 
-                        :value="item.toolName" />
+                        v-for="item in allAgents" 
+                        :key="item.agentName" 
+                        :label="`${item.agentName}${item.agentAlias ? ' (' + item.agentAlias + ')' : ''}`" 
+                        :value="item.agentName" />
                 </el-select>
             </el-form-item>
             <el-form-item label="是否启用">

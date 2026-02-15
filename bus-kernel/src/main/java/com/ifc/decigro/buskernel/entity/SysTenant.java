@@ -31,10 +31,10 @@ public class SysTenant extends BaseEntity {
     private String tenantName;
 
     /**
-     * 绑定的工具列表 (JSONB)
+     * 绑定的智能体列表 (JSONB)
      */
     @Column(typeHandler = Fastjson2TypeHandler.class)
-    private List<String> toolList;
+    private List<String> agentList;
 
     /**
      * 是否有效
