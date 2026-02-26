@@ -299,7 +299,7 @@ async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> C
     plan = state.plan or []
     current_index = state.current_step_index
     query = state.query
-    selected_agent = state.selected_agent
+    current_executor = state.current_executor
     
     # 检查是否有待执行的步骤
     if not plan or current_index >= len(plan):
@@ -311,7 +311,7 @@ async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> C
         )
     
     # 检查是否有可用的 Agent
-    if not selected_agent:
+    if not current_executor:
         return Command(
             update={
                 "error": "没有可用的 Agent 执行此步骤",
@@ -327,10 +327,10 @@ async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> C
     
     # 发送 Agent 开始事件
     agent_registry = get_agent_registry()
-    agent_config = agent_registry.get_agent(selected_agent, token)
-    agent_alias = agent_config.alias if agent_config else selected_agent
+    agent_config = agent_registry.get_agent(current_executor, token)
+    agent_alias = agent_config.alias if agent_config else current_executor
     
-    await adispatch_custom_event("agent_start", {"agent": selected_agent, "alias": agent_alias}, config=config)
+    await adispatch_custom_event("agent_start", {"agent": current_executor, "alias": agent_alias}, config=config)
 
     # 更新步骤状态
     current_step.status = StepStatus.IN_PROGRESS
@@ -342,7 +342,7 @@ async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> C
     token = state.token
     result, tool_trace_snapshots, used_system_prompt = await _execute_step_with_agent(
         step=current_step,
-        agent_name=selected_agent,
+        agent_name=current_executor,
         query=query,
         token=token,
         config=config,
@@ -351,7 +351,7 @@ async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> C
     # 审计：构建 Agent 快照（包含工具调用详情、system_prompt 和 agent_result）
     settings = get_settings()
     agent_snap = build_agent_snapshot(
-        agent_name=selected_agent,
+        agent_name=current_executor,
         model_config={"provider": "openai", "model_name": settings.llm_model},
         tools_snapshot=tool_trace_snapshots,
         system_prompt=used_system_prompt,

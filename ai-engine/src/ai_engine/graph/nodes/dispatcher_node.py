@@ -9,83 +9,127 @@ from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
 from langgraph.types import Command
 
-from ..state import AgentState, IntentType, PlanStep, ReviewStatus, StepStatus
-from ...config import get_settings
-from ...registry import get_agent_registry
-from langchain_core.runnables import RunnableConfig
-from ...audit import start_node_trace, finish_node_trace
-
+from ..state import AgentState, IntentType, IntentObject, PlanStep, ReviewStatus, StepStatus
 
 # Agent 选择 Prompt 模板
-AGENT_SELECTION_PROMPT = """你是一个智能调度专家。根据当前任务步骤，从可用的 Agent 列表中选择最合适的执行者。
+PLANNER_SELECTION_PROMPT = """你是一个智能调度专家。根据用户的意图，从可用的 Planner Agent 列表中选择最合适的一个来负责本次任务规划。
 
 ## 调度原则
-1. **优先匹配专项 Agent**：如果任务属于某个 Agent 的专业领域，优先分配给该 Agent。
-2. **通用需求回退**：如果任务属于通用交流、闲聊、或没有合适的专项 Agent 能够处理，请选择列表中标记为"通用"或"默认"的智能体。
-3. **通用智能体能力**：通用智能体拥有系统中所有可用的工具，适合处理综合性、通用性或跨领域的任务。
+1. **优先匹配专项 Planner**：如果意图明确属于某个业务领域，优先分配给对应的 Planner。
+2. **默认 Planner**：如果意图广泛或找不到完全匹配的专项领域，选择带有"通用"或"系统"等标识的 Planner。
 
-## 可用 Agent 列表
+## 可用 Planner 列表
+{agent_descriptions}
+
+## 用户意图
+{intent_description}
+
+## 输出要求
+请直接返回选中的 Planner 名称（agent_name），严禁输出任何解释性文字。
+
+## 选择结果
+"""
+
+EXECUTOR_SELECTION_PROMPT = """你是一个任务分配专家(Planner的助手)。根据当前待执行的具体任务步骤，从 Planner 绑定的可用 Executor 列表中选择最合适的一个来执行该步骤。
+
+## 分配原则
+1. **最匹配原则**：选择职责描述最符合当前步骤要求的 Executor。
+2. **兜底分配的 Executor**：如果没有最合适的，返回列表中第一个即可。
+
+## 可用 Executor 列表
 {agent_descriptions}
 
 ## 当前待执行任务步骤
 {step_description}
 
 ## 输出要求
-请直接返回选中的 Agent 名称（agent_name），严禁输出任何解释性文字。
+请直接返回选中的 Executor 名称（agent_name），严禁输出任何解释性文字。
 
 ## 选择结果
 """
 
-
 def _get_fallback_agent(agent_names: list[str]) -> str | None:
-    """
-    功能: 获取回退 Agent（优先选择通用/默认 Agent）
-    参数: agent_names - 可用的 Agent 名称列表
-    返回: Agent 名称，如果没有可用 Agent 则返回 None
-    """
+    """获取回退 Agent"""
     if not agent_names:
         return None
-    # 优先返回第一个可用的 Agent（期望 Agent Card 已正确配置优先级）
     return agent_names[0]
 
 
-async def _select_agent_for_step(step: PlanStep, token: str, config: RunnableConfig = None) -> str | None:
-    """
-    功能: 为任务步骤选择最合适的 Agent (Async)
-    参数: 
-        step - 当前计划步骤
-        token - 用户 Token
-    返回: Agent 名称，如果没有可用 Agent 则返回 None
-    """
-    # 如果步骤已经指定了 Agent，直接使用
-    if step.assigned_agent:
-        return step.assigned_agent
-    
+async def _select_planner_agent(intent: IntentObject, token: str, config: RunnableConfig = None) -> str | None:
+    """为全局意图选择合适的 Planner Agent"""
     agent_registry = get_agent_registry()
-    descriptions = agent_registry.get_agent_descriptions(token)
+    descriptions = agent_registry.get_agent_descriptions(token, agent_type="PLANNER")
     agent_names = list(descriptions.keys())
     
     if not descriptions:
-        print("[Dispatcher] 警告: 没有可用的 Agent")
-        return _get_fallback_agent(agent_names)
+        print("[Dispatcher] 警告: 没有可用的 PLANNER Agent")
+        return None
     
-    # 构建 Agent 描述文本
-    agent_desc_text = "\n".join([
-        f"- **{name}**: {desc}"
-        for name, desc in descriptions.items()
-    ])
-    
-    # 使用 LLM 选择 Agent
+    if len(descriptions) == 1:
+        return agent_names[0]
+        
     settings = get_settings()
     llm = ChatOpenAI(
         model=settings.llm_model,
         api_key=settings.openai_api_key,
         base_url=settings.openai_api_base,
-        temperature=0.1,  # 调度推荐低温度
+        temperature=0.1,
         streaming=True
     )
     
-    prompt = AGENT_SELECTION_PROMPT.format(
+    agent_desc_text = "\n".join([f"- **{name}**: {desc}" for name, desc in descriptions.items()])
+    prompt = PLANNER_SELECTION_PROMPT.format(
+        agent_descriptions=agent_desc_text,
+        intent_description=f"意图类型: {intent.intent_type}\n实体: {intent.entities}"
+    )
+    
+    try:
+        response = await llm.ainvoke(prompt, config=config)
+        agent_name = response.content.strip()
+        if agent_name in descriptions:
+            return agent_name
+        return _get_fallback_agent(agent_names)
+    except Exception as e:
+        print(f"[Dispatcher] Planner 选择失败: {e}")
+        return _get_fallback_agent(agent_names)
+
+
+async def _select_executor_agent(step: PlanStep, planner_name: str, token: str, config: RunnableConfig = None) -> str | None:
+    """为任务步骤选择最合适的 bounded Executor Agent"""
+    if step.assigned_agent:
+        return step.assigned_agent
+    
+    agent_registry = get_agent_registry()
+    
+    # 获取 Planner 的 bound_agents
+    planner = agent_registry.get_agent(planner_name, token) if planner_name else None
+    bound_agents = planner.bound_agents if planner else []
+    
+    # 获取所有的 Executor 描述
+    all_executors = agent_registry.get_agent_descriptions(token, agent_type="EXECUTOR")
+    
+    # 如果 planner 有 bound_agents，则过滤；否则回退到全局所有的 EXECUTOR（防止旧数据或未配置绑定）
+    descriptions = {name: desc for name, desc in all_executors.items() if name in bound_agents} if bound_agents else all_executors
+    agent_names = list(descriptions.keys())
+    
+    if not descriptions:
+        print("[Dispatcher] 警告: 没有可用的 EXECUTOR Agent (即便尝试回退)")
+        return _get_fallback_agent(list(all_executors.keys()))
+        
+    if len(descriptions) == 1:
+        return agent_names[0]
+    
+    settings = get_settings()
+    llm = ChatOpenAI(
+        model=settings.llm_model,
+        api_key=settings.openai_api_key,
+        base_url=settings.openai_api_base,
+        temperature=0.1,
+        streaming=True
+    )
+    
+    agent_desc_text = "\n".join([f"- **{name}**: {desc}" for name, desc in descriptions.items()])
+    prompt = EXECUTOR_SELECTION_PROMPT.format(
         agent_descriptions=agent_desc_text,
         step_description=step.description,
     )
@@ -93,16 +137,12 @@ async def _select_agent_for_step(step: PlanStep, token: str, config: RunnableCon
     try:
         response = await llm.ainvoke(prompt, config=config)
         agent_name = response.content.strip()
-        
-        # 验证返回的 Agent 是否存在
         if agent_name in descriptions:
             return agent_name
-        # 回退到第一个可用 Agent
         return _get_fallback_agent(agent_names)
     except Exception as e:
-        print(f"[Dispatcher] Agent 选择失败: {e}")
+        print(f"[Dispatcher] Executor 选择失败: {e}")
         return _get_fallback_agent(agent_names)
-
 
 async def dispatcher_node(state: AgentState, config: RunnableConfig) -> Command:
     """
@@ -142,8 +182,16 @@ async def dispatcher_node(state: AgentState, config: RunnableConfig) -> Command:
 
     print(f"[Dispatcher] 路由决策: {next_route}")
     
-    # 2. 如果是跳转到执行器，选择具体的 Agent
-    selected_agent = None
+    # 2. 状态更新变量
+    current_planner = state.current_planner
+    current_executor = state.current_executor
+    
+    if next_route == "planner":
+        # 路由到 planner 之前，选择具体的 Planner Agent
+        current_planner = await _select_planner_agent(intent, state.token, config=config)
+        if current_planner:
+            print(f"[Dispatcher] 选择 Planner: {current_planner}")
+
     if next_route == "executor":
         plan = state.plan or []
         current_index = state.current_step_index
@@ -151,21 +199,25 @@ async def dispatcher_node(state: AgentState, config: RunnableConfig) -> Command:
         if plan and current_index < len(plan):
             current_step = plan[current_index]
             token = state.token
-            selected_agent = await _select_agent_for_step(current_step, token, config=config)
-            if not selected_agent or selected_agent == "None":
-                print(f"[Dispatcher] 警告: 无法为步骤 {current_step.step_id} 选择 Agent")
+            current_executor = await _select_executor_agent(current_step, current_planner, token, config=config)
+            if not current_executor:
+                print(f"[Dispatcher] 警告: 无法为步骤 {current_step.step_id} 选择 Executor")
             else:
-                print(f"[Dispatcher] 选择 Agent: {selected_agent} 执行步骤: {current_step.description}")
+                print(f"[Dispatcher] 选择 Executor: {current_executor} 执行步骤: {current_step.description}")
 
     # 审计埋点：记录路由决策
-    route_result = f"路由到: {next_route}" + (f", Agent: {selected_agent}" if selected_agent else "")
+    route_result = f"路由到: {next_route}"
+    if current_planner and next_route == "planner":
+        route_result += f", Planner: {current_planner}"
+    if current_executor and next_route == "executor":
+        route_result += f", Executor: {current_executor}"
     finish_node_trace(nt, "SUCCESS", node_result=route_result)
 
     # 3. 使用 Command 返回
     if next_route == "__end__":
         return Command(
             update={
-                "selected_agent": None,
+                "current_executor": None,
                 "messages": [AIMessage(content="[Dispatcher] 任务计划执行完毕，正在通过汇总节点生成响应...")],
                 "node_traces": state.node_traces + [nt],
             },
@@ -174,7 +226,8 @@ async def dispatcher_node(state: AgentState, config: RunnableConfig) -> Command:
     else:
         return Command(
             update={
-                "selected_agent": selected_agent,
+                "current_planner": current_planner,
+                "current_executor": current_executor,
                 "messages": [AIMessage(content=f"[Dispatcher] 路由到: {next_route}")],
                 "node_traces": state.node_traces + [nt],
             },

@@ -1,6 +1,7 @@
 package com.ifc.decigro.buskernel.service;
 
 import com.ifc.decigro.buskernel.entity.AgentCard;
+import com.ifc.decigro.buskernel.entity.ToolCard;
 import com.mybatisflex.core.paginate.Page;
 
 import java.util.List;
@@ -13,7 +14,7 @@ public interface AgentCardService {
     /**
      * 分页查询智能体列表
      */
-    Page<AgentCard> page(String keyword, String tag, int pageNum, int pageSize);
+    Page<AgentCard> page(String keyword, String tag, String agentType, int pageNum, int pageSize);
 
     /**
      * 根据名称查询智能体详情 (主键变更为 String)
@@ -44,6 +45,27 @@ public interface AgentCardService {
      * 获取所有可绑定的工具列表
      */
     List<String> getAvailableTools();
+
+    /**
+     * 获取所有可绑定的 Executor 列表
+     */
+    List<String> getAvailableExecutors();
+
+    /**
+     * 向 ai-engine 提供接口：根据 Planner ID 获取其名下所有的 Executor
+     * 
+     * @param plannerName Planner 智能体名称
+     * @return Executor 列表
+     */
+    List<AgentCard> getExecutorListByPlanner(String plannerName);
+
+    /**
+     * 向 ai-engine 提供接口：根据 Executor ID 获取其被授权的可用 Tool 列表
+     * 
+     * @param executorName Executor 智能体名称
+     * @return ToolCard 列表
+     */
+    List<ToolCard> getToolListByExecutor(String executorName);
 
     /**
      * 获取当前用户所有的可用智能体

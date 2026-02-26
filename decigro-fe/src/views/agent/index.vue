@@ -14,9 +14,11 @@ interface AgentCard {
     agentAlias: string
     agentDescription: string
     agentTags: string[]
+    agentType: string
     systemPrompt: string
     negativePrompt: string
     boundTools: string[] | null
+    boundAgents: string[] | null
     reasoningFramework: string
     agentVersion: string
     isOnline: boolean
@@ -27,13 +29,17 @@ interface AgentCard {
 }
 
 // --- 列表相关 ---
-const cardList = ref<AgentCard[]>([])
+const plannerList = ref<AgentCard[]>([])
+const executorList = ref<AgentCard[]>([])
+// 保存完整的 Executor 列表，用于在取消过滤时恢复
+const fullExecutorList = ref<AgentCard[]>([])
+
 const loading = ref(false)
-const total = ref(0)
-const pageNum = ref(1)
-const pageSize = ref(12)
 const searchKeyword = ref('')
 const searchTag = ref('')
+
+// 当点击的 Planner 名称（用于高亮显示和过滤）
+const activePlanner = ref<string>('')
 
 // --- 卡片翻转状态 (使用 agentName 作为 Key) ---
 const flippedCards = ref<Set<string>>(new Set())
@@ -48,9 +54,11 @@ const form = reactive<AgentCard>({
     agentAlias: '',
     agentDescription: '',
     agentTags: [],
+    agentType: 'EXECUTOR',
     systemPrompt: '',
     negativePrompt: '',
     boundTools: null,
+    boundAgents: [],
     reasoningFramework: 'ReAct',
     agentVersion: '1.0.0',
     isOnline: true,
@@ -72,7 +80,14 @@ const formRules = reactive<FormRules>({
 
 // --- 可用工具列表 ---
 const availableTools = ref<string[]>([])
+const availableExecutors = ref<string[]>([])
 const newTag = ref('')
+
+// --- 智能体类型选项 ---
+const agentTypeOptions = [
+    { label: 'PLANNER (业务规划)', value: 'PLANNER' },
+    { label: 'EXECUTOR (任务执行)', value: 'EXECUTOR' }
+]
 
 // --- 推理框架选项 ---
 const frameworkOptions = [
@@ -89,12 +104,24 @@ const frameworkOptions = [
 const fetchList = async () => {
     loading.value = true
     try {
-        const params: any = { page: pageNum.value, size: pageSize.value }
+        const params: any = { page: 1, size: 999 } // Fetch all agents for front-end categorization
         if (searchKeyword.value) params.keyword = searchKeyword.value
         if (searchTag.value) params.tag = searchTag.value
         const res: any = await request.get('/agent/page', { params })
-        cardList.value = res.records || []
-        total.value = res.totalRow || 0
+        const allCards: AgentCard[] = res.records || []
+        
+        plannerList.value = allCards.filter(c => c.agentType === 'PLANNER')
+        fullExecutorList.value = allCards.filter(c => c.agentType === 'EXECUTOR')
+        
+        // 如果当前有激活的 Planner，且该 Planner 仍存在，则保留过滤状态
+        // 否则显示所有 EXECUTOR
+        if (activePlanner.value && plannerList.value.some(p => p.agentName === activePlanner.value)) {
+           await loadBoundExecutors(activePlanner.value)
+        } else {
+           activePlanner.value = ''
+           executorList.value = [...fullExecutorList.value]
+        }
+
     } catch (e) {
         console.error('获取列表失败', e)
     } finally {
@@ -102,8 +129,34 @@ const fetchList = async () => {
     }
 }
 
+const loadBoundExecutors = async (plannerName: string) => {
+    try {
+        loading.value = true
+        activePlanner.value = plannerName
+        const res: any = await request.get('/agent/executor-list', { params: { plannerName } })
+        
+        // 仅显示该 Planner 绑定的并且处于当前完整列表中的 executor（可能存在 keyword 搜索的交集处理）
+        const boundNames = res.map((c: AgentCard) => c.agentName)
+        executorList.value = fullExecutorList.value.filter(e => boundNames.includes(e.agentName))
+    } catch (e) {
+        console.error('获取绑定 executor 失败', e)
+    } finally {
+        loading.value = false
+    }
+}
+
+const handlePlannerClick = async (plannerName: string) => {
+    // 再次点击取消过滤
+    if (activePlanner.value === plannerName) {
+        activePlanner.value = ''
+        executorList.value = [...fullExecutorList.value]
+    } else {
+        await loadBoundExecutors(plannerName)
+    }
+}
+
 const handleSearch = () => {
-    pageNum.value = 1
+    activePlanner.value = '' // Clear selection on search
     fetchList()
 }
 
@@ -114,11 +167,19 @@ const fetchAvailableTools = async () => {
     } catch (e) { console.error(e) }
 }
 
+const fetchAvailableExecutors = async () => {
+    try {
+        const res: any = await request.get('/agent/available-executors')
+        availableExecutors.value = res || []
+    } catch (e) { console.error(e) }
+}
+
 const handleAdd = () => {
     dialogTitle.value = '入职新智能体'
     isEdit.value = false
     resetForm()
     fetchAvailableTools()
+    fetchAvailableExecutors()
     dialogVisible.value = true
 }
 
@@ -127,7 +188,9 @@ const handleEdit = (card: AgentCard) => {
     isEdit.value = true
     Object.assign(form, JSON.parse(JSON.stringify(card)))
     if (!form.agentTags) form.agentTags = []
+    if (!form.boundAgents) form.boundAgents = []
     fetchAvailableTools()
+    fetchAvailableExecutors()
     dialogVisible.value = true
 }
 
@@ -161,9 +224,11 @@ const resetForm = () => {
         agentAlias: '',
         agentDescription: '',
         agentTags: [],
+        agentType: 'EXECUTOR',
         systemPrompt: '',
         negativePrompt: '',
         boundTools: null,
+        boundAgents: [],
         reasoningFramework: 'ReAct',
         agentVersion: '1.0.0',
         isOnline: true,
@@ -194,8 +259,8 @@ onMounted(() => fetchList())
         <div class="header-left">
             <div class="header-icon"><el-icon class="text-white"><Cpu /></el-icon></div>
             <div class="header-info">
-                <h3 class="header-title">MAS 智能体管理中心</h3>
-                <p class="header-subtitle">{{ total }} 名就职员工</p>
+                <h3 class="header-title">MAS 智能体拓扑管理</h3>
+                <p class="header-subtitle">PLANNER(规划者) / EXECUTOR(执行者) 联动编排</p>
             </div>
             <el-button type="primary" :icon="Plus" @click="handleAdd" class="add-btn">
                 创建智能体
@@ -208,14 +273,23 @@ onMounted(() => fetchList())
         </div>
     </div>
 
-    <!-- 工牌网格 -->
-    <div class="badge-wall" v-loading="loading">
-        <div 
-            v-for="(card, index) in cardList" 
-            :key="card.agentName" 
-            class="badge-container entrance-swing"
-            :class="{ 'is-flipped': flippedCards.has(card.agentName) }"
-            :style="{ animationDelay: `${index * 0.1}s` }">
+    <!-- 主体区域：左侧 PLANNER (25%) / 右侧 EXECUTOR (75%) -->
+    <div class="main-content" v-loading="loading">
+        <!-- 左侧 Planner 列表 (1列) -->
+        <div class="planner-column">
+            <h4 class="column-title">规划者 (PLANNER)</h4>
+            <div class="badge-wall planner-wall">
+                <div 
+                    v-for="(card, index) in plannerList" 
+                    :key="card.agentName" 
+                    class="badge-container entrance-swing"
+                    :class="{ 
+                        'is-flipped': flippedCards.has(card.agentName),
+                        'is-active': activePlanner === card.agentName
+                    }"
+                    :style="{ animationDelay: `${index * 0.1}s` }"
+                    @click="handlePlannerClick(card.agentName)">
+                    <!-- 卡片内部复用 -->
             
             <div class="lanyard"><div class="lanyard-clip"></div><div class="lanyard-string"></div></div>
             
@@ -237,7 +311,7 @@ onMounted(() => fetchList())
                     </div>
                     
                     <div class="id-band">
-                        <span class="id-text">{{ card.agentName }}</span>
+                        <span class="id-text">[{{ card.agentType || 'EXECUTOR' }}] {{ card.agentName }}</span>
                     </div>
                     
                     <div class="card-main">
@@ -269,7 +343,7 @@ onMounted(() => fetchList())
                 <div class="badge-back">
                     <div class="back-header">
                         <span>内核设定</span>
-                        <button class="close-btn" @click="handleFlip(card.agentName)">✕</button>
+                        <button class="close-btn" @click.stop="handleFlip(card.agentName)">✕</button>
                     </div>
                     <div class="back-content">
                         <div class="info-section">
@@ -292,8 +366,105 @@ onMounted(() => fetchList())
                         </div>
                     </div>
                     <div class="back-actions">
-                        <el-button circle :icon="card.isOnline ? Close : Check" :type="card.isOnline ? 'info' : 'success'" @click="handleToggleOnline(card)" />
-                        <el-button circle :icon="Edit" @click="handleEdit(card)" />
+                        <el-button circle :icon="card.isOnline ? Close : Check" :type="card.isOnline ? 'info' : 'success'" @click.stop="handleToggleOnline(card)" />
+                        <el-button circle :icon="Edit" @click.stop="handleEdit(card)" />
+                    </div>
+                </div>
+            </div>
+        </div>
+        </div>
+        </div>
+
+        <!-- 右侧 Executor 列表 (3列) -->
+        <div class="executor-column">
+            <h4 class="column-title">执行者 (EXECUTOR) <span v-if="activePlanner" class="filter-hint">- 当前筛选: {{ activePlanner }}</span></h4>
+            <div class="badge-wall executor-wall">
+                <div 
+                    v-for="(card, index) in executorList" 
+                    :key="card.agentName" 
+                    class="badge-container entrance-swing"
+                    :class="{ 'is-flipped': flippedCards.has(card.agentName) }"
+                    :style="{ animationDelay: `${index * 0.05}s` }">
+                    
+                    <div class="lanyard"><div class="lanyard-clip"></div><div class="lanyard-string"></div></div>
+                    
+                    <div class="badge-flipper">
+                        <!-- 正面: 参考图片样式优化 -->
+                        <div class="badge-front">
+                            <!-- 右上角配置按钮 -->
+                            <button class="config-btn-top" @click.stop="handleFlip(card.agentName)" title="查看配置详情">
+                                <el-icon><Edit /></el-icon>
+                            </button>
+                            
+                            <div class="status-bar" :class="card.isOnline ? 'online' : 'offline'">
+                                <span class="status-dot"></span>
+                                {{ card.isOnline ? 'READY' : 'OFF' }}
+                            </div>
+
+                            <div v-if="card.requireReview" class="review-badge" title="需要人工审核">
+                                <el-icon><Check /></el-icon> REVIEW
+                            </div>
+                            
+                            <div class="id-band">
+                                <span class="id-text">[{{ card.agentType || 'EXECUTOR' }}] {{ card.agentName }}</span>
+                            </div>
+                            
+                            <div class="card-main">
+                                <div class="avatar-box">
+                                    <img 
+                                        :src="`https://api.dicebear.com/9.x/notionists/svg?seed=${card.agentName}`" 
+                                        :alt="card.agentAlias"
+                                        class="pixel-avatar-img"
+                                    />
+                                </div>
+                                
+                                <div class="info-content">
+                                    <h4 class="info-alias">{{ card.agentAlias }}</h4>
+                                    <p class="info-desc">{{ card.agentDescription }}</p>
+                                </div>
+                            </div>
+                            
+                            <div class="card-divider"></div>
+                            
+                            <div class="card-footer-new">
+                                <div class="footer-brand">MAS.CORE</div>
+                                <div class="footer-tags-area">
+                                    <span v-for="tag in card.agentTags.slice(0, 2)" :key="tag" class="footer-tag">{{ tag }}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 背面: 核心配置 -->
+                        <div class="badge-back">
+                            <div class="back-header">
+                                <span>内核设定</span>
+                                <button class="close-btn" @click.stop="handleFlip(card.agentName)">✕</button>
+                            </div>
+                            <div class="back-content">
+                                <div class="info-section">
+                                    <div class="info-label">系统指令 (Prompt)</div>
+                                    <div class="info-value prompt-box">{{ card.systemPrompt }}</div>
+                                </div>
+                                <div class="info-section">
+                                    <div class="info-label">工具权限</div>
+                                    <div class="tool-list">
+                                        <template v-if="card.boundTools === null">
+                                            <span class="tool-badge all">全量启用 (All Tools)</span>
+                                        </template>
+                                        <template v-else-if="card.boundTools.length === 0">
+                                            <span class="tool-badge none">纯文本模式 (Chat Only)</span>
+                                        </template>
+                                        <template v-else>
+                                            <span v-for="t in card.boundTools" :key="t" class="tool-badge">{{ t }}</span>
+                                        </template>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="back-actions">
+                                <el-button circle :icon="card.isOnline ? Close : Check" :type="card.isOnline ? 'info' : 'success'" @click.stop="handleToggleOnline(card)" />
+                                <el-button circle :icon="Edit" @click.stop="handleEdit(card)" />
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -318,6 +489,15 @@ onMounted(() => fetchList())
             <el-form-item label="职能描述" prop="agentDescription">
                 <el-input v-model="form.agentDescription" type="textarea" :rows="2" placeholder="展示在工牌上的描述" />
             </el-form-item>
+            <el-row :gutter="20">
+                <el-col :span="12">
+                    <el-form-item label="智能体类型" prop="agentType">
+                        <el-select v-model="form.agentType" class="w-full">
+                            <el-option v-for="o in agentTypeOptions" :key="o.value" :label="o.label" :value="o.value" />
+                        </el-select>
+                    </el-form-item>
+                </el-col>
+            </el-row>
             <el-form-item label="系统提示词" prop="systemPrompt">
                 <el-input v-model="form.systemPrompt" type="textarea" :rows="6" placeholder="System Message" />
             </el-form-item>
@@ -345,11 +525,21 @@ onMounted(() => fetchList())
                     </el-form-item>
                 </el-col>
             </el-row>
-            <el-form-item label="工具绑定">
+            <el-form-item label="执行器绑定" v-if="form.agentType === 'PLANNER'">
+                <el-select 
+                    v-model="form.boundAgents" 
+                    multiple 
+                    placeholder="选择可用的 Executor (子节点)"
+                    class="w-full">
+                    <el-option v-for="a in availableExecutors" :key="a" :label="a" :value="a" />
+                </el-select>
+            </el-form-item>
+
+            <el-form-item label="工具绑定" v-if="form.agentType === 'EXECUTOR'">
                 <el-radio-group v-model="form.boundTools" class="mb-2">
-                    <el-radio :label="null">默认全量 (All)</el-radio>
+                    <el-radio :label="null">默认全量公开工具 (All Public)</el-radio>
                     <el-radio :label="[]">无工具 (Chat Only)</el-radio>
-                    <el-radio label="specific">白名单 (Allowlist)</el-radio>
+                    <el-radio label="specific">白名单 (Allowlist, 支持 Protected 工具)</el-radio>
                 </el-radio-group>
                 <el-select 
                     v-if="typeof form.boundTools === 'string' || (form.boundTools && form.boundTools.length > 0)"
@@ -376,8 +566,24 @@ onMounted(() => fetchList())
 .header-icon { width: 40px; height: 40px; background: #000; display: flex; align-items: center; justify-content: center; border-radius: 4px; }
 .header-title { font-weight: 800; font-size: 18px; margin: 0; }
 .header-subtitle { font-size: 12px; color: #666; margin: 0; font-family: monospace; }
-.badge-wall { flex: 1; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 60px 24px; padding: 40px 20px 20px; overflow-y: auto; background: #f8faff; }
-.badge-container { display: flex; flex-direction: column; align-items: center; perspective: 1000px; transform-origin: top center; }
+.badge-container { display: flex; flex-direction: column; align-items: center; perspective: 1000px; transform-origin: top center; cursor: pointer; transition: transform 0.2s; }
+
+/* 布局调整 */
+.main-content { flex: 1; display: flex; gap: 24px; padding: 20px; overflow-y: hidden; background: #f8faff; height: 0; min-height: 0;}
+.planner-column { flex: 1; display: flex; flex-direction: column; background: #fff; border-radius: 12px; border: 2px solid #e2e8f0; overflow: hidden; }
+.executor-column { flex: 3; display: flex; flex-direction: column; background: #fff; border-radius: 12px; border: 2px solid #e2e8f0; overflow: hidden; }
+
+.column-title { margin: 0; padding: 16px; font-size: 16px; font-weight: 800; border-bottom: 2px solid #e2e8f0; background: #f1f5f9; display: flex; align-items: center;}
+.filter-hint { margin-left: auto; color: #f59e0b; font-size: 12px; background: #fef3c7; padding: 2px 8px; border-radius: 4px; border: 1px solid #fcd34d; font-weight: normal; }
+
+.badge-wall { flex: 1; overflow-y: auto; padding: 40px 20px; }
+/* 强制列数 */
+.planner-wall { display: grid; grid-template-columns: repeat(1, 1fr); gap: 60px 12px; justify-items: center; }
+/* >= 3列的弹性网格 */
+.executor-wall { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 60px 24px; justify-items: center; }
+
+/* 选中 Planner 高亮提示 */
+.badge-container.is-active .badge-front { border-color: #f59e0b; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.3); }
 
 /* 入场摆动动画 */
 .entrance-swing {

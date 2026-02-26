@@ -3,6 +3,7 @@ package com.ifc.decigro.buskernel.controller;
 import com.ifc.decigro.buskernel.common.api.Result;
 import com.ifc.decigro.buskernel.common.auth.TokenProvider;
 import com.ifc.decigro.buskernel.entity.AgentCard;
+import com.ifc.decigro.buskernel.entity.ToolCard;
 import com.ifc.decigro.buskernel.entity.dto.AgentCardDetailRequest;
 import com.ifc.decigro.buskernel.entity.vo.AgentCardSummaryVO;
 import com.ifc.decigro.buskernel.service.AgentCardService;
@@ -33,9 +34,10 @@ public class AgentCardController {
     public Result<Page<AgentCard>> page(
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String tag,
+            @RequestParam(required = false) String agentType,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "12") int size) {
-        return Result.success(agentCardService.page(keyword, tag, page, size));
+        return Result.success(agentCardService.page(keyword, tag, agentType, page, size));
     }
 
     @GetMapping("/detail/{agentName}")
@@ -83,6 +85,24 @@ public class AgentCardController {
     @Operation(summary = "获取可绑定工具列表")
     public Result<List<String>> getAvailableTools() {
         return Result.success(agentCardService.getAvailableTools());
+    }
+
+    @GetMapping("/available-executors")
+    @Operation(summary = "获取可绑定的Executor列表")
+    public Result<List<String>> getAvailableExecutors() {
+        return Result.success(agentCardService.getAvailableExecutors());
+    }
+
+    @GetMapping("/executor-list")
+    @Operation(summary = "获取Planner绑定的Executor列表")
+    public Result<List<AgentCard>> getExecutorListByPlanner(@RequestParam String plannerName) {
+        return Result.success(agentCardService.getExecutorListByPlanner(plannerName));
+    }
+
+    @GetMapping("/tool-list")
+    @Operation(summary = "获取Executor绑定的可用Tool列表")
+    public Result<List<ToolCard>> getToolListByExecutor(@RequestParam String executorName) {
+        return Result.success(agentCardService.getToolListByExecutor(executorName));
     }
 
     /**

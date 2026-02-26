@@ -124,7 +124,8 @@ class AgentState:
     - require_review: 是否需要人工审核
     - review_status: 审核状态
     - review_feedback: 审核反馈
-    - selected_agent: 当前选择的 Agent 名称
+    - current_planner: 当前 Planner
+    - current_executor: 当前 Executor
     - error: 全局错误信息
     """
     pass
@@ -170,8 +171,9 @@ class AgentState(BaseModel):
     review_status: Optional[ReviewStatus] = Field(default=None, description="当前人工审核的状态（待审、通过、驳回）")
     review_feedback: Optional[str] = Field(default=None, description="人工审核提供的反馈或说明意见")
     
-    # Agent 选择
-    selected_agent: Optional[str] = Field(default=None, description="当前调度选中的执行 Agent 名称")
+    # Agent 选择 (Hierarchical Routing)
+    current_planner: Optional[str] = Field(default=None, description="当前负责拆解和分发任务的 Planner Agent 名称")
+    current_executor: Optional[str] = Field(default=None, description="当前正在执行任务的 Executor Agent 名称")
     
     # 错误信息
     error: Optional[str] = Field(default=None, description="工作流执行过程中产生的全局错误或异常信息")
@@ -221,7 +223,8 @@ def create_initial_state(
         require_review=False,
         review_status=None,
         review_feedback=None,
-        selected_agent=None,
+        current_planner=None,
+        current_executor=None,
         error=None,
         token=token,
         node_traces=[],

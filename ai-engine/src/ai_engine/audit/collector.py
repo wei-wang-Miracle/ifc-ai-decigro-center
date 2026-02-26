@@ -95,8 +95,8 @@ def _build_trace_index(state, ai_response: str, node_traces: list = None) -> dic
     execution_path = []
     if node_traces:
         execution_path = [nt.get("node_name", "") for nt in node_traces if nt.get("node_name")]
-    elif state.selected_agent:
-        execution_path.append(state.selected_agent)
+    elif state.current_executor:
+        execution_path.append(state.current_executor)
 
     # 判断最终状态
     if state.error:
@@ -129,7 +129,7 @@ def _build_trace_index(state, ai_response: str, node_traces: list = None) -> dic
         "deptId": None,
         "tenantCode": None,
         # 智能体画像
-        "agentName": state.selected_agent or "",
+        "agentName": state.current_executor or state.current_planner or "",
         "agentVersion": None,
         "modelProvider": get_settings().llm_model,
         "userFeedback": 0,

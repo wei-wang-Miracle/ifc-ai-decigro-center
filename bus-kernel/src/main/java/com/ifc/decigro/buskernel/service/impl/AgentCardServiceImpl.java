@@ -16,6 +16,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -43,7 +44,7 @@ public class AgentCardServiceImpl implements AgentCardService {
     private SysRoleService sysRoleService;
 
     @Override
-    public Page<AgentCard> page(String keyword, String tag, int pageNum, int pageSize) {
+    public Page<AgentCard> page(String keyword, String tag, String agentType, int pageNum, int pageSize) {
         QueryWrapper queryWrapper = QueryWrapper.create();
 
         if (StringUtils.hasText(keyword)) {
@@ -54,6 +55,10 @@ public class AgentCardServiceImpl implements AgentCardService {
 
         if (StringUtils.hasText(tag)) {
             queryWrapper.and("agent_tags @> '" + tag + "'");
+        }
+
+        if (StringUtils.hasText(agentType)) {
+            queryWrapper.and(AGENT_CARD.AGENT_TYPE.eq(agentType));
         }
 
         queryWrapper.orderBy(AGENT_CARD.UPDATE_TIME.desc());
@@ -106,6 +111,56 @@ public class AgentCardServiceImpl implements AgentCardService {
 
         List<ToolCard> tools = toolCardMapper.selectListByQuery(queryWrapper);
         return tools.stream().map(ToolCard::getToolName).collect(Collectors.toList());
+    }
+
+    @Override
+    public List<String> getAvailableExecutors() {
+        QueryWrapper queryWrapper = QueryWrapper.create()
+                .where(AGENT_CARD.AGENT_TYPE.eq("EXECUTOR"))
+                .and(AGENT_CARD.IS_ONLINE.eq(true))
+                .orderBy(AGENT_CARD.AGENT_NAME.asc());
+        List<AgentCard> agents = agentCardMapper.selectListByQuery(queryWrapper);
+        return agents.stream().map(AgentCard::getAgentName).collect(Collectors.toList());
+    }
+
+    @Override
+    public List<AgentCard> getExecutorListByPlanner(String plannerName) {
+        AgentCard planner = agentCardMapper.selectOneById(plannerName);
+        if (planner == null || !"PLANNER".equals(planner.getAgentType())) {
+            throw new RuntimeException("Planner不存在或类型不匹配: " + plannerName);
+        }
+        List<String> boundAgents = planner.getBoundAgents();
+        if (boundAgents == null || boundAgents.isEmpty()) {
+            return Collections.emptyList();
+        }
+        QueryWrapper queryWrapper = QueryWrapper.create()
+                .where(AGENT_CARD.AGENT_NAME.in(boundAgents))
+                .and(AGENT_CARD.IS_ONLINE.eq(true)); // 只返回已上线的Executor
+        return agentCardMapper.selectListByQuery(queryWrapper);
+    }
+
+    @Override
+    public List<ToolCard> getToolListByExecutor(String executorName) {
+        AgentCard executor = agentCardMapper.selectOneById(executorName);
+        if (executor == null || !"EXECUTOR".equals(executor.getAgentType())) {
+            throw new RuntimeException("Executor不存在或类型不匹配: " + executorName);
+        }
+
+        List<String> boundTools = executor.getBoundTools();
+        QueryWrapper queryWrapper = QueryWrapper.create()
+                .where(TOOL_CARD.IS_ONLINE.eq(true));
+
+        if (boundTools != null && !boundTools.isEmpty()) {
+            // 如果 Executor 显式绑定了某些 tool，则可以直接使用并在其中检索 (包含 public 和 protected)
+            queryWrapper.and(TOOL_CARD.TOOL_NAME.in(boundTools));
+        } else if (boundTools != null && boundTools.isEmpty()) {
+            // '[]' 表示不使用任何工具
+            return Collections.emptyList();
+        } else {
+            // NULL 表示全量可用工具。为了合规，全量情况只能拉取 public 工具
+            queryWrapper.and(TOOL_CARD.TOOL_PRIVILEGES.eq("public"));
+        }
+        return toolCardMapper.selectListByQuery(queryWrapper);
     }
 
     @Override

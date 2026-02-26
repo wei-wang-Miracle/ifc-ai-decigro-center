@@ -77,6 +77,21 @@ class AgentConfig:
             return json.loads(bound) if bound else []
         return bound
     
+    @property
+    def agent_type(self) -> str:
+        return self._summary.get("agent_type", "EXECUTOR")
+        
+    @property
+    def bound_agents(self) -> list[str]:
+        if not self._detail:
+            return self._summary.get("bound_agents", [])
+        bound = self._detail.get("bound_agents")
+        if bound is None:
+            return []
+        if isinstance(bound, str):
+            return json.loads(bound) if bound else []
+        return bound
+    
     def set_detail(self, detail: dict[str, Any]):
         """填充详情"""
         self._detail = detail
@@ -164,6 +179,8 @@ class AgentRegistry:
                     "agent_alias": record.get("agentAlias", name),
                     "agent_description": record.get("agentDescription"),
                     "agent_tags": record.get("agentTags"),
+                    "agent_type": record.get("agentType", "EXECUTOR"),
+                    "bound_agents": record.get("boundAgents", []),
                 }
                 user_agents[name] = AgentConfig(summary)
         
@@ -189,6 +206,8 @@ class AgentRegistry:
                     "system_prompt": detail_data.get("systemPrompt"),
                     "negative_prompt": detail_data.get("negativePrompt"),
                     "bound_tools": detail_data.get("boundTools"),
+                    "bound_agents": detail_data.get("boundAgents", []),
+                    "agent_type": detail_data.get("agentType", "EXECUTOR"),
                     "reasoning_framework": detail_data.get("reasoningFramework"),
                 }
                 agent.set_detail(detail)
@@ -201,16 +220,20 @@ class AgentRegistry:
         self.load(token)
         return list(self._user_agents.get(token, {}).values())
     
-    def get_agent_names(self, token: str) -> list[str]:
+    def get_agent_names(self, token: str, agent_type: str = None) -> list[str]:
         self.load(token)
-        return list(self._user_agents.get(token, {}).keys())
+        return [
+            name for name, config in self._user_agents.get(token, {}).items()
+            if not agent_type or config.agent_type == agent_type
+        ]
     
-    def get_agent_descriptions(self, token: str) -> dict[str, str]:
+    def get_agent_descriptions(self, token: str, agent_type: str = None) -> dict[str, str]:
         self.load(token)
         user_agents = self._user_agents.get(token, {})
         return {
             name: config.description
             for name, config in user_agents.items()
+            if not agent_type or config.agent_type == agent_type
         }
     
     def find_agent_by_tag(self, tag: str, token: str) -> list[AgentConfig]:

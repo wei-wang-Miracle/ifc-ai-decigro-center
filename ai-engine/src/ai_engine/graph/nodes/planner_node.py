@@ -113,8 +113,17 @@ async def planner_node(state: AgentState, config: RunnableConfig) -> Command:
         for s in summaries
     ]) if summaries else "暂无可用工具"
     
-    # 构建 Agent 描述
-    agents = agent_registry.get_agent_descriptions(token)
+    # 构建 Agent 描述 (仅限 Planner 绑定的 Executor)
+    current_planner = state.current_planner
+    planner = agent_registry.get_agent(current_planner, token) if current_planner else None
+    bound_agents = planner.bound_agents if planner else []
+    
+    all_executors = agent_registry.get_agent_descriptions(token, agent_type="EXECUTOR")
+    if bound_agents:
+        agents = {name: desc for name, desc in all_executors.items() if name in bound_agents}
+    else:
+        agents = all_executors
+        
     agent_descriptions = "\n".join([
         f"- **{name}**: {desc}"
         for name, desc in agents.items()

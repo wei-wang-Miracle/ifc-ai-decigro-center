@@ -152,6 +152,8 @@ CREATE TABLE agent_cards (
     -- 标签：使用 JSONB 格式，与 Java 端的 List<String> (Fastjson2TypeHandler) 保持一致
     -- 对应需求: ['finance', 'external_api']
     agent_tags JSONB DEFAULT '[]'::jsonb,
+    -- 智能体类型 (PLANNER, EXECUTOR)
+    agent_type VARCHAR(32) DEFAULT 'EXECUTOR',
     -- 2. 内核配置 (Core Configuration)
     -- System Prompt: Agent 的灵魂
     system_prompt TEXT NOT NULL,
@@ -162,6 +164,8 @@ CREATE TABLE agent_cards (
     -- Empty Array '{}': 表示不使用任何工具 (Pure Chat)
     -- Array ['tool_a']: 仅允许使用指定工具 (Allowlist)
     bound_tools JSONB DEFAULT '[]'::jsonb,
+    -- PLANNER 绑定的 EXECUTOR 列表
+    bound_agents JSONB DEFAULT '[]'::jsonb,
     -- 推理框架：NULL 则使用系统默认 (e.g. Direct/CoT)，否则指定如 'ReAct'
     reasoning_framework VARCHAR(50),
     -- 3. 元数据 (Meta Information)
@@ -181,7 +185,9 @@ COMMENT ON TABLE agent_cards IS 'Agent 注册与配置表';
 COMMENT ON COLUMN agent_cards.agent_name IS '唯一标识 (ID)，建议 snake_case';
 COMMENT ON COLUMN agent_cards.agent_alias IS '智能体别名/名称';
 COMMENT ON COLUMN agent_cards.agent_description IS '给 Planner 看的路由描述';
+COMMENT ON COLUMN agent_cards.agent_type IS '智能体类型 (PLANNER, EXECUTOR)';
 COMMENT ON COLUMN agent_cards.bound_tools IS 'NULL=全部工具, {}=无工具, [names]=指定工具';
+COMMENT ON COLUMN agent_cards.bound_agents IS '绑定的执行智能体 (JSONB)';
 -- =================================================================
 -- AI 聊天会话表 (ai_chat_session)
 -- 用于存储用户的 AI 对话会话

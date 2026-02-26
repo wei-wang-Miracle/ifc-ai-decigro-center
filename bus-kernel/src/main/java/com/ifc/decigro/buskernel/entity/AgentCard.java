@@ -50,6 +50,11 @@ public class AgentCard implements Serializable {
     @Column(typeHandler = Fastjson2TypeHandler.class)
     private List<String> agentTags;
 
+    /**
+     * Agent 类型 (PLANNER, EXECUTOR)
+     */
+    private String agentType;
+
     // =========================================
     // 3. Core Config
     // =========================================
@@ -70,6 +75,12 @@ public class AgentCard implements Serializable {
      */
     @Column(typeHandler = Fastjson2TypeHandler.class)
     private List<String> boundTools;
+
+    /**
+     * PLANNER 绑定的 EXECUTOR 列表 (JSONB)
+     */
+    @Column(typeHandler = Fastjson2TypeHandler.class)
+    private List<String> boundAgents;
 
     /**
      * 推理框架
