@@ -2,6 +2,8 @@ package com.ifc.decigro.buskernel.service;
 
 import com.ifc.decigro.buskernel.entity.ToolCard;
 import com.mybatisflex.core.paginate.Page;
+import com.ifc.decigro.buskernel.entity.vo.ToolCardSummaryVO;
+import java.util.List;
 
 /**
  * MAS 工具卡片服务接口
@@ -60,7 +62,7 @@ public interface ToolCardService {
      * @param username 当前登录用户名
      * @return 符合条件的工具简要信息列表
      */
-    java.util.List<com.ifc.decigro.buskernel.entity.vo.ToolCardSummaryVO> getAvailableTools(String username);
+    List<ToolCardSummaryVO> getAvailableTools(String username);
 
     /**
      * 获取单个工具的详情
@@ -83,5 +85,5 @@ public interface ToolCardService {
     /**
      * 获取所有上线工具及其别名
      */
-    java.util.List<com.ifc.decigro.buskernel.entity.vo.ToolCardSummaryVO> listAll();
+    List<ToolCardSummaryVO> listAll();
 }

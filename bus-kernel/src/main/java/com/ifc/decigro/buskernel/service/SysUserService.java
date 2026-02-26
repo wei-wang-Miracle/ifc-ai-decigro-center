@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 
 import java.util.List;
 import java.util.Map;
+import com.ifc.decigro.buskernel.dto.ProfileUpdateRequest;
 
 /**
  * 用户业务接口
@@ -50,5 +51,5 @@ public interface SysUserService {
     /**
      * 更新个人资料
      */
-    void updateProfile(String username, com.ifc.decigro.buskernel.dto.ProfileUpdateRequest request);
+    void updateProfile(String username, ProfileUpdateRequest request);
 }

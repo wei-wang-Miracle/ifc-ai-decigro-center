@@ -3,6 +3,7 @@ package com.ifc.decigro.buskernel.dto;
 import com.ifc.decigro.buskernel.common.annotation.ToolOutput;
 import lombok.Data;
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 会话响应 DTO
@@ -25,5 +26,5 @@ public class SessionResponse {
     private LocalDateTime updateTime;
 
     @ToolOutput(param_name = "messages", param_description = "会话消息列表", param_type = "array")
-    private java.util.List<MessageResponse> messages;
+    private List<MessageResponse> messages;
 }

@@ -2,6 +2,8 @@ package com.ifc.decigro.buskernel.service;
 
 import com.ifc.decigro.buskernel.entity.CustomerTag;
 import com.mybatisflex.core.paginate.Page;
+import com.ifc.decigro.buskernel.dto.CustomerTagDto;
+import java.util.List;
 
 /**
  * 客户标签服务接口
@@ -22,7 +24,7 @@ public interface CustomerTagService {
      * 查询所有标签 (AI Tool 专用)
      * 返回: 包含完整元数据定义的标签 DTO 列表
      */
-    java.util.List<com.ifc.decigro.buskernel.dto.CustomerTagDto> listAllForTool();
+    List<CustomerTagDto> listAllForTool();
 
     /**
      * 分页查询标签列表

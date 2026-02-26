@@ -137,7 +137,7 @@ public class ToolCardController {
 
     @GetMapping("/list-all")
     @Operation(summary = "获取所有可用工具简要信息", description = "用于管理端下拉选择等场景")
-    public Result<List<com.ifc.decigro.buskernel.entity.vo.ToolCardSummaryVO>> listAll() {
+    public Result<List<ToolCardSummaryVO>> listAll() {
         return Result.success(toolCardService.listAll());
     }
 }

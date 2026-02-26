@@ -311,7 +311,7 @@ onMounted(() => fetchList())
                     </div>
                     
                     <div class="id-band">
-                        <span class="id-text">[{{ card.agentType || 'EXECUTOR' }}] {{ card.agentName }}</span>
+                        <span class="id-text">{{ card.agentName }}</span>
                     </div>
                     
                     <div class="card-main">
@@ -406,7 +406,7 @@ onMounted(() => fetchList())
                             </div>
                             
                             <div class="id-band">
-                                <span class="id-text">[{{ card.agentType || 'EXECUTOR' }}] {{ card.agentName }}</span>
+                                <span class="id-text">{{ card.agentName }}</span>
                             </div>
                             
                             <div class="card-main">

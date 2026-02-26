@@ -21,6 +21,7 @@ import java.lang.reflect.Parameter;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.*;
+import org.springframework.web.util.pattern.PathPattern;
 
 /**
  * 自动注册 ToolCard
@@ -77,7 +78,7 @@ public class ToolCardAutoRegistrar implements ApplicationListener<ApplicationRea
         String urlPath = null;
         // 优先尝试 PathPatternsCondition (Spring Boot 2.6+)
         if (mappingInfo.getPathPatternsCondition() != null) {
-            Set<org.springframework.web.util.pattern.PathPattern> patterns = mappingInfo.getPathPatternsCondition()
+            Set<PathPattern> patterns = mappingInfo.getPathPatternsCondition()
                     .getPatterns();
             if (!patterns.isEmpty()) {
                 urlPath = patterns.iterator().next().getPatternString();

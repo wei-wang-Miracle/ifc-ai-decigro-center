@@ -16,6 +16,8 @@ import com.ifc.decigro.buskernel.dto.ToolGetMessagesRequest;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
 
 /**
  * AI 聊天会话控制器
@@ -174,17 +176,17 @@ public class AiChatController {
                 dto.setSessionTitle((String) map.get("session_title"));
                 // 安全处理时间类型转换
                 Object createTime = map.get("create_time");
-                if (createTime instanceof java.sql.Timestamp) {
-                    dto.setCreateTime(((java.sql.Timestamp) createTime).toLocalDateTime());
-                } else if (createTime instanceof java.time.LocalDateTime) {
-                    dto.setCreateTime((java.time.LocalDateTime) createTime);
+                if (createTime instanceof Timestamp) {
+                    dto.setCreateTime(((Timestamp) createTime).toLocalDateTime());
+                } else if (createTime instanceof LocalDateTime) {
+                    dto.setCreateTime((LocalDateTime) createTime);
                 }
 
                 Object updateTime = map.get("update_time");
-                if (updateTime instanceof java.sql.Timestamp) {
-                    dto.setUpdateTime(((java.sql.Timestamp) updateTime).toLocalDateTime());
-                } else if (updateTime instanceof java.time.LocalDateTime) {
-                    dto.setUpdateTime((java.time.LocalDateTime) updateTime);
+                if (updateTime instanceof Timestamp) {
+                    dto.setUpdateTime(((Timestamp) updateTime).toLocalDateTime());
+                } else if (updateTime instanceof LocalDateTime) {
+                    dto.setUpdateTime((LocalDateTime) updateTime);
                 }
                 return dto;
             }).collect(Collectors.toList());
@@ -217,10 +219,10 @@ public class AiChatController {
                 dto.setAgentLog((String) map.get("agent_log"));
 
                 Object createTime = map.get("create_time");
-                if (createTime instanceof java.sql.Timestamp) {
-                    dto.setCreateTime(((java.sql.Timestamp) createTime).toLocalDateTime());
-                } else if (createTime instanceof java.time.LocalDateTime) {
-                    dto.setCreateTime((java.time.LocalDateTime) createTime);
+                if (createTime instanceof Timestamp) {
+                    dto.setCreateTime(((Timestamp) createTime).toLocalDateTime());
+                } else if (createTime instanceof LocalDateTime) {
+                    dto.setCreateTime((LocalDateTime) createTime);
                 }
                 return dto;
             }).collect(Collectors.toList());

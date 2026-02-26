@@ -5,6 +5,7 @@ import com.ifc.decigro.buskernel.entity.ToolCard;
 import com.mybatisflex.core.paginate.Page;
 
 import java.util.List;
+import com.ifc.decigro.buskernel.entity.vo.AgentCardSummaryVO;
 
 /**
  * MAS 智能体卡片服务接口 (V2)
@@ -74,7 +75,7 @@ public interface AgentCardService {
      * @param username 当前登录用户名
      * @return 符合条件的智能体简要信息列表
      */
-    List<com.ifc.decigro.buskernel.entity.vo.AgentCardSummaryVO> getAvailableAgents(String username);
+    List<AgentCardSummaryVO> getAvailableAgents(String username);
 
     /**
      * 获取单个智能体的详情

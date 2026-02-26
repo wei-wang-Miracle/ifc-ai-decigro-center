@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 
 import static com.ifc.decigro.buskernel.entity.table.SysUserTableDef.SYS_USER;
+import com.ifc.decigro.buskernel.dto.ProfileUpdateRequest;
 
 @Slf4j
 @Service
@@ -167,7 +168,7 @@ public class SysUserServiceImpl implements SysUserService {
 
     @Override
     @Transactional
-    public void updateProfile(String username, com.ifc.decigro.buskernel.dto.ProfileUpdateRequest request) {
+    public void updateProfile(String username, ProfileUpdateRequest request) {
         SysUser user = getByUsername(username);
         if (user != null) {
             user.setNickName(request.getNickName());
