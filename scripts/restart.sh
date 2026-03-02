@@ -4,6 +4,7 @@
 PROJECT_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BACKEND_DIR="$PROJECT_ROOT/bus-kernel"
 AI_ENGINE_DIR="$PROJECT_ROOT/ai-engine"
+AI_RAG_DIR="$PROJECT_ROOT/ai-rag"
 FRONTEND_DIR="$PROJECT_ROOT/decigro-fe"
 LOG_DIR="$PROJECT_ROOT/logs"
 
@@ -19,9 +20,11 @@ NC='\033[0m' # No Color
 
 echo -e "${YELLOW}[1/4] Stopping existing services...${NC}"
 
-# Find and kill processes on ports 8080 (Backend), 8001 (AI Engine), 5173 (Frontend)
+# Find and kill processes on ports:
+# 8080 (Backend), 8001 (AI Engine), 8002 (AI RAG), 5173 (Frontend)
 lsof -ti:8080 | xargs kill -9 2>/dev/null
 lsof -ti:8001 | xargs kill -9 2>/dev/null
+lsof -ti:8002 | xargs kill -9 2>/dev/null
 lsof -ti:5173 | xargs kill -9 2>/dev/null
 
 # Java 17 Setup
@@ -47,12 +50,12 @@ echo -e "${YELLOW}[4/4] Starting all services...${NC}"
 
 # Clear old logs
 rm -f "$LOG_DIR"/*.log
-touch "$LOG_DIR/backend.log" "$LOG_DIR/ai-engine.log" "$LOG_DIR/frontend.log"
+touch "$LOG_DIR/backend.log" "$LOG_DIR/ai-engine.log" "$LOG_DIR/ai-rag.log" "$LOG_DIR/frontend.log"
 
 # Function to handle exit
 cleanup() {
     echo -e "\n${RED}[INFO] Stopping all services...${NC}"
-    kill $B_PID $A_PID $F_PID 2>/dev/null
+    kill $B_PID $A_PID $R_PID $F_PID 2>/dev/null
     exit
 }
 trap cleanup INT
@@ -70,23 +73,34 @@ export PYTHONPATH=$AI_ENGINE_DIR/src
 if command -v uv &> /dev/null; then
     uv run python -m ai_engine.main > "$LOG_DIR/ai-engine.log" 2>&1 &
 else
-    # Fallback to python
     python3 -m ai_engine.main > "$LOG_DIR/ai-engine.log" 2>&1 &
 fi
 A_PID=$!
 
-# 3. Start Frontend
+# 3. Start AI RAG (New)
+echo -e "${CYAN}[START] AI RAG Knowledge Base (8002)...${NC}"
+cd "$AI_RAG_DIR"
+export PYTHONPATH=$AI_RAG_DIR/src
+if command -v uv &> /dev/null; then
+    uv run python -m ai_rag.main > "$LOG_DIR/ai-rag.log" 2>&1 &
+else
+    python3 -m ai_rag.main > "$LOG_DIR/ai-rag.log" 2>&1 &
+fi
+R_PID=$!
+
+# 4. Start Frontend
 echo -e "${CYAN}[START] Frontend (5173)...${NC}"
 cd "$FRONTEND_DIR"
 npm run dev > "$LOG_DIR/frontend.log" 2>&1 &
 F_PID=$!
 
 echo -e "${GREEN}[SUCCESS] All services are starting up!${NC}"
-echo -e "Backend: http://localhost:8080/api/dg/swagger-ui.html"
+echo -e "Backend:   http://localhost:8080/api/dg/swagger-ui.html"
 echo -e "AI Engine: http://localhost:8001/docs"
-echo -e "Frontend: http://localhost:5173"
+echo -e "AI RAG:    http://localhost:8002/docs"
+echo -e "Frontend:  http://localhost:5173"
 echo -e "${YELLOW}Aggregating logs into this console (Ctrl+C to stop everything)...${NC}"
 echo "--------------------------------------------------------------------------------"
 
 # Tail logs
-tail -f "$LOG_DIR/backend.log" "$LOG_DIR/ai-engine.log" "$LOG_DIR/frontend.log"
+tail -f "$LOG_DIR/backend.log" "$LOG_DIR/ai-engine.log" "$LOG_DIR/ai-rag.log" "$LOG_DIR/frontend.log"

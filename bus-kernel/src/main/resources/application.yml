@@ -65,3 +65,11 @@ crypto:
       gqp9JcybZ+wo5rcsu/iub0PN9ox2v1GSICuv30QuPvSBiSTt+T+OXf5ehEE6Luni
       eBd2m/8JQWoYiQ==
       -----END PRIVATE KEY-----
+
+# ========================================
+# AI RAG 微服务配置
+# ========================================
+ai:
+  rag:
+    # ai-rag Python 微服务地址（端口 8002 为约定端口）
+    base-url: http://localhost:8002/api/rag
