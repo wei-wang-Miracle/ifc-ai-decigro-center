@@ -1,18 +1,18 @@
 package com.ifc.decigro.buskernel.controller;
 
 import com.ifc.decigro.buskernel.common.api.Result;
-import com.ifc.decigro.buskernel.service.KnowledgeProxyService;
 import com.ifc.decigro.buskernel.common.annotation.ToolCard;
+import com.ifc.decigro.buskernel.dto.KnowledgeSearchRequest;
+import com.ifc.decigro.buskernel.dto.KnowledgeSearchResult;
+import com.ifc.decigro.buskernel.service.KnowledgeProxyService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
-
-import java.util.Map;
 
 /**
  * 知识库管理代理控制器
@@ -115,22 +115,38 @@ public class KnowledgeController {
 
     /**
      * 知识库检索接口（供 ai-engine ToolCard 调用）
+     *
+     * 预校验说明：
+     * - query 为必填项，长度 2~500 字符，必须是自然语言，空值会直接返回错误
+     * - doc_type 可省略；若传入，最长 50 字符
+     * - must_match_code 须为 4~10 位字母数字组成的完整编码
+     * - top_k 范围 1~10，省略默认 5
+     *
+     * 调用失败时，message 字段会包含具体的改正提示，AI 可据此自动修正参数后重试。
      */
     @PostMapping("/search")
     @ToolCard(tool_name = "search_knowledge_base", summary = "知识库语义检索", description = "[Action] 对内部知识库执行混合语义检索（向量相似度 + BM25 关键词），"
             +
-            "返回与查询最相关的文档片段（Chunk），并自动扩展上下文防止语义截断。" +
+            "返回与查询最相关的文档片段，并自动扩展上下文防止语义截断。" +
             "[Trigger] 当用户提问涉及专业知识、内部资料或产品文档，" +
             "且需要从知识库中获取事实依据时调用。" +
             "典型场景：用户询问某基金的策略说明、研报摘要、业务规则等。" +
             "[Constraint] " +
-            "1. query 参数必须是自然语言语义描述，不得传入 SQL 或代码片段。" +
-            "2. doc_type 仅接受已录入知识库的分类值（如研报、规则文档）。" +
-            "3. must_match_code 为精确匹配，值为完整基金代码（如 000001），不支持模糊。" +
-            "4. top_k 默认 5，最大建议不超过 10，过大会影响响应速度和答案质量。" +
-            "5. 返回结果已按相关度排序并经过 FlashRank 重排序，直接取前 N 条即可。", tags = { "knowledge", "rag",
-                    "search" }, privileges = "protected", input_examples = "{\"query\": \"沪深300指数增强策略的风险控制方法\", \"doc_type\": \"研报\", \"must_match_code\": \"000001\", \"top_k\": 5}", output_examples = "{\"code\": 200, \"data\": [{\"content\": \"沪深300指数增强策略通过多因子模型控制跟踪误差...\", \"doc_id\": \"d3f8a1b2-xxxx\", \"doc_name\": \"2024年一季度量化研报.pdf\", \"doc_type\": \"研报\", \"score\": 1.0, \"chunk_count\": 3}], \"message\": \"success\"}")
-    public Result<Object> search(@RequestBody Map<String, Object> searchRequest) {
-        return knowledgeProxyService.search(searchRequest);
+            "1. query 必须是自然语言语义描述（2~500字符），不得传入 SQL 或代码片段。" +
+            "2. doc_type 仅接受已录入知识库的分类值（如研报、规则文档），可省略。" +
+            "3. must_match_code 须为完整 4~10 位字母数字代码（如 000001），不支持模糊，可省略。" +
+            "4. top_k 默认 5，范围 1~10，超出范围会被拒绝并告知错误原因。" +
+            "5. 返回 data.items 列表已按相关度降序排列，直接取前 N 条引用即可。" +
+            "[ErrorHandling] 若 code != 200，请仔细阅读 message 字段，" +
+            "其中包含具体字段的错误原因和修正建议，参考后调整参数重新调用。", tags = { "knowledge", "rag",
+                    "search" }, privileges = "protected", input_examples = "{\"query\": \"沪深300指数增强策略的风险控制方法\", " +
+                            "\"doc_type\": \"研报\", \"must_match_code\": \"000001\", \"top_k\": 5}", output_examples = "{\"code\": 200, \"message\": \"操作成功\", "
+                                    +
+                                    "\"data\": {\"items\": [{\"content\": \"沪深300指数增强策略通过多因子模型...\", " +
+                                    "\"doc_id\": \"d3f8a1b2-xxxx\", \"doc_name\": \"2024年一季度量化研报.pdf\", " +
+                                    "\"doc_type\": \"研报\", \"score\": 0.95, \"chunk_count\": 3}], \"total\": 1}}")
+    public Result<KnowledgeSearchResult> search(
+            @Validated @RequestBody KnowledgeSearchRequest request) {
+        return knowledgeProxyService.search(request);
     }
 }

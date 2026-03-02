@@ -4,7 +4,8 @@ ai-rag 服务数据模型定义
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Generic, Optional, TypeVar
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
+import re
 
 T = TypeVar("T")
 
@@ -52,12 +53,86 @@ class ChunkVO(BaseModel):
 
 
 class SearchRequest(BaseModel):
-    """知识库检索请求"""
-    query: str                         # 语义查询词（必填）
-    doc_type: Optional[str] = None     # 文档分类过滤（选填）
-    must_match_code: Optional[str] = None  # 精确匹配业务代码（选填，如基金代码）
-    exact_keyword: Optional[str] = None    # 关键词精确匹配（选填）
-    top_k: int = 5                     # 返回最相关的片段数量
+    """
+    知识库检索请求（已加入严格的 Pydantic 校验，校验失败时返回 422 + 明确错误原因）
+
+    字段说明：
+    - query: 语义查询词，必须是自然语言描述，2~500 字符（必填）
+    - doc_type: 文档分类过滤，最长 50 字符（选填）
+    - must_match_code: 精确业务代码（如基金代码），须为 4~10 位字母数字（选填）
+    - top_k: 返回最相关片段数量，范围 1~10，默认 5
+    """
+
+    query: str = Field(
+        ...,
+        min_length=2,
+        max_length=500,
+        description="[必填] 语义查询词，必须是自然语言描述，长度 2~500 字符。"
+                    "不得传入 SQL、JSON 代码或纯关键词列表。"
+    )
+
+    doc_type: Optional[str] = Field(
+        default=None,
+        max_length=50,
+        description="[选填] 文档分类过滤，仅接受已录入知识库的分类值（如'研报'、'规则文档'）。"
+                    "传入未知分类值时检索结果将为空，省略则不限制分类。"
+    )
+
+    must_match_code: Optional[str] = Field(
+        default=None,
+        description="[选填] 精确匹配关联的业务代码（如基金代码'000001'）。"
+                    "须为完整 4~10 位字母数字组成的代码，不支持模糊匹配。"
+    )
+
+    exact_keyword: Optional[str] = Field(
+        default=None,
+        description="[选填] 关键词精确匹配，要求在文档内容中必须包含此词。"
+    )
+
+    top_k: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        description="[选填] 返回最相关的文档片段数量，默认 5，范围 1~10。"
+                    "超过 10 会显著增加响应延迟，强制拒绝。"
+    )
+
+    @field_validator("query")
+    @classmethod
+    def validate_query_not_code(cls, v: str) -> str:
+        """
+        功能: 校验 query 不是 SQL 或代码片段，而是自然语言描述。
+        参数: v - 待校验的查询字符串
+        返回: 校验通过后的字符串
+        """
+        # 检测明显的 SQL 关键词（大小写不敏感）
+        sql_keywords = ["SELECT ", "INSERT ", "UPDATE ", "DELETE ", "DROP ", "CREATE ", "ALTER "]
+        normalized = v.upper()
+        for kw in sql_keywords:
+            if kw in normalized:
+                raise ValueError(
+                    f"[AI调用错误] query 字段不得包含 SQL 关键词（如 {kw.strip()}）。"
+                    "请将 query 改为自然语言语义描述，例如：'沪深300指数增强策略的风险控制方法'。"
+                )
+        return v
+
+    @field_validator("must_match_code")
+    @classmethod
+    def validate_code_format(cls, v: Optional[str]) -> Optional[str]:
+        """
+        功能: 校验 must_match_code 为 4~10 位字母数字组成的完整代码。
+        参数: v - 待校验的代码字符串（可为 None）
+        返回: 校验通过后的字符串或 None
+        """
+        if v is None:
+            return v
+        # 只允许纯字母和数字，长度 4~10
+        if not re.match(r"^[a-zA-Z0-9]{4,10}$", v):
+            raise ValueError(
+                f"[AI调用错误] must_match_code 格式不正确（当前值：'{v}'）。"
+                "须为 4~10 位字母或数字的完整代码（如 '000001'），不支持模糊匹配或正则表达式。"
+            )
+        return v
 
 
 class SearchResult(BaseModel):
@@ -68,3 +143,4 @@ class SearchResult(BaseModel):
     doc_type: str         # 文档分类
     score: float          # 相关性得分
     chunk_count: int      # 此结果包含的 Chunk 数量（上下文扩展后）
+

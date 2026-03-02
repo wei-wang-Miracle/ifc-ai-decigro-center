@@ -1,6 +1,8 @@
 package com.ifc.decigro.buskernel.service;
 
 import com.ifc.decigro.buskernel.common.api.Result;
+import com.ifc.decigro.buskernel.dto.KnowledgeSearchRequest;
+import com.ifc.decigro.buskernel.dto.KnowledgeSearchResult;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
@@ -13,6 +15,9 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -176,21 +181,76 @@ public class KnowledgeProxyService {
 
     /**
      * 执行知识库语义检索（供 ai-engine 调用，包装为 ToolCard 出参）
+     *
+     * 功能: 将强类型 KnowledgeSearchRequest 转换为 ai-rag 接受的 snake_case Map，
+     * 调用 ai-rag /knowledge/search 接口，再将响应的原始 Map 解析为结构化的
+     * KnowledgeSearchResult 返回，方便 AI Agent 精准解析出参。
      */
-    public Result<Object> search(Map<String, Object> searchRequest) {
+    @SuppressWarnings("unchecked")
+    public Result<KnowledgeSearchResult> search(KnowledgeSearchRequest request) {
         try {
+            // 第一步：构建发往 ai-rag 的参数体（字段名与 Python SearchRequest 模型对齐）
+            Map<String, Object> body = new HashMap<>();
+            body.put("query", request.getQuery());
+            body.put("top_k", request.getTopK() != null ? request.getTopK() : 5);
+            if (request.getDocType() != null && !request.getDocType().isBlank()) {
+                body.put("doc_type", request.getDocType());
+            }
+            if (request.getMustMatchCode() != null && !request.getMustMatchCode().isBlank()) {
+                body.put("must_match_code", request.getMustMatchCode());
+            }
+
+            // 第二步：发送请求到 ai-rag 微服务
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(searchRequest, headers);
+            HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(body, headers);
 
             ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
                     aiRagBaseUrl + "/knowledge/search",
                     HttpMethod.POST, requestEntity, (Class<Map<String, Object>>) (Class<?>) Map.class);
 
-            return Result.success(response.getBody());
+            // 第三步：将 ai-rag 原始响应解析为强类型 KnowledgeSearchResult
+            Map<String, Object> responseBody = response.getBody();
+            if (responseBody == null) {
+                return Result.fail("[知识库检索] ai-rag 返回空响应，请稍后重试。");
+            }
+
+            // 解析 data 字段（ai-rag 返回 {code, message, data: [...]}）
+            Object dataObj = responseBody.get("data");
+            List<KnowledgeSearchResult.Item> items = new ArrayList<>();
+
+            if (dataObj instanceof List<?> rawList) {
+                // 遍历 ai-rag 返回的 SearchResult 列表，逐项映射为 KnowledgeSearchResult.Item
+                for (Object rawItem : rawList) {
+                    if (rawItem instanceof Map) {
+                        // 强转为 Map<String, Object>，ai-rag 使用 Jackson 序列化，key 均为 String 类型
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> itemMap = (Map<String, Object>) rawItem;
+                        KnowledgeSearchResult.Item item = new KnowledgeSearchResult.Item();
+                        item.setContent(String.valueOf(itemMap.getOrDefault("content", "")));
+                        item.setDocId(String.valueOf(itemMap.getOrDefault("doc_id", "")));
+                        item.setDocName(String.valueOf(itemMap.getOrDefault("doc_name", "")));
+                        item.setDocType(String.valueOf(itemMap.getOrDefault("doc_type", "")));
+                        Object scoreObj = itemMap.get("score");
+                        item.setScore(scoreObj instanceof Number ? ((Number) scoreObj).doubleValue() : 0.0);
+                        Object chunkCountObj = itemMap.get("chunk_count");
+                        item.setChunkCount(chunkCountObj instanceof Number ? ((Number) chunkCountObj).intValue() : 0);
+                        items.add(item);
+                    }
+                }
+            }
+
+            KnowledgeSearchResult result = new KnowledgeSearchResult(items, items.size());
+            return Result.success(result);
+
+        } catch (HttpClientErrorException e) {
+            // 客户端错误（4xx）通常是参数问题，透传给 AI 以便自我修正
+            log.warn("[KnowledgeProxy] 知识库检索请求参数错误: {}", e.getResponseBodyAsString());
+            return Result.fail(400, "[AI调用错误] ai-rag 拒绝了本次请求，原因：" + e.getResponseBodyAsString()
+                    + "。请检查参数后重试。");
         } catch (Exception e) {
             log.error("[KnowledgeProxy] 知识库检索失败", e);
-            return Result.fail("检索失败: " + e.getMessage());
+            return Result.fail("[知识库检索] 服务调用失败，错误信息：" + e.getMessage() + "。若问题持续，请联系系统管理员。");
         }
     }
 
