@@ -18,8 +18,6 @@ CREATE TABLE IF NOT EXISTS knowledge_documents (
     -- ============ 业务元数据（与Chunk索引中的元数据字段保持一致！） ============
     doc_type VARCHAR(64) NOT NULL,
     -- 文档分类: 研报/制度规范/名词释义 等
-    related_codes JSONB DEFAULT '[]',
-    -- 关联业务代码数组: ["000001","000002"]
     biz_tags JSONB DEFAULT '[]',
     -- 业务标签数组: ["A股","大盘"]
     publish_date DATE,
@@ -44,10 +42,8 @@ CREATE INDEX IF NOT EXISTS idx_kd_doc_type ON knowledge_documents(doc_type);
 CREATE INDEX IF NOT EXISTS idx_kd_status ON knowledge_documents(status);
 CREATE INDEX IF NOT EXISTS idx_kd_create_time ON knowledge_documents(create_time DESC);
 -- GIN 索引：加速 JSONB 字段的包含查询（如搜索包含某基金代码的文档）
-CREATE INDEX IF NOT EXISTS idx_kd_related_codes ON knowledge_documents USING GIN(related_codes);
 CREATE INDEX IF NOT EXISTS idx_kd_biz_tags ON knowledge_documents USING GIN(biz_tags);
 -- 注释
 COMMENT ON TABLE knowledge_documents IS 'AI RAG 知识库文档管理表，跟踪文档处理状态和业务元数据';
 COMMENT ON COLUMN knowledge_documents.doc_id IS '与 RAGLite documents 表的 id 字段保持一致';
-COMMENT ON COLUMN knowledge_documents.related_codes IS '关联的业务主体代码，如基金代码，供 AI 引擎做硬过滤';
 COMMENT ON COLUMN knowledge_documents.status IS 'PENDING 等待|PARSING 解析中|EMBEDDING 向量化中|SUCCESS 完成|FAILED 失败';

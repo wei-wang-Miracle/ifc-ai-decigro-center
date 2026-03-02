@@ -42,10 +42,9 @@ public class KnowledgeController {
     public Result<Object> uploadDocument(
             @Parameter(description = "文档文件") @RequestParam("file") MultipartFile file,
             @Parameter(description = "文档分类") @RequestParam("docType") String docType,
-            @Parameter(description = "关联业务代码，逗号分隔") @RequestParam(value = "relatedCodes", required = false, defaultValue = "") String relatedCodes,
             @Parameter(description = "业务标签，逗号分隔") @RequestParam(value = "bizTags", required = false, defaultValue = "") String bizTags,
             @Parameter(description = "发布日期") @RequestParam(value = "publishDate", required = false) String publishDate) {
-        return knowledgeProxyService.uploadDocument(file, docType, relatedCodes, bizTags, publishDate);
+        return knowledgeProxyService.uploadDocument(file, docType, bizTags, publishDate);
     }
 
     /**
@@ -119,7 +118,6 @@ public class KnowledgeController {
      * 预校验说明：
      * - query 为必填项，长度 2~500 字符，必须是自然语言，空值会直接返回错误
      * - doc_type 可省略；若传入，最长 50 字符
-     * - must_match_code 须为 4~10 位字母数字组成的完整编码
      * - top_k 范围 1~10，省略默认 5
      *
      * 调用失败时，message 字段会包含具体的改正提示，AI 可据此自动修正参数后重试。
@@ -130,17 +128,16 @@ public class KnowledgeController {
             "返回与查询最相关的文档片段，并自动扩展上下文防止语义截断。" +
             "[Trigger] 当用户提问涉及专业知识、内部资料或产品文档，" +
             "且需要从知识库中获取事实依据时调用。" +
-            "典型场景：用户询问某基金的策略说明、研报摘要、业务规则等。" +
+            "典型场景：用户询问某活动说明、考核指标、技术文档等。" +
             "[Constraint] " +
             "1. query 必须是自然语言语义描述（2~500字符），不得传入 SQL 或代码片段。" +
-            "2. doc_type 仅接受已录入知识库的分类值（如研报、规则文档），可省略。" +
-            "3. must_match_code 须为完整 4~10 位字母数字代码（如 000001），不支持模糊，可省略。" +
-            "4. top_k 默认 5，范围 1~10，超出范围会被拒绝并告知错误原因。" +
-            "5. 返回 data.items 列表已按相关度降序排列，直接取前 N 条引用即可。" +
+            "2. doc_type 仅接受已录入知识库的分类值（如考核文档、技术文档），可省略。" +
+            "3. top_k 默认 5，范围 1~10，超出范围会被拒绝并告知错误原因。" +
+            "4. 返回 data.items 列表已按相关度降序排列，直接取前 N 条引用即可。" +
             "[ErrorHandling] 若 code != 200，请仔细阅读 message 字段，" +
             "其中包含具体字段的错误原因和修正建议，参考后调整参数重新调用。", tags = { "knowledge", "rag",
-                    "search" }, privileges = "protected", input_examples = "{\"query\": \"沪深300指数增强策略的风险控制方法\", " +
-                            "\"doc_type\": \"研报\", \"must_match_code\": \"000001\", \"top_k\": 5}", output_examples = "{\"code\": 200, \"message\": \"操作成功\", "
+                    "search" }, privileges = "protected", input_examples = "{\"query\": \"年度考核指标的计算方法\", " +
+                            "\"doc_type\": \"考核文档\", \"top_k\": 5}", output_examples = "{\"code\": 200, \"message\": \"操作成功\", "
                                     +
                                     "\"data\": {\"items\": [{\"content\": \"沪深300指数增强策略通过多因子模型...\", " +
                                     "\"doc_id\": \"d3f8a1b2-xxxx\", \"doc_name\": \"2024年一季度量化研报.pdf\", " +

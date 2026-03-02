@@ -26,7 +26,7 @@ Agentic RAG 在 `ai-engine` 中需要被设计为一个**独立的高阶智能�
 
 1.  **意图消解**：将用户输入（如“000001最近咋样”）翻译为标准化、专业化的查询短语（如“000001 基金 近期表现 风险分析”）。
 2.  **多路拆解**：如果用户问题包含多个维度（“告诉我什么是夏普比率，顺便查一下000001的夏普比率”），Planner 需要将其拆解为独立的两条查询意图。
-3.  **元数据提取**：基于 Prompt，引导 LLM 提取出时间范围、实体代码（基金代码）、文档类型等**结构化过滤条件**，准备传给 `bus-kernel` 的检索工具。
+3.  **元数据提取**：基于 Prompt，引导 LLM 提取出时间范围、文档类型等**结构化过滤条件**，准备传给 `bus-kernel` 的检索工具。
 
 ### 2.2 阶段二：混合检索执行 (Execution)
 
@@ -35,7 +35,7 @@ Agentic RAG 在 `ai-engine` 中需要被设计为一个**独立的高阶智能�
 **实现原理**：
 `ai-engine` 通过组装好的参数，调用 `bus-kernel` 的 `advanced_knowledge_search` API。底层执行：
 
-- **硬过滤 (Pre-filter)**：先用提取的结构化元数据（如 `fundCode="000001"`, `docType="年报"`）在 ES 中过滤掉 99% 不相关的文档块。
+- **硬过滤 (Pre-filter)**：先用提取的结构化元数据（如 `docType="考核文档"`）在 ES 中过滤掉 99% 不相关的文档块。
 - **混合召回 (Hybrid Search)**：对剩余的 1% 文档库，同时执行 Dense Vector (语义向量相似度) 和 BM25 (精准关键字匹配)，并将结果通过 RRF (倒数排序融合) 打分排序，返回 Top K 结果。
 
 ### 2.3 阶段三：结果交叉评估 (Grading & Evaluation)
@@ -76,34 +76,32 @@ Responder 获取所有评估为 "Yes" 的优质文档块作为上下文生成。
 
 记录上传的原始文件元数据。
 
-| 字段名称        | 字段类型    | 说明                    | 示例 / 注释                                            |
-| :-------------- | :---------- | :---------------------- | :----------------------------------------------------- |
-| `doc_id`        | String(PK)  | 文档唯一ID              | `doc_fc5a90d8...`                                      |
-| `file_name`     | String      | 原文件名                | `2024年富国天惠年报.pdf`                               |
-| `file_url`      | String      | 物理存储路径(OSS/MinIO) | `/minio/knowledge/2024/...`                            |
-| `doc_type`      | String/Enum | 文档所属分类池          | `研报`, `制度规范`, `名词释义`                         |
-| `related_codes` | JSONB       | 关联的业务代码          | `["000001", "000002"]` (极其重要，用于硬过滤)          |
-| `biz_tags`      | JSONB       | 业务辅助标签            | `["A股", "大盘"]`                                      |
-| `publish_date`  | Date        | 文档发布时间            | 用户限定检索时间范围                                   |
-| `status`        | Enum        | 文档解析状态            | `PENDING`, `PARSING`, `EMBEDDING`, `SUCCESS`, `FAILED` |
-| `tenant_code`   | String      | 租户隔离(若有)          | -                                                      |
-| `created_by`    | String      | 上传人                  | -                                                      |
+| 字段名称       | 字段类型    | 说明                    | 示例 / 注释                                            |
+| :------------- | :---------- | :---------------------- | :----------------------------------------------------- |
+| `doc_id`       | String(PK)  | 文档唯一ID              | `doc_fc5a90d8...`                                      |
+| `file_name`    | String      | 原文件名                | `2024年富国天惠年报.pdf`                               |
+| `file_url`     | String      | 物理存储路径(OSS/MinIO) | `/minio/knowledge/2024/...`                            |
+| `doc_type`     | String/Enum | 文档所属分类池          | `研报`, `制度规范`, `名词释义`                         |
+| `biz_tags`     | JSONB       | 业务辅助标签            | `["A股", "大盘"]`                                      |
+| `publish_date` | Date        | 文档发布时间            | 用户限定检索时间范围                                   |
+| `status`       | Enum        | 文档解析状态            | `PENDING`, `PARSING`, `EMBEDDING`, `SUCCESS`, `FAILED` |
+| `tenant_code`  | String      | 租户隔离(若有)          | -                                                      |
+| `created_by`   | String      | 上传人                  | -                                                      |
 
 ### 3.2 向量存储结构设计 (Chunk/Vector Index - Elasticsearch 等)
 
 切碎的知识块和高维向量，是提供给 AI 工具检索的真正标的物。
 
-| 字段名称        | 字段类型      | 说明                   | RAG 价值                                                    |
-| :-------------- | :------------ | :--------------------- | :---------------------------------------------------------- |
-| `chunk_id`      | String(PK)    | 切块唯一ID             | `chunk_uuid`                                                |
-| `doc_id`        | String(FK)    | 归属的主文档ID         | 用于找回出处和文件链接                                      |
-| `chunk_index`   | Integer       | 块序号 (0, 1, 2...)    | 命中后可通过 `index±1` 召回上下文，解决块边界信息截断问题   |
-| `content`       | Text          | 切片纯文本内容         | 经过标准或自定义 IK 分词，用于 BM25 关键词匹配得分          |
-| `embedding`     | Vector(Dense) | 高维语义向量表示       | 如 1536 维 float 数组，用于 KNN 语义相似度计算得分          |
-| `title_path`    | Keyword[]     | 该块所在的文档层级路径 | 如 `["前言", "产品风险"]`，大模型结合它能更好地理解块的主旨 |
-| `doc_type`      | Keyword       | 冗余父表字段：文档分类 | **关键！** AI 通过大类限定检索范围，防止跨库干扰            |
-| `related_codes` | Keyword[]     | 冗余父表字段：关联代码 | **关键！** AI 可指令“只搜关于 000001 的研报片段”            |
-| `publish_date`  | Date          | 冗余父表字段：时间戳   | AI 可指令“只搜三个月内发生的事”                             |
+| 字段名称       | 字段类型      | 说明                   | RAG 价值                                                    |
+| :------------- | :------------ | :--------------------- | :---------------------------------------------------------- |
+| `chunk_id`     | String(PK)    | 切块唯一ID             | `chunk_uuid`                                                |
+| `doc_id`       | String(FK)    | 归属的主文档ID         | 用于找回出处和文件链接                                      |
+| `chunk_index`  | Integer       | 块序号 (0, 1, 2...)    | 命中后可通过 `index±1` 召回上下文，解决块边界信息截断问题   |
+| `content`      | Text          | 切片纯文本内容         | 经过标准或自定义 IK 分词，用于 BM25 关键词匹配得分          |
+| `embedding`    | Vector(Dense) | 高维语义向量表示       | 如 1536 维 float 数组，用于 KNN 语义相似度计算得分          |
+| `title_path`   | Keyword[]     | 该块所在的文档层级路径 | 如 `["前言", "产品风险"]`，大模型结合它能更好地理解块的主旨 |
+| `doc_type`     | Keyword       | 冗余父表字段：文档分类 | **关键！** AI 通过大类限定检索范围，防止跨库干扰            |
+| `publish_date` | Date          | 冗余父表字段：时间戳   | AI 可指令“只搜三个月内发生的事”                             |
 
 ### 3.3 文档解析与向量化生命周期 (Pipeline)
 
@@ -114,12 +112,12 @@ Responder 获取所有评估为 "Yes" 的优质文档块作为上下文生成。
     - **策略注意点**：不能粗暴按字数长短切断。需要识别 PDF/Word 的逻辑边界（如遇见标题换行、句号换段）。
     - **重叠窗口 (Overlap)**：每个 Chunk 与下一个 Chunk 必须保持一定的字符重叠（如 500字一块，重叠 50字），防止关键概念恰好被一刀切成两段导致两者均搜不出。
 3.  **向量抽取 (Embedding)**：调用 Embedding 模型 API（如 `text-embedding-3-small` 或本地 BGE 模型），将每个 Chunk 转化为数组。
-4.  **向量入库 (Indexing)**：将 Chunk 以及所有的关联元数据（docType, related_codes 等）作为一个 Document 写入 ES 或 Vector DB，状态置为 `SUCCESS`。
+4.  **向量入库 (Indexing)**：将 Chunk 以及所有的关联元数据（docType 等）作为一个 Document 写入 ES 或 Vector DB，状态置为 `SUCCESS`。
 
 ### 3.4 后台管理 API 清单 (参考)
 
 - **文档库管理**：
-  - `POST /knowledge/upload`：上传接口（附带文件与关联基金代码等元数据）。
+  - `POST /knowledge/upload`：上传接口（附带文件与分类等元数据）。
   - `GET /knowledge/page`：分页查看库内文件及其向量化状态。
   - `DELETE /knowledge/{docId}`：物理删除文件，并**级联移除 ES 中对应 docId 的所有 Chunks**，保持纯净。
 - **人工微调与补偿**：
@@ -144,7 +142,6 @@ Responder 获取所有评估为 "Yes" 的优质文档块作为上下文生成。
 - `query` (String, 必填): 用于去匹配知识库语意的查询主词。
 - `exact_keyword` (String, 选填): 如果你怀疑存在生僻专有名词，将其填在这里，系统会增加精确关键词匹配权重。
 - `must_match_doc_type` (String, 选填): 当你需要查询特定类型文档时填写（枚举值说明...）。
-- `must_match_code` (String, 选填): 当用户的关注点是一只精确的基金时（如 000001），请**务必**传入该代码。
 
 ### 4.2 AI Engine Agent 挂载策略
 

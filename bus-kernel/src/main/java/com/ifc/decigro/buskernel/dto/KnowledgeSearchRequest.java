@@ -38,16 +38,6 @@ public class KnowledgeSearchRequest {
     private String docType;
 
     /**
-     * 精确匹配业务代码（选填）
-     * 用于精确过滤关联了特定基金代码的文档
-     */
-    @ToolInput(param_name = "must_match_code", param_type = "string", param_required = false, param_description = "精确匹配关联的业务代码（如基金代码 '000001'）。"
-            +
-            "须为完整代码，不支持模糊匹配。省略则不限制业务代码。", param_example = "000001")
-    @Pattern(regexp = "^[a-zA-Z0-9]{4,10}$", message = "[AI调用错误] must_match_code 须为 4~10 位字母或数字的完整代码（如 '000001'），不支持模糊或正则。")
-    private String mustMatchCode;
-
-    /**
      * 返回结果数量上限（选填，默认 5）
      */
     @ToolInput(param_name = "top_k", param_type = "integer", param_required = false, param_description = "返回最相关的文档片段数量，默认 5，最大 10。"

@@ -44,7 +44,6 @@ public class KnowledgeProxyService {
     public Result<Object> uploadDocument(
             MultipartFile file,
             String docType,
-            String relatedCodes,
             String bizTags,
             String publishDate) {
         try {
@@ -60,7 +59,6 @@ public class KnowledgeProxyService {
             };
             body.add("file", fileResource);
             body.add("doc_type", docType);
-            body.add("related_codes", relatedCodes != null ? relatedCodes : "");
             body.add("biz_tags", bizTags != null ? bizTags : "");
             if (publishDate != null) {
                 body.add("publish_date", publishDate);
@@ -186,7 +184,6 @@ public class KnowledgeProxyService {
      * 调用 ai-rag /knowledge/search 接口，再将响应的原始 Map 解析为结构化的
      * KnowledgeSearchResult 返回，方便 AI Agent 精准解析出参。
      */
-    @SuppressWarnings("unchecked")
     public Result<KnowledgeSearchResult> search(KnowledgeSearchRequest request) {
         try {
             // 第一步：构建发往 ai-rag 的参数体（字段名与 Python SearchRequest 模型对齐）
@@ -195,9 +192,6 @@ public class KnowledgeProxyService {
             body.put("top_k", request.getTopK() != null ? request.getTopK() : 5);
             if (request.getDocType() != null && !request.getDocType().isBlank()) {
                 body.put("doc_type", request.getDocType());
-            }
-            if (request.getMustMatchCode() != null && !request.getMustMatchCode().isBlank()) {
-                body.put("must_match_code", request.getMustMatchCode());
             }
 
             // 第二步：发送请求到 ai-rag 微服务

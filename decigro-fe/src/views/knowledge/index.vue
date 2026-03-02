@@ -29,7 +29,6 @@ interface KnowledgeDoc {
   doc_id: string;
   file_name: string;
   doc_type: string;
-  related_codes: string[];
   biz_tags: string[];
   publish_date: string | null;
   status: DocStatus;
@@ -78,7 +77,6 @@ const uploadDialogVisible = ref(false);
 const uploadLoading = ref(false);
 const uploadForm = reactive({
   docType: "",
-  relatedCodes: "",
   bizTags: "",
   publishDate: undefined as string | undefined,
 });
@@ -166,7 +164,6 @@ const handleUploadSubmit = async () => {
     const formData = new FormData();
     formData.append("file", selectedFile.value);
     formData.append("docType", uploadForm.docType);
-    formData.append("relatedCodes", uploadForm.relatedCodes || "");
     formData.append("bizTags", uploadForm.bizTags || "");
     if (uploadForm.publishDate)
       formData.append("publishDate", uploadForm.publishDate);
@@ -189,7 +186,6 @@ const handleUploadSubmit = async () => {
 const resetUploadForm = () => {
   Object.assign(uploadForm, {
     docType: "",
-    relatedCodes: "",
     bizTags: "",
     publishDate: undefined,
   });
@@ -525,20 +521,6 @@ onMounted(() => fetchDocList());
 
         <!-- 元数据信息 -->
         <div class="card-meta">
-          <div v-if="doc.related_codes?.length" class="meta-row">
-            <span class="meta-label">关联代码</span>
-            <div class="meta-tags">
-              <span
-                v-for="code in doc.related_codes.slice(0, 3)"
-                :key="code"
-                class="code-tag"
-                >{{ code }}</span
-              >
-              <span v-if="doc.related_codes.length > 3" class="more-tag"
-                >+{{ doc.related_codes.length - 3 }}</span
-              >
-            </div>
-          </div>
           <div class="meta-row">
             <span class="meta-label">上传时间</span>
             <span class="meta-value mono">{{ doc.create_time }}</span>
@@ -645,15 +627,6 @@ onMounted(() => fetchDocList());
                 :value="t"
               />
             </el-select>
-          </el-form-item>
-          <el-form-item label="关联代码">
-            <el-input
-              v-model="uploadForm.relatedCodes"
-              placeholder="如：000001,000002（英文逗号分隔）"
-            />
-            <div class="form-hint">
-              重要！填写后 AI 可精准定向检索该基金代码相关文档
-            </div>
           </el-form-item>
           <el-form-item label="业务标签">
             <el-input

@@ -26,7 +26,6 @@ async def create_document_record(
     file_name: str,
     file_path: str,
     doc_type: str,
-    related_codes: list[str],
     biz_tags: list[str],
     publish_date: Optional[str],
 ) -> DocumentVO:
@@ -46,14 +45,13 @@ async def create_document_record(
         await conn.execute(
             """
             INSERT INTO knowledge_documents
-                (doc_id, file_name, file_path, doc_type, related_codes, biz_tags, publish_date, status, create_time, update_time)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', NOW(), NOW())
+                (doc_id, file_name, file_path, doc_type, biz_tags, publish_date, status, create_time, update_time)
+            VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', NOW(), NOW())
             """,
             doc_id,
             file_name,
             file_path,
             doc_type,
-            json.dumps(related_codes),
             json.dumps(biz_tags),
             pub_date_obj,
         )
@@ -65,7 +63,6 @@ async def create_document_record(
         file_name=file_name,
         file_path=file_path,
         doc_type=doc_type,
-        related_codes=related_codes,
         biz_tags=biz_tags,
         publish_date=publish_date,
         status=DocumentStatus.PENDING,
@@ -100,7 +97,7 @@ async def list_documents(
 
         rows = await conn.fetch(
             f"""
-            SELECT doc_id, file_name, file_path, doc_type, related_codes, biz_tags,
+            SELECT doc_id, file_name, file_path, doc_type, biz_tags,
                    publish_date, status, error_msg, chunk_count,
                    to_char(create_time, 'YYYY-MM-DD HH24:MI:SS') AS create_time,
                    to_char(update_time, 'YYYY-MM-DD HH24:MI:SS') AS update_time
@@ -123,7 +120,7 @@ async def get_document_by_id(doc_id: str) -> Optional[DocumentVO]:
     try:
         row = await conn.fetchrow(
             """
-            SELECT doc_id, file_name, file_path, doc_type, related_codes, biz_tags,
+            SELECT doc_id, file_name, file_path, doc_type, biz_tags,
                    publish_date, status, error_msg, chunk_count,
                    to_char(create_time, 'YYYY-MM-DD HH24:MI:SS') AS create_time,
                    to_char(update_time, 'YYYY-MM-DD HH24:MI:SS') AS update_time
@@ -294,7 +291,6 @@ def _row_to_document_vo(row) -> DocumentVO:
         file_name=row["file_name"],
         file_path=row["file_path"],
         doc_type=row["doc_type"],
-        related_codes=json.loads(row["related_codes"]) if row["related_codes"] else [],
         biz_tags=json.loads(row["biz_tags"]) if row["biz_tags"] else [],
         publish_date=pub_date,
         status=DocumentStatus(row["status"]),

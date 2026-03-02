@@ -38,7 +38,6 @@ async def _process_document_async(
     doc_id: str,
     file_path: str,
     doc_type: str,
-    related_codes: list[str],
     biz_tags: list[str],
 ):
     """
@@ -62,7 +61,6 @@ async def _process_document_async(
             id=doc_id,
             # RAGLite 支持任意 keyword 元数据，会被存入搜索索引
             doc_type=doc_type,
-            related_codes=",".join(related_codes),  # 逗号分隔，便于后续 LIKE 查询
             biz_tags=",".join(biz_tags),
         )
 
@@ -90,7 +88,6 @@ async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="上传的文档文件（PDF / Word / Markdown 等）"),
     doc_type: str = Form(..., description="文档分类，如：研报、名词释义、制度规范"),
-    related_codes: str = Form("", description="关联的业务代码，多个以英文逗号分隔，如：000001,000002"),
     biz_tags: str = Form("", description="业务标签，多个以英文逗号分隔"),
     publish_date: Optional[str] = Form(None, description="文档发布日期，格式：YYYY-MM-DD"),
 ):
@@ -116,8 +113,7 @@ async def upload_document(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"文件保存失败: {e}")
 
-    # 解析关联代码和标签
-    codes_list = [c.strip() for c in related_codes.split(",") if c.strip()]
+    # 解析标签
     tags_list = [t.strip() for t in biz_tags.split(",") if t.strip()]
 
     # 在数据库中创建记录（状态: PENDING）
@@ -126,7 +122,6 @@ async def upload_document(
         file_name=file.filename,
         file_path=str(saved_path),
         doc_type=doc_type,
-        related_codes=codes_list,
         biz_tags=tags_list,
         publish_date=publish_date,
     )
@@ -137,7 +132,6 @@ async def upload_document(
         doc_id=doc_id,
         file_path=str(saved_path),
         doc_type=doc_type,
-        related_codes=codes_list,
         biz_tags=tags_list,
     )
 
@@ -247,7 +241,6 @@ async def reprocess_document(doc_id: str, background_tasks: BackgroundTasks):
         doc_id=doc_id,
         file_path=doc.file_path,
         doc_type=doc.doc_type,
-        related_codes=doc.related_codes or [],
         biz_tags=doc.biz_tags or [],
     )
 

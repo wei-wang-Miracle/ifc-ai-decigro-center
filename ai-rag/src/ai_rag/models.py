@@ -32,7 +32,6 @@ class DocumentVO(BaseModel):
     file_name: str
     file_path: Optional[str] = None
     doc_type: str
-    related_codes: list[str] = []
     biz_tags: list[str] = []
     publish_date: Optional[str] = None
     status: DocumentStatus = DocumentStatus.PENDING
@@ -59,7 +58,6 @@ class SearchRequest(BaseModel):
     字段说明：
     - query: 语义查询词，必须是自然语言描述，2~500 字符（必填）
     - doc_type: 文档分类过滤，最长 50 字符（选填）
-    - must_match_code: 精确业务代码（如基金代码），须为 4~10 位字母数字（选填）
     - top_k: 返回最相关片段数量，范围 1~10，默认 5
     """
 
@@ -78,11 +76,6 @@ class SearchRequest(BaseModel):
                     "传入未知分类值时检索结果将为空，省略则不限制分类。"
     )
 
-    must_match_code: Optional[str] = Field(
-        default=None,
-        description="[选填] 精确匹配关联的业务代码（如基金代码'000001'）。"
-                    "须为完整 4~10 位字母数字组成的代码，不支持模糊匹配。"
-    )
 
     exact_keyword: Optional[str] = Field(
         default=None,
@@ -116,23 +109,7 @@ class SearchRequest(BaseModel):
                 )
         return v
 
-    @field_validator("must_match_code")
-    @classmethod
-    def validate_code_format(cls, v: Optional[str]) -> Optional[str]:
-        """
-        功能: 校验 must_match_code 为 4~10 位字母数字组成的完整代码。
-        参数: v - 待校验的代码字符串（可为 None）
-        返回: 校验通过后的字符串或 None
-        """
-        if v is None:
-            return v
-        # 只允许纯字母和数字，长度 4~10
-        if not re.match(r"^[a-zA-Z0-9]{4,10}$", v):
-            raise ValueError(
-                f"[AI调用错误] must_match_code 格式不正确（当前值：'{v}'）。"
-                "须为 4~10 位字母或数字的完整代码（如 '000001'），不支持模糊匹配或正则表达式。"
-            )
-        return v
+
 
 
 class SearchResult(BaseModel):

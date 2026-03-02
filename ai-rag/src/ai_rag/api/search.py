@@ -19,15 +19,12 @@ async def search_knowledge(req: SearchRequest):
     高级知识库混合检索接口（供 bus-kernel ToolCard 和 ai-engine 调用）
 
     实现：
-    1. 硬过滤（Pre-filter）：先用元数据（doc_type, related_codes）缩小候选集
+    1. 硬过滤（Pre-filter）：先用元数据（doc_type）缩小候选集
     2. 混合召回（Hybrid Search）：向量语义搜索 + BM25 关键词搜索，RRF 融合排序
     3. 上下文扩展：将命中的 Chunk 扩展至其邻居，解决语义在块边界被截断的问题
     4. 重排序（可选）：FlashRank 精排，取 top_k 结果
 
     参数说明：
-    - query: 语义查询主词（必填）
-    - doc_type: 文档分类过滤（选填，如 '研报'）
-    - must_match_code: 精确匹配基金代码（选填，如 '000001'）
     - top_k: 返回数量（默认 5）
     """
     config = get_raglite_config()
@@ -36,9 +33,6 @@ async def search_knowledge(req: SearchRequest):
     metadata_filter = {}
     if req.doc_type:
         metadata_filter["doc_type"] = req.doc_type
-    if req.must_match_code:
-        # 因为 related_codes 存储为逗号分隔字符串，用 LIKE 匹配
-        metadata_filter["related_codes__icontains"] = req.must_match_code
 
     # 第二步：执行混合检索（向量 + BM25 双路，RRF 融合打分）
     chunk_ids, _ = hybrid_search(
