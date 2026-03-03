@@ -123,7 +123,7 @@ public class KnowledgeController {
      * 调用失败时，message 字段会包含具体的改正提示，AI 可据此自动修正参数后重试。
      */
     @PostMapping("/search")
-    @ToolCard(tool_name = "search_knowledge_base", summary = "知识库语义检索", description = "[Action] 对内部知识库执行混合语义检索（向量相似度 + BM25 关键词），"
+    @ToolCard(tool_name = "search_knowledge_base", summary = "知识库语义检索", alias = "知识库语义检索", description = "[Action] 对内部知识库执行混合语义检索（向量相似度 + BM25 关键词），"
             +
             "返回与查询最相关的文档片段，并自动扩展上下文防止语义截断。" +
             "[Trigger] 当用户提问涉及专业知识、内部资料或产品文档，" +
@@ -135,8 +135,8 @@ public class KnowledgeController {
             "3. top_k 默认 5，范围 1~10，超出范围会被拒绝并告知错误原因。" +
             "4. 返回 data.items 列表已按相关度降序排列，直接取前 N 条引用即可。" +
             "[ErrorHandling] 若 code != 200，请仔细阅读 message 字段，" +
-            "其中包含具体字段的错误原因和修正建议，参考后调整参数重新调用。", tags = { "knowledge", "rag",
-                    "search" }, privileges = "protected", input_examples = "{\"query\": \"年度考核指标的计算方法\", " +
+            "其中包含具体字段的错误原因 and 修正建议，参考后调整参数重新调用。", tags = { "knowledge_base", "semantic_search", "rag_retrieval",
+                    "information_qa" }, privileges = "protected", input_examples = "{\"query\": \"年度考核指标的计算方法\", " +
                             "\"doc_type\": \"考核文档\", \"top_k\": 5}", output_examples = "{\"code\": 200, \"message\": \"操作成功\", "
                                     +
                                     "\"data\": {\"items\": [{\"content\": \"沪深300指数增强策略通过多因子模型...\", " +

@@ -161,7 +161,8 @@ public class AiChatController {
      * POST /api/dg/ai/chat/tool/sessions
      */
     @PostMapping("/tool/sessions")
-    @ToolCard(tool_name = "get_current_user_sessions", summary = "获取当前用户的会话列表", description = "获取当前登录用户的所有历史会话列表。当需要查找、回顾或管理当前用户的对话历史时使用。")
+    @ToolCard(tool_name = "get_current_user_sessions", summary = "获取当前用户的会话列表", alias = "获取当前用户的会话列表", description = "获取当前登录用户的所有历史会话列表。当需要查找、回顾或管理当前用户的对话历史时使用。", tags = {
+            "chat_management", "session_history", "user_context" })
     public Result<List<SessionResponse>> toolListSessions(
             @RequestHeader("X-Auth-Token") String token) {
         try {
@@ -202,7 +203,8 @@ public class AiChatController {
      * POST /api/dg/ai/chat/tool/messages
      */
     @PostMapping("/tool/messages")
-    @ToolCard(tool_name = "get_session_messages", summary = "获取指定会话的消息记录", description = "根据会话ID获取该会话的所有详细消息记录。当需要深入分析特定对话的内容、上下文或执行过程时使用。")
+    @ToolCard(tool_name = "get_session_messages", summary = "获取指定会话的消息记录", alias = "获取指定会话的消息记录", description = "根据会话ID获取该会话的所有详细消息记录。当需要深入分析特定对话的内容、上下文或执行过程时使用。", tags = {
+            "chat_analysis", "message_details", "context_retrieval" })
     public Result<List<MessageResponse>> toolGetMessages(
             @RequestBody ToolGetMessagesRequest request) {
         try {

@@ -30,6 +30,14 @@ public @interface ToolCard {
     String summary() default "";
 
     /**
+     * 工具别名 (alias)
+     * 用于前端展示或语义标注
+     *
+     * @return 工具别名
+     */
+    String alias() default "";
+
+    /**
      * 工具详细描述 (tool_description)
      * 对应 README 要求的 AI 友好写法。对应 原 @Operation.description
      * 约束要求:

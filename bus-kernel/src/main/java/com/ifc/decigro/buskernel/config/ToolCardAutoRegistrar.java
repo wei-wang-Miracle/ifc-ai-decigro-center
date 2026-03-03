@@ -104,12 +104,16 @@ public class ToolCardAutoRegistrar implements ApplicationListener<ApplicationRea
 
         if (existTool != null) {
             // === 已存在：仅更新硬契约 (Technical Spec) ===
-            log.info("工具 {} 已存在，正在同步技术契约(Schema/Path)...", toolName);
+            log.info("工具 {} 已存在，正在同步技术契约(Schema/Path/Alias)...", toolName);
 
             existTool.setToolProtocol(toolProtocol);
             existTool.setUrlPath(urlPath);
             existTool.setToolParameters(inputSchema);
             existTool.setOutputSchema(outputSchema);
+            // 同步别名（如果注解中有定义）
+            if (StrUtil.isNotBlank(annotation.alias())) {
+                existTool.setToolAlias(annotation.alias());
+            }
 
             // 注意：Description, Tags, Examples, Manager, Privileges 等软描述字段保持 DB 原值，不覆盖
             toolCardService.saveOrUpdate(existTool);
@@ -119,6 +123,7 @@ public class ToolCardAutoRegistrar implements ApplicationListener<ApplicationRea
 
             ToolCard newTool = new ToolCard();
             newTool.setToolName(toolName);
+            newTool.setToolAlias(annotation.alias());
 
             // 硬契约
             newTool.setToolProtocol(toolProtocol);

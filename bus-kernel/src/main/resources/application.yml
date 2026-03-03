@@ -17,6 +17,9 @@ spring:
     password: 123456
     driver-class-name: org.postgresql.Driver
     type: com.zaxxer.hikari.HikariDataSource
+  data:
+    mongodb:
+      uri: mongodb://admin:123456@127.0.0.1:27017/recommend?authSource=recommend&authMechanism=SCRAM-SHA-256
 
 mybatis-flex:
   mapper-locations: classpath*:/mapper/*.xml

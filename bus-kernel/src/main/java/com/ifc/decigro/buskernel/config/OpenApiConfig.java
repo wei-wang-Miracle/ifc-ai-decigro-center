@@ -65,6 +65,9 @@ public class OpenApiConfig {
                 if (StringUtils.hasText(toolCard.tool_name())) {
                     operation.addExtension("x-tool-name", toolCard.tool_name());
                 }
+                if (StringUtils.hasText(toolCard.alias())) {
+                    operation.addExtension("x-tool-alias", toolCard.alias());
+                }
             }
             return operation;
         };
