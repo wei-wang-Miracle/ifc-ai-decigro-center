@@ -60,6 +60,9 @@ async def responder_node(state: AgentState, config: RunnableConfig) -> Command:
     # 优先处理特殊意图
     if intent and intent.intent_type == IntentType.UNSUPPORTED:
         summary = "抱歉，根据我目前拥有的 Tool Card 和 Agent Card 权限，我暂时无法直接处理您的这项请求。您可以尝试换一种方式提问，或者查看我支持的功能列表。"
+    elif state.error and not step_results:
+        # 上游节点（如 Planner）明确给出了能力缺口原因，直接透传给用户，无需 LLM 再包装
+        summary = state.error
     else:
         try:
             # 调用 LLM 生成输出

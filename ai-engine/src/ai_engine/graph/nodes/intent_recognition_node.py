@@ -119,6 +119,9 @@ async def intent_recognition_node(state: AgentState, config: RunnableConfig) -> 
         elif intent.intent_type == IntentType.UNSUPPORTED:
             # 如果不支持，直接去 responder 节点生成引导语
             goto = "responder"
+        elif intent.intent_type in [IntentType.CHAT, IntentType.QUESTION]:
+            # 闲聊或简单问答，走普通对话节点（绑定 public 工具）
+            goto = "normal"
         elif intent.intent_type == IntentType.CLARIFY:
             # 简单处理：如果是澄清，也先到 dispatcher 处理或者直接结束
             goto = "dispatcher"

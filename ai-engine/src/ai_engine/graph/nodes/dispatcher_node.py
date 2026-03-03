@@ -6,10 +6,14 @@
 from typing import Any, Literal
 
 from langchain_core.messages import AIMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
 from langgraph.types import Command
 
 from ..state import AgentState, IntentType, IntentObject, PlanStep, ReviewStatus, StepStatus
+from ...audit import start_node_trace, finish_node_trace
+from ...config import get_settings
+from ...registry import get_agent_registry
 
 # Agent 选择 Prompt 模板
 PLANNER_SELECTION_PROMPT = """你是一个智能调度专家。根据用户的意图，从可用的 Planner Agent 列表中选择最合适的一个来负责本次任务规划。
@@ -60,7 +64,7 @@ async def _select_planner_agent(intent: IntentObject, token: str, config: Runnab
     agent_registry = get_agent_registry()
     descriptions = agent_registry.get_agent_descriptions(token, agent_type="PLANNER")
     agent_names = list(descriptions.keys())
-    
+
     if not descriptions:
         print("[Dispatcher] 警告: 没有可用的 PLANNER Agent")
         return None
@@ -96,29 +100,30 @@ async def _select_planner_agent(intent: IntentObject, token: str, config: Runnab
 
 async def _select_executor_agent(step: PlanStep, planner_name: str, token: str, config: RunnableConfig = None) -> str | None:
     """为任务步骤选择最合适的 bounded Executor Agent"""
-    if step.assigned_agent:
-        return step.assigned_agent
-    
     agent_registry = get_agent_registry()
-    
+
     # 获取 Planner 的 bound_agents
     planner = agent_registry.get_agent(planner_name, token) if planner_name else None
     bound_agents = planner.bound_agents if planner else []
-    
-    # 获取所有的 Executor 描述
+
+    # 获取所有的 Executor 描述，严格限定在 bound_agents 范围内
     all_executors = agent_registry.get_agent_descriptions(token, agent_type="EXECUTOR")
-    
-    # 如果 planner 有 bound_agents，则过滤；否则回退到全局所有的 EXECUTOR（防止旧数据或未配置绑定）
-    descriptions = {name: desc for name, desc in all_executors.items() if name in bound_agents} if bound_agents else all_executors
+    descriptions = {name: desc for name, desc in all_executors.items() if name in bound_agents} if bound_agents else {}
     agent_names = list(descriptions.keys())
-    
+
     if not descriptions:
-        print("[Dispatcher] 警告: 没有可用的 EXECUTOR Agent (即便尝试回退)")
-        return _get_fallback_agent(list(all_executors.keys()))
-        
+        print(f"[Dispatcher] 警告: Planner '{planner_name}' 没有绑定任何可用的 EXECUTOR Agent")
+        return None
+
+    # 如果 step 已指定 agent，验证其是否在 bound_agents 范围内
+    if step.assigned_agent:
+        if step.assigned_agent in descriptions:
+            return step.assigned_agent
+        print(f"[Dispatcher] 警告: 步骤指定的 Agent '{step.assigned_agent}' 不在 Planner 绑定范围内，将重新选择")
+
     if len(descriptions) == 1:
         return agent_names[0]
-    
+
     settings = get_settings()
     llm = ChatOpenAI(
         model=settings.llm_model,
@@ -127,13 +132,13 @@ async def _select_executor_agent(step: PlanStep, planner_name: str, token: str, 
         temperature=0.1,
         streaming=True
     )
-    
+
     agent_desc_text = "\n".join([f"- **{name}**: {desc}" for name, desc in descriptions.items()])
     prompt = EXECUTOR_SELECTION_PROMPT.format(
         agent_descriptions=agent_desc_text,
         step_description=step.description,
     )
-    
+
     try:
         response = await llm.ainvoke(prompt, config=config)
         agent_name = response.content.strip()

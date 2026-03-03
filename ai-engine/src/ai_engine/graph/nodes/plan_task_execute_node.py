@@ -330,11 +330,15 @@ async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> C
     agent_config = agent_registry.get_agent(current_executor, token)
     agent_alias = agent_config.alias if agent_config else current_executor
     
-    await adispatch_custom_event("agent_start", {"agent": current_executor, "alias": agent_alias}, config=config)
+    await adispatch_custom_event("agent_start", {
+        "agent": current_executor,
+        "alias": agent_alias,
+        "step_id": current_step.step_id,
+    }, config=config)
 
     # 更新步骤状态
     current_step.status = StepStatus.IN_PROGRESS
-    
+
     # 审计埋点
     nt = start_node_trace("executor")
 
@@ -347,7 +351,14 @@ async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> C
         token=token,
         config=config,
     )
-    
+
+    # 发送 Agent 结束事件
+    await adispatch_custom_event("agent_end", {
+        "agent": current_executor,
+        "step_id": current_step.step_id,
+        "success": result.success,
+    }, config=config)
+
     # 审计：构建 Agent 快照（包含工具调用详情、system_prompt 和 agent_result）
     settings = get_settings()
     agent_snap = build_agent_snapshot(
@@ -363,16 +374,16 @@ async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> C
         agent_snapshot=agent_snap,
         node_result=result.output if result.success else result.error,
     )
-    
+
     # 更新步骤状态
     current_step.status = StepStatus.COMPLETED if result.success else StepStatus.FAILED
     if result.require_review:
         current_step.status = StepStatus.NEEDS_REVIEW
-    
+
     # 收集执行结果
     step_results = list(state.step_results)
     step_results.append(result)
-    
+
     # 如果需要审核，设置标记但不推进索引
     if result.require_review:
         return Command(
@@ -385,7 +396,7 @@ async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> C
             },
             goto="dispatcher"
         )
-    
+
     # 推进到下一步，并重置 review_status 以便下一个需要审核的步骤能正确触发
     return Command(
         update={

@@ -178,15 +178,26 @@ async def start_workflow(request: ChatRequest, x_auth_token: Optional[str] = Hea
         raise HTTPException(status_code=500, detail=f"工作流执行失败: {str(e)}")
 
 
-# 节点名称友好映射
+# 节点名称友好映射（覆盖所有注册节点）
 NODE_NAME_MAP = {
     "intent_recognition": "意图识别",
+    "dispatcher": "任务调度",
     "planner": "计划制定",
     "executor": "任务执行",
+    "normal": "智能对话",
     "responder": "结果汇总",
     "review": "人工审核",
     "feedback": "反馈处理",
 }
+
+# 所有需要在前端展示进度的节点（dispatcher 是内部路由节点，不展示）
+_VISIBLE_NODES = {"intent_recognition", "planner", "executor", "normal", "responder", "review", "feedback"}
+
+# 产生结构化 JSON 输出、不应在前端展示为正文的节点
+_JSON_NODES = {"intent_recognition", "planner", "dispatcher"}
+
+# 产生中间思考过程、应在 Agent 面板展示而非主聊天流的节点
+_THOUGHT_NODES = {"executor", "normal"}
 
 @router.post("/chat/stream")
 async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str] = Header(None, alias="X-Auth-Token")):
@@ -224,200 +235,142 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
         try:
             # 发送初始信息
             yield f"data: {json.dumps({'type': 'meta', 'task_id': task_id, 'trace_id': trace_id})}\n\n"
-            
-            # 使用 astream_events v2 获取详细事件
-            # v2 支持 on_custom_event（Agent 进场等自定义事件），v1 不支持
+
+            # 当前所在节点（通过 LangGraph metadata 追踪）
             current_node = None
+
             async for event in workflow.astream_events(initial_state, config, version="v2"):
                 event_type = event["event"]
                 metadata = event.get("metadata", {})
-                node_name = metadata.get("langgraph_node")
-                if node_name:
-                    current_node = node_name
-                
-                # 调试日志（上线后可注释）
-                if event_type in ["on_custom_event", "on_tool_start", "on_tool_end"]:
-                    print(f"[Stream] Event: {event_type}, Name: {event.get('name')}, Data: {str(event.get('data', ''))[:200]}")
-                
-                if event_type in ["on_node_start", "on_chain_start"]:
-                    # 识别节点进入 (astream_events v1 中 node 可能是 chain 也可能是 node)
-                    name = event.get("name")
-                    # 兼容不同版本的节点名称
-                    if name and any(k in name for k in ["planner", "executor", "intent_recognition", "review", "feedback", "responder"]):
-                        # 提取核心名称
-                        clean_name = name
-                        for k in ["planner", "executor", "intent_recognition", "review", "feedback", "responder"]:
-                            if k in name:
-                                clean_name = k
-                                break
-                        print(f"[Stream] 节点进场: {clean_name} (原始: {name})")
-                        display_name = NODE_NAME_MAP.get(clean_name, clean_name)
-                        yield f"data: {json.dumps({'type': 'node_start', 'node': clean_name, 'display_name': display_name})}\n\n"
-                        
+                ev_node = metadata.get("langgraph_node")
+                if ev_node:
+                    current_node = ev_node
+
+                # ── 节点进入 ──────────────────────────────────────────
+                if event_type == "on_chain_start":
+                    name = event.get("name", "")
+                    # 精确匹配图中注册的节点名称，避免匹配子链
+                    if name in _VISIBLE_NODES:
+                        print(f"[Stream] 节点进场: {name}")
+                        yield f"data: {json.dumps({'type': 'node_start', 'node': name, 'display_name': NODE_NAME_MAP.get(name, name)})}\n\n"
+
+                # ── 工具调用开始 ──────────────────────────────────────
                 elif event_type == "on_tool_start":
-                    # 工具调用开始
-                    tool_name = event.get("name")
+                    tool_name = event.get("name", "")
                     from ..registry import get_tool_registry
                     tool_reg = get_tool_registry()
-                    # 尝试从摘要中获取别名
                     tool_summary = tool_reg._user_tool_summaries.get(x_auth_token, {}).get(tool_name, {})
                     tool_alias = tool_summary.get("tool_alias", tool_name)
-                    
-                    print(f"[Stream] 工具调用: {tool_name} (别名: {tool_alias})")
-                    yield f"data: {json.dumps({
-                        'type': 'tool_start', 
-                        'tool': tool_name, 
-                        'tool_alias': tool_alias,
-                        'input': event.get('data', {}).get('input', {})
-                    }, ensure_ascii=False)}\n\n"
-                    
-                elif event_type == "on_tool_end":
-                    # 工具调用结束
-                    yield f"data: {json.dumps({
-                        'type': 'tool_end', 
-                        'tool': event['name'], 
-                        'output': str(event['data'].get('output'))
-                    }, ensure_ascii=False)}\n\n"
-                
-                elif event_type == "on_chat_model_start":
-                     yield f"data: {json.dumps({'type': 'thinking', 'content': '正在思考...'}, ensure_ascii=False)}\n\n"
-                
-                elif event_type == "on_custom_event":
-                    if event["name"] == "agent_start":
-                         agent_name = event['data']['agent']
-                         agent_alias = event['data'].get('alias', agent_name)
-                         print(f"[Stream] Agent进场: {agent_name} (别名: {agent_alias})")
-                         yield f"data: {json.dumps({
-                            'type': 'agent_start', 
-                            'agent': agent_name,
-                            'agent_alias': agent_alias
-                        }, ensure_ascii=False)}\n\n"
+                    # 工具归属的节点（用于前端精确绑定到正确的 Agent 条目）
+                    tool_node = ev_node or current_node
+                    print(f"[Stream] 工具调用开始: {tool_name} | node={tool_node}")
+                    yield f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name, 'tool_alias': tool_alias, 'node': tool_node, 'input': event.get('data', {}).get('input', {})}, ensure_ascii=False)}\n\n"
 
+                # ── 工具调用结束 ──────────────────────────────────────
+                elif event_type == "on_tool_end":
+                    tool_node = ev_node or current_node
+                    output = event["data"].get("output")
+                    output_str = str(output) if output is not None else ""
+                    print(f"[Stream] 工具调用结束: {event['name']} | node={tool_node}")
+                    yield f"data: {json.dumps({'type': 'tool_end', 'tool': event['name'], 'node': tool_node, 'output': output_str}, ensure_ascii=False)}\n\n"
+
+                # ── 自定义事件（agent_start / agent_end）─────────────
+                elif event_type == "on_custom_event":
+                    ev_name = event["name"]
+                    if ev_name == "agent_start":
+                        agent_name = event["data"]["agent"]
+                        agent_alias = event["data"].get("alias", agent_name)
+                        # step_id 用于前端在多步骤场景下唯一标识一个 Agent 工作条目
+                        step_id = event["data"].get("step_id", "")
+                        print(f"[Stream] Agent 进场: {agent_name} ({agent_alias}) step={step_id}")
+                        yield f"data: {json.dumps({'type': 'agent_start', 'agent': agent_name, 'agent_alias': agent_alias, 'step_id': step_id}, ensure_ascii=False)}\n\n"
+                    elif ev_name == "agent_end":
+                        agent_name = event["data"]["agent"]
+                        step_id = event["data"].get("step_id", "")
+                        success = event["data"].get("success", True)
+                        print(f"[Stream] Agent 结束: {agent_name} step={step_id} success={success}")
+                        yield f"data: {json.dumps({'type': 'agent_end', 'agent': agent_name, 'step_id': step_id, 'success': success}, ensure_ascii=False)}\n\n"
+
+                # ── 模型流式 token ────────────────────────────────────
                 elif event_type == "on_chat_model_stream":
-                    # 获取流式 chunk
                     chunk = event.get("data", {}).get("chunk")
-                    if chunk:
-                        content = ""
-                        reasoning = ""
-                        
-                        # 1. 提取推理内容 (Reasoning)
-                        # 兼容 Moonshot/DeepSeek 等厂商。LangChain OpenAI 会将其放在 additional_kwargs
-                        if hasattr(chunk, "additional_kwargs"):
-                            reasoning = chunk.additional_kwargs.get("reasoning_content", "")
-                        
-                        # 特殊版本或某些封装可能直接放在 reasoning 字段
-                        if not reasoning and hasattr(chunk, "reasoning"):
-                            reasoning = getattr(chunk, "reasoning", "")
-                        
-                        # 2. 提取文本内容 (Content)
-                        if hasattr(chunk, "content"):
-                            content = chunk.content
-                        elif isinstance(chunk, dict):
-                            content = chunk.get("content", "")
-                        
-                        if content or reasoning:
-                            # 识别当前节点及其属性
-                            node_name = event.get("metadata", {}).get("langgraph_node") or current_node
-                            
-                            is_thought = False
-                            is_json = False
-                            
-                            # 逻辑 A: 任何显式的『推理流』字段都属于思考过程
-                            if reasoning:
-                                is_thought = True
-                            
-                            # 逻辑 B: 根据节点名处理 content
-                            if node_name == "responder":
-                                # 汇总节点：reasoning 属于思考，content 属于最终结果
-                                if content:
-                                    is_thought = False
-                            elif node_name in ["intent_recognition", "planner", "dispatcher"]:
-                                # 中间解析/调度节点：产生的结构化数据标记为 is_json 隐藏
-                                # dispatcher 输出的是 Agent 名称选择结果，也不应展示
-                                if content:
-                                    is_thought = True
-                                    is_json = True
-                            elif node_name == "executor":
-                                # 执行器节点：Agent 的 Monologue 属于思考过程
-                                if content:
-                                    is_thought = True
-                            else:
-                                # 默认逻辑：如果没有明确节点名，尝试根据是否有 content 来区分
-                                # 参考 Kimi 示例：如果没有 content 只有 reasoning，则是思考中
-                                if reasoning and not content:
-                                    is_thought = True
-                                
-                            yield f"data: {json.dumps({
-                                'type': 'token', 
-                                'content': content,
-                                'reasoning': reasoning,
-                                'node': node_name,
-                                'is_thought': is_thought,
-                                'is_json': is_json
-                            }, ensure_ascii=False)}\n\n"
-                
-                elif event_type == "on_node_end":
-                    # 节点执行结束，发送结果用于调试（标记为 node_result，前端依需展示）
-                    node_name = event.get("name")
-                    if node_name:
+                    if not chunk:
+                        continue
+
+                    content = ""
+                    reasoning = ""
+
+                    # 提取推理链内容（Moonshot / DeepSeek 兼容）
+                    if hasattr(chunk, "additional_kwargs"):
+                        reasoning = chunk.additional_kwargs.get("reasoning_content", "")
+                    if not reasoning and hasattr(chunk, "reasoning"):
+                        reasoning = getattr(chunk, "reasoning", "") or ""
+
+                    # 提取正文内容
+                    if hasattr(chunk, "content"):
+                        content = chunk.content or ""
+                    elif isinstance(chunk, dict):
+                        content = chunk.get("content", "")
+
+                    if not content and not reasoning:
+                        continue
+
+                    node_name = ev_node or current_node
+
+                    # 分类逻辑：
+                    #   is_json=True  → 结构化中间数据，前端完全隐藏
+                    #   is_thought=True → 思考/中间过程，展示在 Agent 面板，不进入主聊天流
+                    #   两者均为 False  → 最终正文，展示在主聊天流
+                    is_thought = bool(reasoning)  # 任何 reasoning 字段都属于思考
+                    is_json = False
+
+                    if node_name in _JSON_NODES:
+                        # 规划/调度节点输出结构化 JSON，前端不可见
+                        is_thought = True
+                        is_json = True
+                    elif node_name in _THOUGHT_NODES:
+                        # executor/normal 节点的 content 是 Agent 的行动中间过程
+                        if content:
+                            is_thought = True
+                    # responder 节点的 content 是最终正文，is_thought 保持 False
+
+                    yield f"data: {json.dumps({'type': 'token', 'content': content, 'reasoning': reasoning, 'node': node_name, 'is_thought': is_thought, 'is_json': is_json}, ensure_ascii=False)}\n\n"
+
+                # ── 节点结束 ──────────────────────────────────────────
+                elif event_type == "on_chain_end":
+                    name = event.get("name", "")
+                    if name in _VISIBLE_NODES:
                         output = event.get("data", {}).get("output")
-                        yield f"data: {json.dumps({
-                            'type': 'node_result',
-                            'node': node_name,
-                            'output': str(output) # 可能是 JSON 字符串
-                        }, ensure_ascii=False)}\n\n"
-            
-            # 流程结束，获取最终状态
-            # 注意: astream_events 不直接返回最终 state，我们需要重新获取或通过 storage 获取
-            # 这里简化处理：如果在 _active_workflows 中有记录（需要审核），则返回 pending
-            # 否则假设成功。更严谨的做法是 checkpointer.get(config)
-            
-            # 检查是否需要审核 (从 memory 中检查 active workflows)
-            # 由于是 async generator，我们难以直接拿到 workflow.invoke 的返回值
-            # 但我们可以通过 checkpointer 读取最新状态
-            # 暂时简化：发送完成信号 (前端刷新或结束 loading)
-            
-            # 获取最终快照
+                        yield f"data: {json.dumps({'type': 'node_result', 'node': name, 'output': str(output)}, ensure_ascii=False)}\n\n"
+
+            # ── 流结束：读取最终快照 ───────────────────────────────────
             snapshot = workflow.get_state(config)
             final_message = ""
             require_review = False
             status = "completed"
-            
+
             if snapshot and snapshot.values:
-                 # 获取最后的消息
-                 steps = snapshot.values.get("step_results", [])
-                 msgs = snapshot.values.get("messages", [])
-                 if msgs:
-                     final_message = msgs[-1].content if hasattr(msgs[-1], 'content') else str(msgs[-1])
-                 
-                 # 检查 review 状态
-                 # 如果我们在 plan_task_execute_node 返回了 require_review=True，它会体现在 messages 或 state 中
-                 # 但 snapshot.next 可能会指示下一步是 'review'
-                 if snapshot.next and "review" in snapshot.next:
-                     require_review = True
-                     status = "pending_review"
-                     final_message = "任务需要人工审核"
-            
-            # 如果需要审核，保存状态
+                msgs = snapshot.values.get("messages", [])
+                if msgs:
+                    final_message = msgs[-1].content if hasattr(msgs[-1], "content") else str(msgs[-1])
+                if snapshot.next and "review" in snapshot.next:
+                    require_review = True
+                    status = "pending_review"
+                    final_message = "任务需要人工审核"
+
             if require_review:
                 _active_workflows[task_id] = {
                     "workflow": workflow,
                     "config": config,
-                    "state": snapshot.values, # 保存 state values
+                    "state": snapshot.values,
                     "trace_id": trace_id,
                 }
 
-            yield f"data: {json.dumps({
-                'type': 'result', 
-                'task_id': task_id,
-                'status': status,
-                'message': final_message,
-                'require_review': require_review
-            }, ensure_ascii=False)}\n\n"
-            
+            yield f"data: {json.dumps({'type': 'result', 'task_id': task_id, 'status': status, 'message': final_message, 'require_review': require_review}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
 
         except Exception as e:
+            print(f"[Stream] 异常: {e}")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(

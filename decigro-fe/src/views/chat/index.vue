@@ -42,8 +42,8 @@ interface AgentWorkEntry {
 // 当前所有 Agent 工作记录
 const agentWorkEntries = reactive<AgentWorkEntry[]>([])
 
-// 当前活跃的 Agent（正在工作中）
-const activeAgentName = ref<string | null>(null)
+// 当前活跃的 step_id（用于精确绑定工具/思考流到对应 Agent 条目）
+const activeStepId = ref<string | null>(null)
 
 // 计算属性：使用 store 中的消息
 const messages = computed(() => chatStore.messages)
@@ -108,9 +108,10 @@ const closeAgentPanel = () => {
     highlightedAgent.value = null
 }
 
-// 获取当前活跃的 AgentWorkEntry
-const getActiveAgent = (): AgentWorkEntry | undefined => {
-    return agentWorkEntries.find(e => e.status === 'running')
+// 通过 step_id 查找 AgentWorkEntry（精确绑定，多 Agent 场景不错位）
+const getEntryByStepId = (stepId: string | null): AgentWorkEntry | undefined => {
+    if (!stepId) return undefined
+    return agentWorkEntries.find(e => e.id === stepId)
 }
 
 // 初始化：加载会话列表 + 自动收起侧边栏
@@ -193,7 +194,7 @@ const handleSend = async () => {
     agentPanelVisible.value = false
     agentWorkEntries.splice(0)
     expandedThinking.value = {}
-    activeAgentName.value = null
+    activeStepId.value = null
     
     // 添加用户消息
     const userMessage = reactive<ChatMessage>({
@@ -311,7 +312,8 @@ const handleSend = async () => {
                                 // ====== Agent 进场：展开右侧面板 ======
                                 const agentAlias = event.agent_alias || event.agent
                                 const agentName = event.agent
-                                
+                                const stepId = event.step_id || `aw-${Date.now()}`
+
                                 // 结束上一个运行中的思考步骤
                                 if (aiMessage.thoughts && aiMessage.thoughts.length > 0) {
                                     const last = aiMessage.thoughts[aiMessage.thoughts.length - 1]
@@ -320,7 +322,7 @@ const handleSend = async () => {
 
                                 // 在聊天气泡中记录 Agent 启动
                                 aiMessage.thoughts?.push({
-                                    id: `agent-${Date.now()}-${Math.random()}`,
+                                    id: `agent-${stepId}`,
                                     type: 'agent_start',
                                     title: agentAlias,
                                     status: 'running',
@@ -328,9 +330,9 @@ const handleSend = async () => {
                                     content: ''
                                 })
 
-                                // 向右侧 Agent 面板添加工作条目
+                                // 向右侧 Agent 面板添加工作条目（以 step_id 作为唯一 id）
                                 const entry: AgentWorkEntry = {
-                                    id: `aw-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                                    id: stepId,
                                     agentName,
                                     agentAlias,
                                     status: 'running',
@@ -340,12 +342,29 @@ const handleSend = async () => {
                                     result: ''
                                 }
                                 agentWorkEntries.push(entry)
-                                activeAgentName.value = agentName
+                                activeStepId.value = stepId
 
                                 // 展开 Agent 面板
                                 agentPanelVisible.value = true
                                 scrollToBottom()
                                 scrollAgentPanelToBottom()
+
+                            } else if (event.type === 'agent_end') {
+                                // ====== Agent 结束：标记完成，清空活跃 step ======
+                                const stepId = event.step_id
+                                const entry = getEntryByStepId(stepId)
+                                if (entry) {
+                                    entry.status = event.success === false ? 'failed' : 'success'
+                                }
+                                // 在气泡中将对应 agent_start thought 标记完成
+                                const agentThought = aiMessage.thoughts?.find(
+                                    t => t.id === `agent-${stepId}`
+                                )
+                                if (agentThought) agentThought.status = 'success'
+                                // 若当前活跃 step 就是本 step，清空
+                                if (activeStepId.value === stepId) {
+                                    activeStepId.value = null
+                                }
 
                             } else if (event.type === 'tool_start') {
                                 // 在聊天思考中记录
@@ -356,10 +375,10 @@ const handleSend = async () => {
                                     status: 'running',
                                     timestamp: Date.now()
                                 })
-                                // 同步到 Agent 面板
-                                const activeEntry = getActiveAgent()
-                                if (activeEntry) {
-                                    activeEntry.tools.push({
+                                // 同步到 Agent 面板（精确绑定到当前活跃 step）
+                                const toolEntry = getEntryByStepId(activeStepId.value)
+                                if (toolEntry) {
+                                    toolEntry.tools.push({
                                         name: event.tool,
                                         alias: event.tool_alias || event.tool,
                                         status: 'running'
@@ -370,16 +389,16 @@ const handleSend = async () => {
                             } else if (event.type === 'tool_end') {
                                 // 更新聊天思考中的工具状态
                                 const thought = aiMessage.thoughts?.slice().reverse().find(
-                                    t => t.type === 'tool_start' && t.title.includes(event.tool_alias || event.tool)
+                                    (t: any) => t.type === 'tool_start' && t.title.includes(event.tool_alias || event.tool)
                                 )
                                 if (thought) {
                                     thought.status = 'success'
                                 }
-                                // 同步到 Agent 面板
-                                const activeEntry = getActiveAgent()
-                                if (activeEntry) {
-                                    const tool = activeEntry.tools.slice().reverse().find(
-                                        t => t.name === event.tool || t.alias === (event.tool_alias || event.tool)
+                                // 同步到 Agent 面板（精确绑定到当前活跃 step）
+                                const toolEntry = getEntryByStepId(activeStepId.value)
+                                if (toolEntry) {
+                                    const tool = toolEntry.tools.slice().reverse().find(
+                                        (t: any) => t.name === event.tool || t.alias === (event.tool_alias || event.tool)
                                     )
                                     if (tool) {
                                         tool.status = 'success'
@@ -390,15 +409,9 @@ const handleSend = async () => {
 
                             } else if (event.type === 'node_result') {
                                 // 标记节点完成
-                                const nodeThought = aiMessage.thoughts?.slice().reverse().find(t => t.status === 'running')
+                                const nodeThought = aiMessage.thoughts?.slice().reverse().find((t: any) => t.status === 'running')
                                 if (nodeThought) {
                                     nodeThought.status = 'success'
-                                }
-                                // 如果当前有活跃 Agent，标记其完成
-                                const activeEntry = getActiveAgent()
-                                if (activeEntry && event.node === 'executor') {
-                                    activeEntry.status = 'success'
-                                    activeAgentName.value = null
                                 }
                                 console.log(`[Node Result] ${event.node}:`, event.output)
 
@@ -410,8 +423,8 @@ const handleSend = async () => {
 
                                 if (is_thought) {
                                     // ====== 思考流：分发到聊天气泡 + Agent 面板 ======
-                                    let activeThought = aiMessage.thoughts?.slice().reverse().find(t => t.status === 'running')
-                                    
+                                    let activeThought = aiMessage.thoughts?.slice().reverse().find((t: any) => t.status === 'running')
+
                                     if (!activeThought) {
                                         const newThought = {
                                             id: `auto-${Date.now()}`,
@@ -430,11 +443,11 @@ const handleSend = async () => {
                                         else if (content) activeThought.content += content
                                     }
 
-                                    // 同步思考内容到 Agent 面板
-                                    const activeEntry = getActiveAgent()
-                                    if (activeEntry) {
-                                        if (reasoning) activeEntry.thinking += reasoning
-                                        else if (content) activeEntry.thinking += content
+                                    // 同步思考内容到 Agent 面板（精确绑定到当前活跃 step）
+                                    const thinkEntry = getEntryByStepId(activeStepId.value)
+                                    if (thinkEntry) {
+                                        if (reasoning) thinkEntry.thinking += reasoning
+                                        else if (content) thinkEntry.thinking += content
                                         scrollAgentPanelToBottom()
                                     }
                                     continue
@@ -442,12 +455,6 @@ const handleSend = async () => {
 
                                 // ====== 正文流 ======
                                 if (content) {
-                                    // 如果有活跃 Agent，同时追加到 Agent 面板的 result
-                                    const activeEntry = getActiveAgent()
-                                    if (activeEntry) {
-                                        activeEntry.result += content
-                                        scrollAgentPanelToBottom()
-                                    }
                                     aiMessage.content += content
                                     scrollToBottom()
                                 }
@@ -458,7 +465,7 @@ const handleSend = async () => {
                                 }
                                 aiMessage.status = event.status
                                 aiMessage.requireReview = event.require_review
-                                
+
                                 // 异步持久化 AI 回复到数据库
                                 chatStore.saveMessageToServer({
                                     sessionId: chatStore.currentSessionId!,
@@ -472,11 +479,11 @@ const handleSend = async () => {
 
                                 if (event.status === 'completed') {
                                     chatStore.clearTaskId()
-                                    // 结束所有运行中的 Agent
+                                    // 结束所有仍在运行中的 Agent（兜底）
                                     agentWorkEntries.forEach(e => {
                                         if (e.status === 'running') e.status = 'success'
                                     })
-                                    activeAgentName.value = null
+                                    activeStepId.value = null
                                 }
                             }
                             

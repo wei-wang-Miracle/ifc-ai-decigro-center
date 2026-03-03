@@ -187,7 +187,8 @@ public class AgentCardServiceImpl implements AgentCardService {
         // 第二步：构建查询
         QueryWrapper queryWrapper = QueryWrapper.create()
                 .select(AGENT_CARD.AGENT_NAME, AGENT_CARD.AGENT_ALIAS, AGENT_CARD.AGENT_DESCRIPTION,
-                        AGENT_CARD.AGENT_TAGS, AGENT_CARD.REQUIRE_REVIEW)
+                        AGENT_CARD.AGENT_TAGS, AGENT_CARD.AGENT_TYPE, AGENT_CARD.BOUND_AGENTS,
+                        AGENT_CARD.REQUIRE_REVIEW)
                 .from(AGENT_CARD)
                 .where(AGENT_CARD.IS_ONLINE.eq(true));
 

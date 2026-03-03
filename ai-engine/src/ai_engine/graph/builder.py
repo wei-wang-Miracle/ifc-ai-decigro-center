@@ -18,6 +18,7 @@ from .nodes import (
     human_review_node,
     feedback_handler_node,
     responder_node,
+    normal_node,
 )
 
 
@@ -47,6 +48,7 @@ def create_workflow_graph(checkpointer=None):
     workflow.add_node("review", human_review_node)
     workflow.add_node("feedback", feedback_handler_node)
     workflow.add_node("responder", responder_node)
+    workflow.add_node("normal", normal_node)
     
     # 2. 设置入口点
     workflow.set_entry_point("intent_recognition")
