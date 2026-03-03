@@ -76,3 +76,18 @@ ai:
   rag:
     # ai-rag Python 微服务地址（端口 8002 为约定端口）
     base-url: http://localhost:8002/api/rag
+
+# ========================================
+# StarRocks 数据源配置
+# ========================================
+starrocks:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://198.28.2.238:9030/dm
+    username: root
+    password: root
+    initial-size: 1
+    min-idle: 1
+    max-active: 50
+    validation-query: select 1
+    test-while-idle: true
