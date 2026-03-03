@@ -100,27 +100,27 @@ class AgentConfig:
     def get_tools(self, token: str) -> list[StructuredTool]:
         """
         获取该 Agent 可用的工具列表 (触发工具详情加载)
-        
+
         工具绑定规则:
-        - bound_tools = None: 使用所有可用工具（通用 Agent）
-        - bound_tools = []: 不使用任何工具（纯对话模式）
+        - bound_tools = None: 该 Agent 未配置工具绑定，返回空列表
+        - bound_tools = []: 明确指定不使用任何工具（纯对话模式）
         - bound_tools = ["tool_a", ...]: 仅使用指定工具（专项 Agent）
+
+        注意: None 不再表示"使用所有工具"，避免 Executor 意外获得超出授权的工具。
+        如需公开工具，请使用 ToolRegistry.get_public_tools()。
         """
         if self._bound_tools_loaded:
             return self._tools
-        
+
         tool_registry = get_tool_registry()
         raw_bound = self.raw_bound_tools
-        
-        if raw_bound is None:
-            # None 表示使用所有可用工具（通用 Agent）
-            all_tool_names = tool_registry.get_tool_names(token)
-            self._tools = tool_registry.get_tools_by_names(all_tool_names, token)
-        elif len(raw_bound) == 0:
+
+        if raw_bound is None or len(raw_bound) == 0:
+            # None（未配置）或空列表：均不绑定任何工具
             self._tools = []
         else:
             self._tools = tool_registry.get_tools_by_names(raw_bound, token)
-        
+
         self._bound_tools_loaded = True
         return self._tools
     

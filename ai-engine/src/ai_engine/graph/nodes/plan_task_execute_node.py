@@ -3,7 +3,6 @@
 执行当前计划步骤，调用 Agent 和工具
 """
 
-import json
 import time
 from typing import Any
 
@@ -140,11 +139,25 @@ async def _execute_step_with_agent(
         print(f"[Executor] Agent '{agent_name}' 不存在，使用默认执行方式")
         return await _execute_step_default(step, query, token, config)
     
-    # 获取 Agent 可用的工具
+    # 获取 Agent 可用的工具（严格限定为 bound_tools）
     tools = agent_config.get_tools(token)
-    
-    # 构建系统消息
-    system_message = agent_config.build_system_message(token)
+
+    # 二次过滤：若 Planner 在步骤中明确指定了 expected_tools，
+    # 则仅保留交集，确保 Executor 不会使用超出计划授权范围的工具
+    if step.expected_tools:
+        allowed = set(step.expected_tools)
+        tools = [t for t in tools if t.name in allowed]
+
+    # 构建系统消息（基于过滤后的工具列表，避免 system prompt 中展示超权工具）
+    parts = []
+    if agent_config.system_prompt:
+        parts.append(agent_config.system_prompt)
+    if agent_config.negative_prompt:
+        parts.append(f"\n## 禁止事项\n{agent_config.negative_prompt}")
+    if tools:
+        tool_desc = "\n".join(f"- **{t.name}**: {t.description}" for t in tools)
+        parts.append(f"\n## 可用工具\n{tool_desc}")
+    system_message = "\n\n".join(parts) if parts else "你是一个任务执行助手，请完成分配给你的任务。"
     
     # 创建 LLM
     llm = ChatOpenAI(

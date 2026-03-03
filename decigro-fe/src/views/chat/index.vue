@@ -28,13 +28,22 @@ const agentPanelVisible = ref(false)
 const highlightedAgent = ref<string | null>(null)
 
 // Agent 工作日志数据结构
+interface AgentToolCall {
+    name: string
+    alias: string
+    status: string
+    input?: Record<string, any>   // 工具调用入参（白盒化）
+    output?: string               // 工具返回结果（白盒化）
+    expanded?: boolean            // 是否展开详情
+}
+
 interface AgentWorkEntry {
     id: string
     agentName: string        // Agent 原始名称
     agentAlias: string       // Agent 别名（展示用）
     status: 'running' | 'success' | 'failed'
     startTime: number
-    tools: { name: string; alias: string; status: string; output?: string }[]
+    tools: AgentToolCall[]
     thinking: string         // Agent 的思考内容（流式累加）
     result: string           // Agent 最终产出
 }
@@ -381,15 +390,18 @@ const handleSend = async () => {
                                     toolEntry.tools.push({
                                         name: event.tool,
                                         alias: event.tool_alias || event.tool,
-                                        status: 'running'
+                                        status: 'running',
+                                        input: event.input || {},
+                                        expanded: false
                                     })
                                 }
                                 scrollAgentPanelToBottom()
 
                             } else if (event.type === 'tool_end') {
                                 // 更新聊天思考中的工具状态
+                                const toolAlias = event.tool_alias || event.tool
                                 const thought = aiMessage.thoughts?.slice().reverse().find(
-                                    (t: any) => t.type === 'tool_start' && t.title.includes(event.tool_alias || event.tool)
+                                    (t: any) => t.type === 'tool_start' && t.title.includes(toolAlias)
                                 )
                                 if (thought) {
                                     thought.status = 'success'
@@ -398,7 +410,7 @@ const handleSend = async () => {
                                 const toolEntry = getEntryByStepId(activeStepId.value)
                                 if (toolEntry) {
                                     const tool = toolEntry.tools.slice().reverse().find(
-                                        (t: any) => t.name === event.tool || t.alias === (event.tool_alias || event.tool)
+                                        (t: AgentToolCall) => t.name === event.tool || t.alias === toolAlias
                                     )
                                     if (tool) {
                                         tool.status = 'success'
@@ -839,11 +851,31 @@ const getThoughtTree = (thoughts?: any[]) => {
                             <!-- 工具调用 -->
                             <div v-if="entry.tools.length > 0" class="ap-section-flat">
                                 <div class="ap-section-head">调用 / TOOLS</div>
-                                <div class="ap-tool-box-flat">
-                                    <div v-for="(tool, tidx) in entry.tools" :key="tidx" class="ap-tool-item-flat">
-                                        <span :class="['ap-tool-status', tool.status === 'running' ? 'is-tool-running' : 'is-tool-done']"></span>
-                                        <span class="ap-tool-label">{{ tool.alias }}</span>
-                                        <span v-if="tool.status === 'success'" class="ap-tool-result-tag">OK</span>
+                                <div class="ap-tool-list-flat">
+                                    <div v-for="(tool, tidx) in entry.tools" :key="tidx" class="ap-tool-card">
+                                        <!-- 工具头部行：状态点 + 别名 + OK标记 + 展开按钮 -->
+                                        <div class="ap-tool-card-head" @click="tool.expanded = !tool.expanded">
+                                            <span :class="['ap-tool-status', tool.status === 'running' ? 'is-tool-running' : 'is-tool-done']"></span>
+                                            <span class="ap-tool-label">{{ tool.alias }}</span>
+                                            <span v-if="tool.status === 'running'" class="ap-tool-running-tag">执行中</span>
+                                            <span v-else class="ap-tool-result-tag">OK</span>
+                                            <span class="ap-tool-expand-btn">{{ tool.expanded ? '▲' : '▼' }}</span>
+                                        </div>
+                                        <!-- 工具详情：入参 + 出参（可折叠） -->
+                                        <div v-if="tool.expanded" class="ap-tool-detail">
+                                            <div v-if="tool.input && Object.keys(tool.input).length > 0" class="ap-tool-detail-section">
+                                                <div class="ap-tool-detail-label">入参</div>
+                                                <pre class="ap-tool-detail-code">{{ JSON.stringify(tool.input, null, 2) }}</pre>
+                                            </div>
+                                            <div v-if="tool.output" class="ap-tool-detail-section">
+                                                <div class="ap-tool-detail-label">结果</div>
+                                                <pre class="ap-tool-detail-code ap-tool-output">{{ tool.output }}</pre>
+                                            </div>
+                                            <div v-if="!tool.output && tool.status === 'running'" class="ap-tool-detail-section">
+                                                <div class="ap-tool-detail-label">结果</div>
+                                                <span class="ap-tool-waiting">等待返回...</span>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -994,14 +1026,48 @@ const getThoughtTree = (thoughts?: any[]) => {
     letter-spacing: 0.5px;
 }
 
-/* 工具 */
-.ap-tool-box-flat { display: flex; flex-wrap: wrap; gap: 8px; }
-.ap-tool-item-flat { display: flex; align-items: center; gap: 6px; background: #f8f8f8; padding: 4px 10px; border-radius: 4px; font-size: 11px; }
-.ap-tool-status { width: 8px; height: 2px; background: #ddd; }
+/* 工具（白盒化卡片风格） */
+.ap-tool-list-flat { display: flex; flex-direction: column; gap: 6px; }
+.ap-tool-card { border: 1px solid #eef0f3; border-radius: 6px; overflow: hidden; font-size: 11px; }
+.ap-tool-card-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: #f8f9fb;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s;
+}
+.ap-tool-card-head:hover { background: #f0f3f8; }
+.ap-tool-status { width: 8px; height: 2px; background: #ddd; flex-shrink: 0; }
 .is-tool-running { background: #f59e0b; width: 12px; }
 .is-tool-done { background: #111; width: 12px; }
-.ap-tool-label { color: #666; font-weight: 500; }
+.ap-tool-label { color: #333; font-weight: 600; flex: 1; }
+.ap-tool-running-tag { font-size: 9px; color: #f59e0b; font-weight: 700; }
 .ap-tool-result-tag { font-size: 9px; color: #00c853; font-weight: 900; }
+.ap-tool-expand-btn { font-size: 8px; color: #bbb; margin-left: auto; }
+.ap-tool-detail { padding: 8px 10px; background: #fff; border-top: 1px solid #eef0f3; }
+.ap-tool-detail-section { margin-bottom: 8px; }
+.ap-tool-detail-section:last-child { margin-bottom: 0; }
+.ap-tool-detail-label { font-size: 9px; font-weight: 700; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+.ap-tool-detail-code {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 10px;
+    color: #475569;
+    background: #f8f9fb;
+    border: 1px solid #eef0f3;
+    border-radius: 4px;
+    padding: 6px 8px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 120px;
+    overflow-y: auto;
+    line-height: 1.5;
+    margin: 0;
+}
+.ap-tool-output { color: #1e40af; background: #eff6ff; border-color: #bfdbfe; }
+.ap-tool-waiting { font-size: 10px; color: #94a3b8; font-style: italic; }
 
 /* 思考流（弱化显示 & 折叠） */
 .ap-section-flat.has-thought {

@@ -236,6 +236,10 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
             # 发送初始信息
             yield f"data: {json.dumps({'type': 'meta', 'task_id': task_id, 'trace_id': trace_id})}\n\n"
 
+            # 提前初始化 tool_reg，供工具调用事件复用
+            from ..registry import get_tool_registry
+            tool_reg = get_tool_registry()
+
             # 当前所在节点（通过 LangGraph metadata 追踪）
             current_node = None
 
@@ -257,8 +261,6 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
                 # ── 工具调用开始 ──────────────────────────────────────
                 elif event_type == "on_tool_start":
                     tool_name = event.get("name", "")
-                    from ..registry import get_tool_registry
-                    tool_reg = get_tool_registry()
                     tool_summary = tool_reg._user_tool_summaries.get(x_auth_token, {}).get(tool_name, {})
                     tool_alias = tool_summary.get("tool_alias", tool_name)
                     # 工具归属的节点（用于前端精确绑定到正确的 Agent 条目）
@@ -269,10 +271,13 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
                 # ── 工具调用结束 ──────────────────────────────────────
                 elif event_type == "on_tool_end":
                     tool_node = ev_node or current_node
+                    tool_name = event["name"]
                     output = event["data"].get("output")
                     output_str = str(output) if output is not None else ""
-                    print(f"[Stream] 工具调用结束: {event['name']} | node={tool_node}")
-                    yield f"data: {json.dumps({'type': 'tool_end', 'tool': event['name'], 'node': tool_node, 'output': output_str}, ensure_ascii=False)}\n\n"
+                    tool_summary = tool_reg._user_tool_summaries.get(x_auth_token, {}).get(tool_name, {})
+                    tool_alias = tool_summary.get("tool_alias", tool_name)
+                    print(f"[Stream] 工具调用结束: {tool_name} | node={tool_node}")
+                    yield f"data: {json.dumps({'type': 'tool_end', 'tool': tool_name, 'tool_alias': tool_alias, 'node': tool_node, 'output': output_str}, ensure_ascii=False)}\n\n"
 
                 # ── 自定义事件（agent_start / agent_end）─────────────
                 elif event_type == "on_custom_event":

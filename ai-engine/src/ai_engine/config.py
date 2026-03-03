@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     # ========================================
     openai_api_key: str = "sk-pymikPWePlXQaHmMQXJwWCk6s2N5HxpVniegkrm9n46DnDF5"
     openai_api_base: str = "https://api.moonshot.cn/v1"
-    llm_model: str = "kimi-k2.5"
-    llm_temperature: float = 0.5
+    llm_model: str = "kimi-k2-0711-preview"
+    llm_temperature: float = 0.3
     
     # ========================================
     # Bus Kernel 配置
