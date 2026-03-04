@@ -319,15 +319,12 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
             if is_review_response:
                 # 检测用户意图（关键词优先 + LLM 兜底）
                 action, feedback = await _detect_review_intent(request.query)
-                from ..graph.nodes.human_review_node import handle_review_decision
-                state_input = handle_review_decision(
-                    state=wf_data.get("state", {}),
-                    action=action,
-                    feedback=feedback,
-                )
                 # 移除 active_workflows 记录（后面若还需 review 会重新加入）
                 if task_id in _active_workflows:
                     del _active_workflows[task_id]
+                # 用 Command(resume=...) 恢复图执行，将审核结果直接传入 interrupt() 的返回值
+                from langgraph.types import Command as LGCommand
+                state_input = LGCommand(resume={"action": action, "feedback": feedback})
                 # 发送一个轻量提示节点，让前端有视觉反馈
                 stage_name = "审核确认" if action == "approve" else "反馈处理"
                 stage_node = "review" if action == "approve" else "feedback"
@@ -593,21 +590,17 @@ async def submit_review(task_id: str, request: ReviewRequest):
         raise HTTPException(status_code=400, detail="驳回时必须提供 feedback")
     
     try:
-        from ..graph.nodes.human_review_node import handle_review_decision
-        
-        # 构建更新状态
-        update_state = handle_review_decision(
-            state=workflow_data.get("state", {}),
-            action=request.action,
-            feedback=request.feedback or "",
-        )
-        
+        from langgraph.types import Command as LGCommand
+
+        # 用 Command(resume=...) 恢复图执行，将审核结果传入 interrupt() 的返回值
+        resume_input = LGCommand(resume={"action": request.action, "feedback": request.feedback or ""})
+
         # 恢复工作流执行
         result = None
         final_message = ""
         require_review = False
-        
-        async for event in workflow.astream(update_state, config):
+
+        async for event in workflow.astream(resume_input, config):
             result = event
             for node_name, node_output in event.items():
                 if isinstance(node_output, dict):

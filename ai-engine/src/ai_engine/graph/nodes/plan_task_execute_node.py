@@ -29,16 +29,17 @@ async def _execute_with_tool_loop(
     token: str,
     config: RunnableConfig = None,
     max_iterations: int = 5
-) -> tuple[str, list[str], bool, list[dict]]:
+) -> tuple[str, list[str], list[dict]]:
     """
     功能: 通用的工具调用循环 (Async)
-    返回: (最终输出, 调用的工具列表, 是否需要审核, 工具快照列表)
+    返回: (最终输出, 调用的工具列表, 工具快照列表)
+    
+    注意: 工具照常执行，不在工具层中断。
+    是否需要人工审核由步骤的 requires_review 字段决定，在步骤完成后由上层判断。
     """
     tools_called = []
     tool_trace_snapshots = []  # 工具调用快照列表（审计用）
-    require_review = False
     final_output = ""
-    
     
     for iteration in range(max_iterations):
         print(f"[Executor] 工具循环第 {iteration + 1}/{max_iterations} 轮，LLM 请求中...")
@@ -60,12 +61,7 @@ async def _execute_with_tool_loop(
             tool_args = tool_call.get("args", {})
             print(f"[Executor] 调用工具 '{tool_name}'，参数: {tool_args}")
 
-            # 1. 检查是否为受保护工具
-            if tool_registry.is_protected(tool_name, token):
-                require_review = True
-                print(f"[Executor] 触发受保护工具 '{tool_name}'，需要人工审核")
-
-            # 2. 从注册中心获取工具
+            # 从注册中心获取工具并执行
             tool = tool_registry.get_tool(tool_name, token)
             if tool:
                 try:
@@ -107,16 +103,10 @@ async def _execute_with_tool_loop(
                     tool_call_id=tool_call["id"],
                     content=f"错误: 找不到工具 {tool_name}"
                 ))
-        
-        # 如果触发了受保护工具，且当前逻辑是不允许自动执行这类工具
-        # 在这里我们可以选择中止循环并返回当前的 LLM 响应
-        if require_review:
-            final_output = response.content or "触发受保护操作，需要人工确认"
-            break
     else:
         final_output = messages[-1].content if messages else "执行超时"
 
-    return final_output, tools_called, require_review, tool_trace_snapshots
+    return final_output, tools_called, tool_trace_snapshots
 
 
 async def _execute_step_with_agent(
@@ -221,7 +211,7 @@ async def _execute_step_with_agent(
         ]
         
         # 进入工具循环
-        output, tools_called, require_review, tool_trace_snapshots = await _execute_with_tool_loop(
+        output, tools_called, tool_trace_snapshots = await _execute_with_tool_loop(
             llm_with_tools=llm_with_tools,
             messages=messages,
             tool_registry=tool_registry,
@@ -234,7 +224,7 @@ async def _execute_step_with_agent(
             success=True,
             output=output or "步骤执行完成",
             tools_called=tools_called,
-            require_review=require_review,
+            require_review=False,
         ), tool_trace_snapshots, system_message
     
     except Exception as e:
@@ -312,7 +302,7 @@ async def _execute_step_default(
         ]
         
         # 默认模式也进入工具循环
-        output, tools_called, require_review, tool_trace_snapshots = await _execute_with_tool_loop(
+        output, tools_called, tool_trace_snapshots = await _execute_with_tool_loop(
             llm_with_tools=llm_with_tools,
             messages=messages,
             tool_registry=tool_registry,
@@ -325,7 +315,7 @@ async def _execute_step_default(
             success=True,
             output=output or "执行完成",
             tools_called=tools_called,
-            require_review=require_review,
+            require_review=False,
         ), tool_trace_snapshots, default_system_prompt
     
     except Exception as e:
@@ -438,34 +428,34 @@ async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> C
 
     # 更新步骤状态
     current_step.status = StepStatus.COMPLETED if result.success else StepStatus.FAILED
-    if result.require_review:
-        current_step.status = StepStatus.NEEDS_REVIEW
 
     # 收集执行结果
     step_results = list(state.step_results)
     step_results.append(result)
 
-    # 如果需要审核，设置标记但不推进索引
-    if result.require_review:
+    # 审核由步骤的 requires_review 字段决定（步骤级人机回环），而非工具保护状态
+    if current_step.requires_review and result.success:
+        current_step.status = StepStatus.NEEDS_REVIEW
+        print(f"[Executor] 步骤 {current_step.step_id} 标记为需要人工审核（步骤已执行完毕，等待确认）")
         return Command(
             update={
                 "step_results": step_results,
                 "require_review": True,
                 "plan": plan,
-                "messages": [AIMessage(content=f"[Executor] 步骤 {current_step.step_id} 需要人工审核")],
+                "messages": [AIMessage(content=f"[Executor] 步骤 {current_step.step_id} 执行完毕，等待人工审核确认")],
                 "node_traces": state.node_traces + [nt],
             },
             goto="dispatcher"
         )
 
-    # 推进到下一步，并重置 review_status/review_feedback 以便下一个需要审核的步骤能正确触发
+    # 推进到下一步，并重置 review_status/review_feedback
     return Command(
         update={
             "step_results": step_results,
             "current_step_index": current_index + 1,
             "plan": plan,
             "review_status": None,
-            "review_feedback": None,  # 清除已使用的反馈
+            "review_feedback": None,
             "messages": [AIMessage(content=result.output or f"[Executor] 步骤 {current_step.step_id} 执行完成")],
             "node_traces": state.node_traces + [nt],
         },

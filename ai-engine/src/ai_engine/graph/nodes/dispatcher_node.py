@@ -10,7 +10,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
 from langgraph.types import Command
 
-from ..state import AgentState, IntentType, IntentObject, PlanStep, ReviewStatus, StepStatus
+from ..state import AgentState, IntentType, IntentObject, PlanStep
 from ...audit import start_node_trace, finish_node_trace
 from ...config import get_settings
 from ...registry import get_agent_registry
@@ -198,16 +198,7 @@ async def dispatcher_node(state: AgentState, config: RunnableConfig) -> Command:
                 # 计划执行完毕
                 next_route = "__end__"
             else:
-                # 检查当前步骤是否需要人机协同审核
-                current_step = plan[current_index]
-                has_feedback = bool(state.review_feedback)
-                if current_step.requires_review and state.review_status != ReviewStatus.APPROVED and not has_feedback:
-                    next_route = "review"
-                    print(f"[Dispatcher] 步骤 {current_step.step_id} 需要人工审核确认")
-                else:
-                    if has_feedback:
-                        print(f"[Dispatcher] 存在用户反馈，跳过审核，携带反馈重新执行步骤")
-                    next_route = "executor"
+                next_route = "executor"
 
     print(f"[Dispatcher] 路由决策: {next_route} (意图: {intent.intent_type.value if intent else 'None'})")
     
@@ -254,31 +245,30 @@ async def dispatcher_node(state: AgentState, config: RunnableConfig) -> Command:
             goto="responder"
         )
     elif next_route == "review":
-        # 路由到 review 节点前（interrupt_before 会在此处暂停），
-        # 生成对话式审核提示消息供用户阅读和回复
+        # 路由到 review 节点，生成对话式审核提示消息供用户阅读和回复
         plan_list = state.plan or []
         step_idx = state.current_step_index
         step_results_list = state.step_results
 
         current_step = plan_list[step_idx] if plan_list and step_idx < len(plan_list) else None
 
-        # 找到最近一个需要审核的步骤结果
+        # 找到当前步骤（NEEDS_REVIEW 状态）的执行结果
+        current_step_id = current_step.step_id if current_step else None
         pending_result = None
-        for r in reversed(step_results_list):
-            if r.require_review:
-                pending_result = r
-                break
+        if current_step_id:
+            for r in reversed(step_results_list):
+                if r.step_id == current_step_id:
+                    pending_result = r
+                    break
 
         step_desc = current_step.description if current_step else "当前操作"
         result_output = (pending_result.output or "").strip() if pending_result else ""
-        tools = pending_result.tools_called if pending_result else []
 
+        # 审核内容仅展示步骤描述和执行结果，用户对结果负责，不感知工具细节
         review_parts = ["我已完成以下操作，需要您确认后才能继续：\n"]
-        review_parts.append(f"**操作描述：** {step_desc}")
+        review_parts.append(f"**步骤描述：** {step_desc}")
         if result_output:
             review_parts.append(f"\n**执行结果：**\n{result_output}")
-        if tools:
-            review_parts.append(f"\n**调用工具：** {', '.join(tools)}")
         review_parts.append(
             "\n\n请回复您的决定：\n"
             "- 回复「通过」或「确认」\u2192 批准并继续执行\n"

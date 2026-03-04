@@ -62,10 +62,8 @@ def create_workflow_graph(checkpointer=None):
     if checkpointer is None:
         checkpointer = MemorySaver()
     
-    # 配置中断点（人工审核时暂停）
     compiled = workflow.compile(
         checkpointer=checkpointer,
-        interrupt_before=["review"],
     )
     
     return compiled
