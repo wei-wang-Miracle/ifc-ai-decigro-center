@@ -54,12 +54,23 @@ class BusKernelClient:
         """
         return self._post("/agent/detail", json_data={"agentName": agent_name}, token=token)
 
-    def get_available_tools(self, token: str) -> list[dict[str, Any]]:
+    def get_available_tools(self, token: str, privileges: Optional[str] = None) -> list[dict[str, Any]]:
         """
         功能: 获取当前用户可用的工具列表 (AI 加载阶段)
-        参数: token
+        参数: 
+            token - 用户认证 Token
+            privileges - 权限类型筛选（可选），支持 public/protected
         """
-        result = self._post("/tool/available", token=token)
+        params = f"?privileges={privileges}" if privileges else ""
+        result = self._post(f"/tool/available{params}", token=token)
+        return result if result else []
+
+    def get_all_tools(self, token: str) -> list[dict[str, Any]]:
+        """
+        功能: 获取所有可用工具（不区分权限）
+        参数: token - 用户认证 Token
+        """
+        result = self._post("/tool/all-tools", token=token)
         return result if result else []
 
     def get_tool_detail(self, tool_name: str, token: str) -> Optional[dict[str, Any]]:

@@ -30,18 +30,19 @@ class ToolRegistry:
         # 存储完整的卡片数据: {tool_name: tool_card} (详情全局缓存即可，反正有权限校验)
         self._tool_cards: dict[str, dict[str, Any]] = {}
     
-    def load(self, token: str, force: bool = False) -> None:
+    def load(self, token: str, force: bool = False, privileges: str | None = None) -> None:
         """
         功能: AI 加载阶段 - 仅加载当前用户可用的工具摘要
         参数: 
             token - 用户身份 Token
             force - 是否强制重新加载
+            privileges - 权限类型筛选（可选），支持 public/protected
         """
         if token in self._user_tool_summaries and not force:
             return
         
         # 通过 API 获取当前用户可用的工具列表摘要 (POST /tool/available)
-        records = self._client.get_available_tools(token)
+        records = self._client.get_available_tools(token, privileges)
         
         user_summaries = {}
         for record in records:
@@ -52,6 +53,7 @@ class ToolRegistry:
                     "tool_alias": record.get("toolAlias", name),
                     "tool_description": record.get("toolDescription"),
                     "tool_tags": record.get("toolTags"),
+                    "tool_privileges": record.get("toolPrivileges", "public"),
                 }
         
         self._user_tool_summaries[token] = user_summaries
@@ -176,6 +178,26 @@ class ToolRegistry:
         if token in self._user_tools:
             del self._user_tools[token]
         self.load(token, force=True)
+
+    def get_all_tool_summaries_from_api(self, token: str) -> list[dict[str, Any]]:
+        """
+        功能: 直接从 API 获取所有可用工具摘要（不区分权限）
+        参数: token - 用户身份 Token
+        返回: 工具摘要列表
+        """
+        records = self._client.get_all_tools(token)
+        summaries = []
+        for record in records:
+            name = record.get("toolName")
+            if name:
+                summaries.append({
+                    "tool_name": name,
+                    "tool_alias": record.get("toolAlias", name),
+                    "tool_description": record.get("toolDescription"),
+                    "tool_tags": record.get("toolTags"),
+                    "tool_privileges": record.get("toolPrivileges", "public"),
+                })
+        return summaries
 
 
 # 全局单例

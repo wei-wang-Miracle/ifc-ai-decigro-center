@@ -126,6 +126,7 @@ async def _execute_step_with_agent(
     token: str,
     config: RunnableConfig = None,
     review_feedback: str = None,
+    step_results: list[StepResult] = None,
 ) -> StepResult:
     """
     功能: 使用指定 Agent 执行步骤 (Async)
@@ -134,6 +135,8 @@ async def _execute_step_with_agent(
         agent_name - Agent 名称
         query - 用户原始查询
         config - 运行时配置
+        review_feedback - 用户审核反馈
+        step_results - 之前步骤的执行结果（共享黑板）
     返回: StepResult 执行结果
     """
     agent_registry = get_agent_registry()
@@ -146,7 +149,7 @@ async def _execute_step_with_agent(
     if agent_config is None:
         # 如果指定的 Agent 不存在，使用默认方式执行
         print(f"[Executor] Agent '{agent_name}' 不存在，使用默认执行方式")
-        return await _execute_step_default(step, query, token, config)
+        return await _execute_step_default(step, query, token, config, step_results)
     
     # 获取 Agent 可用的工具（严格限定为 bound_tools）
     tools = agent_config.get_tools(token)
@@ -188,6 +191,17 @@ async def _execute_step_with_agent(
         f"## 当前任务\n{step.description}",
         f"\n## 用户原始需求\n{query}",
     ]
+    
+    # 共享黑板：加入之前步骤的执行结果，供当前步骤参考
+    if step_results:
+        prev_results_text = "\n".join([
+            f"- 步骤 {r.step_id}: {'成功' if r.success else '失败'}\n  输出: {r.output or r.error}"
+            for r in step_results
+        ])
+        execution_prompt_parts.append(
+            f"\n## 之前步骤的执行结果（重要参考）\n{prev_results_text}\n"
+            "请充分利用上述步骤的产出信息来完成当前任务。"
+        )
     
     # 如果有用户反馈，加入 Prompt 让 Agent 参考
     if review_feedback:
@@ -236,7 +250,8 @@ async def _execute_step_default(
     step: PlanStep, 
     query: str, 
     token: str,
-    config: RunnableConfig = None
+    config: RunnableConfig = None,
+    step_results: list[StepResult] = None,
 ) -> StepResult:
     """
     功能: 使用默认方式执行步骤（无特定 Agent）(Async)
@@ -245,6 +260,7 @@ async def _execute_step_default(
         query - 用户原始查询
         token - 用户身份 Token
         config - 运行时配置
+        step_results - 之前步骤的执行结果（共享黑板）
     返回: StepResult 执行结果
     """
     settings = get_settings()
@@ -267,11 +283,24 @@ async def _execute_step_default(
     else:
         llm_with_tools = llm
     
-    execution_prompt = f"""请执行以下任务：
-{step.description}
-
-用户原始需求：{query}
-"""
+    # 构建执行 Prompt
+    execution_prompt_parts = [
+        f"请执行以下任务：\n{step.description}",
+        f"\n用户原始需求：{query}",
+    ]
+    
+    # 共享黑板：加入之前步骤的执行结果，供当前步骤参考
+    if step_results:
+        prev_results_text = "\n".join([
+            f"- 步骤 {r.step_id}: {'成功' if r.success else '失败'}\n  输出: {r.output or r.error}"
+            for r in step_results
+        ])
+        execution_prompt_parts.append(
+            f"\n## 之前步骤的执行结果（重要参考）\n{prev_results_text}\n"
+            "请充分利用上述步骤的产出信息来完成当前任务。"
+        )
+    
+    execution_prompt = "\n".join(execution_prompt_parts)
     
     # 默认模式的系统提示词
     default_system_prompt = execution_prompt
@@ -373,6 +402,7 @@ async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> C
     # 执行步骤
     token = state.token
     review_feedback = state.review_feedback  # 获取用户反馈（如有）
+    previous_step_results = list(state.step_results)  # 共享黑板：之前步骤的执行结果
     result, tool_trace_snapshots, used_system_prompt = await _execute_step_with_agent(
         step=current_step,
         agent_name=current_executor,
@@ -380,6 +410,7 @@ async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> C
         token=token,
         config=config,
         review_feedback=review_feedback,
+        step_results=previous_step_results,
     )
 
     # 发送 Agent 结束事件

@@ -39,4 +39,11 @@ public class ToolCardSummaryVO implements Serializable {
      */
     @Column(typeHandler = Fastjson2TypeHandler.class)
     private List<String> toolTags;
+
+    /**
+     * 工具权限
+     * public: 公开工具
+     * protected: 受保护工具（需要 Agent 绑定）
+     */
+    private String toolPrivileges;
 }

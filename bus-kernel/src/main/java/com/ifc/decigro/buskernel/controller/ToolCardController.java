@@ -115,13 +115,26 @@ public class ToolCardController {
 
     /**
      * 获取当前用户所有的可用工具（AI 引擎加载阶段）
-     * 过滤规则：isOnline = true AND (public OR 用户角色授权 OR 用户个人授权)
+     * 过滤规则：isOnline = true AND 工具权限 = public/protected
      */
     @PostMapping("/available")
     @Operation(summary = "获取可用工具列表", description = "用于 AI 引擎加载阶段，获取工具介绍，符合渐进式加载思想")
-    public Result<List<ToolCardSummaryVO>> getAvailableTools() {
+    public Result<List<ToolCardSummaryVO>> getAvailableTools(
+            @Parameter(description = "权限类型筛选，支持 public/protected，为空则返回全部") 
+            @RequestParam(required = false) String privileges) {
         String username = UserContext.getUserName();
-        return Result.success(toolCardService.getAvailableTools(username));
+        return Result.success(toolCardService.getAvailableTools(username, privileges));
+    }
+
+    /**
+     * 获取所有可用工具（不区分权限）
+     * 用于需要获取完整工具列表的场景
+     */
+    @PostMapping("/all-tools")
+    @Operation(summary = "获取所有可用工具", description = "获取所有上线工具，不区分权限类型")
+    public Result<List<ToolCardSummaryVO>> getAllTools() {
+        String username = UserContext.getUserName();
+        return Result.success(toolCardService.getAllTools(username));
     }
 
     /**

@@ -109,12 +109,30 @@ public class ToolCardServiceImpl implements ToolCardService {
      * 即使出现在摘要里，也不会被 Agent 调用。
      */
     @Override
-    public List<ToolCardSummaryVO> getAvailableTools(String username) {
+    public List<ToolCardSummaryVO> getAvailableTools(String username, String privileges) {
         QueryWrapper queryWrapper = QueryWrapper.create()
-                .select(TOOL_CARD.TOOL_NAME, TOOL_CARD.TOOL_ALIAS, TOOL_CARD.TOOL_DESCRIPTION, TOOL_CARD.TOOL_TAGS)
+                .select(TOOL_CARD.TOOL_NAME, TOOL_CARD.TOOL_ALIAS, TOOL_CARD.TOOL_DESCRIPTION, TOOL_CARD.TOOL_TAGS, TOOL_CARD.TOOL_PRIVILEGES)
                 .from(TOOL_CARD)
                 .where(TOOL_CARD.IS_ONLINE.eq(true));
 
+        // 如果指定了权限类型，则按权限筛选
+        if (StringUtils.hasText(privileges)) {
+            queryWrapper.and(TOOL_CARD.TOOL_PRIVILEGES.eq(privileges));
+        }
+
+        return toolCardMapper.selectListByQueryAs(queryWrapper, ToolCardSummaryVO.class);
+    }
+
+    /**
+     * 实现获取所有可用工具（不区分权限）
+     */
+    @Override
+    public List<ToolCardSummaryVO> getAllTools(String username) {
+        QueryWrapper queryWrapper = QueryWrapper.create()
+                .select(TOOL_CARD.TOOL_NAME, TOOL_CARD.TOOL_ALIAS, TOOL_CARD.TOOL_DESCRIPTION, TOOL_CARD.TOOL_TAGS, TOOL_CARD.TOOL_PRIVILEGES)
+                .from(TOOL_CARD)
+                .where(TOOL_CARD.IS_ONLINE.eq(true))
+                .orderBy(TOOL_CARD.TOOL_ALIAS.asc(), TOOL_CARD.TOOL_NAME.asc());
         return toolCardMapper.selectListByQueryAs(queryWrapper, ToolCardSummaryVO.class);
     }
 

@@ -60,9 +60,18 @@ public interface ToolCardService {
      * 2. toolPrivileges = 'public' OR 用户角色的 toolList OR 用户自身的 toolList
      *
      * @param username 当前登录用户名
+     * @param privileges 权限类型筛选（可选），支持 public/protected
      * @return 符合条件的工具简要信息列表
      */
-    List<ToolCardSummaryVO> getAvailableTools(String username);
+    List<ToolCardSummaryVO> getAvailableTools(String username, String privileges);
+
+    /**
+     * 获取所有可用工具（不区分权限）
+     *
+     * @param username 当前登录用户名
+     * @return 所有上线工具简要信息列表
+     */
+    List<ToolCardSummaryVO> getAllTools(String username);
 
     /**
      * 获取单个工具的详情
