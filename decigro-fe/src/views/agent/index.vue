@@ -83,6 +83,9 @@ const availableTools = ref<string[]>([])
 const availableExecutors = ref<string[]>([])
 const newTag = ref('')
 
+// --- 工具绑定模式: 'none'(不绑定) | 'specific'(白名单) ---
+const boundToolsMode = ref<'none' | 'specific'>('none')
+
 // --- 智能体类型选项 ---
 const agentTypeOptions = [
     { label: 'PLANNER (业务规划)', value: 'PLANNER' },
@@ -189,6 +192,9 @@ const handleEdit = (card: AgentCard) => {
     Object.assign(form, JSON.parse(JSON.stringify(card)))
     if (!form.agentTags) form.agentTags = []
     if (!form.boundAgents) form.boundAgents = []
+    // 回显工具绑定模式
+    boundToolsMode.value = Array.isArray(form.boundTools) && form.boundTools.length > 0 ? 'specific' : 'none'
+    if (boundToolsMode.value === 'none') form.boundTools = null
     fetchAvailableTools()
     fetchAvailableExecutors()
     dialogVisible.value = true
@@ -210,6 +216,8 @@ const submitForm = async (formEl: FormInstance | undefined) => {
     if (!formEl) return
     await formEl.validate(async (valid) => {
         if (valid) {
+            // 不绑定模式时确保提交 null，而非残留的数组
+            if (boundToolsMode.value === 'none') form.boundTools = null
             await request.post('/agent/save', form)
             ElMessage.success('保存成功')
             dialogVisible.value = false
@@ -237,6 +245,7 @@ const resetForm = () => {
         createTime: '',
         updateTime: ''
     })
+    boundToolsMode.value = 'none'
 }
 
 const handleAddTag = () => {
@@ -536,19 +545,27 @@ onMounted(() => fetchList())
             </el-form-item>
 
             <el-form-item label="工具绑定" v-if="form.agentType === 'EXECUTOR'">
-                <el-radio-group v-model="form.boundTools" class="mb-2">
-                    <el-radio :label="null">默认全量公开工具 (All Public)</el-radio>
-                    <el-radio :label="[]">无工具 (Chat Only)</el-radio>
-                    <el-radio label="specific">白名单 (Allowlist, 支持 Protected 工具)</el-radio>
-                </el-radio-group>
-                <el-select 
-                    v-if="typeof form.boundTools === 'string' || (form.boundTools && form.boundTools.length > 0)"
-                    v-model="form.boundTools" 
-                    multiple 
-                    placeholder="选择工具"
-                    class="w-full">
-                    <el-option v-for="t in availableTools" :key="t" :label="t" :value="t" />
-                </el-select>
+                <div class="tool-bind-wrap">
+                    <el-radio-group v-model="boundToolsMode" @change="() => { if (boundToolsMode === 'none') form.boundTools = null; else form.boundTools = [] }" class="tool-mode-radio">
+                        <el-radio value="none">不绑定工具</el-radio>
+                        <el-radio value="specific">指定工具白名单</el-radio>
+                    </el-radio-group>
+                    <template v-if="boundToolsMode === 'specific'">
+                        <el-select
+                            v-model="form.boundTools"
+                            multiple
+                            collapse-tags
+                            collapse-tags-tooltip
+                            placeholder="请选择绑定的工具（支持 protected 权限工具）"
+                            class="w-full mt-2">
+                            <el-option v-for="t in availableTools" :key="t" :label="t" :value="t" />
+                        </el-select>
+                        <div v-if="form.boundTools && form.boundTools.length > 0" class="selected-tools-preview">
+                            <span v-for="t in form.boundTools" :key="t" class="selected-tool-tag">{{ t }}</span>
+                        </div>
+                    </template>
+                    <div v-else class="no-tool-hint">Agent 将不使用任何工具，仅进行纯文本推理</div>
+                </div>
             </el-form-item>
         </el-form>
         <template #footer>
@@ -647,5 +664,10 @@ onMounted(() => fetchList())
 .tool-badge.all { background: #dcfce7; color: #166534; }
 .tool-badge.none { background: #fee2e2; color: #991b1b; }
 .back-actions { padding: 12px; display: flex; justify-content: center; gap: 12px; }
+.tool-bind-wrap { width: 100%; display: flex; flex-direction: column; gap: 8px; }
+.tool-mode-radio { display: flex; gap: 24px; }
+.no-tool-hint { font-size: 12px; color: #999; background: #f9f9f9; border: 1px dashed #ddd; border-radius: 6px; padding: 8px 12px; }
+.selected-tools-preview { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.selected-tool-tag { font-size: 11px; background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; border-radius: 4px; padding: 2px 8px; font-weight: 600; }
 .w-full { width: 100%; }
 </style>
