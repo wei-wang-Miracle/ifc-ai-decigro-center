@@ -125,6 +125,7 @@ async def _execute_step_with_agent(
     query: str,
     token: str,
     config: RunnableConfig = None,
+    review_feedback: str = None,
 ) -> StepResult:
     """
     功能: 使用指定 Agent 执行步骤 (Async)
@@ -183,14 +184,20 @@ async def _execute_step_with_agent(
         llm_with_tools = llm
     
     # 构建执行 Prompt
-    execution_prompt = f"""## 当前任务
-{step.description}
-
-## 用户原始需求
-{query}
-
-请执行上述任务，必要时调用可用工具。完成后返回执行结果。
-"""
+    execution_prompt_parts = [
+        f"## 当前任务\n{step.description}",
+        f"\n## 用户原始需求\n{query}",
+    ]
+    
+    # 如果有用户反馈，加入 Prompt 让 Agent 参考
+    if review_feedback:
+        execution_prompt_parts.append(
+            f"\n## 用户修改意见（重要）\n{review_feedback}\n"
+            "请根据上述反馈调整执行方式。"
+        )
+    
+    execution_prompt_parts.append("\n请执行上述任务，必要时调用可用工具。完成后返回执行结果。")
+    execution_prompt = "\n".join(execution_prompt_parts)
     
     try:
         # 初始消息列表
@@ -365,12 +372,14 @@ async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> C
 
     # 执行步骤
     token = state.token
+    review_feedback = state.review_feedback  # 获取用户反馈（如有）
     result, tool_trace_snapshots, used_system_prompt = await _execute_step_with_agent(
         step=current_step,
         agent_name=current_executor,
         query=query,
         token=token,
         config=config,
+        review_feedback=review_feedback,
     )
 
     # 发送 Agent 结束事件
@@ -418,13 +427,14 @@ async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> C
             goto="dispatcher"
         )
 
-    # 推进到下一步，并重置 review_status 以便下一个需要审核的步骤能正确触发
+    # 推进到下一步，并重置 review_status/review_feedback 以便下一个需要审核的步骤能正确触发
     return Command(
         update={
             "step_results": step_results,
             "current_step_index": current_index + 1,
             "plan": plan,
             "review_status": None,
+            "review_feedback": None,  # 清除已使用的反馈
             "messages": [AIMessage(content=result.output or f"[Executor] 步骤 {current_step.step_id} 执行完成")],
             "node_traces": state.node_traces + [nt],
         },

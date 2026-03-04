@@ -57,10 +57,12 @@ async def feedback_handler_node(state: AgentState) -> Command:
         )
     else:
         # 保留计划，让 Agent 根据反馈调整当前步骤的执行方式
-        print("[FeedbackHandler] 调整当前步骤执行方式")
+        # 保留 review_feedback，供 Executor 在重新执行时参考
+        print(f"[FeedbackHandler] 调整当前步骤执行方式，反馈已保留供 Executor 使用")
         return Command(
             update={
                 "review_status": None,
+                "review_feedback": review_feedback,  # 保留反馈供 Executor 使用
                 "messages": [AIMessage(content=f"[FeedbackHandler] 根据反馈调整: {review_feedback}")],
             },
             goto="dispatcher"

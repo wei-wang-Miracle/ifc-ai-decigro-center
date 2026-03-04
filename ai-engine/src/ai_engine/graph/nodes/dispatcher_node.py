@@ -184,11 +184,15 @@ async def dispatcher_node(state: AgentState, config: RunnableConfig) -> Command:
         else:
             # 检查当前步骤是否需要人机协同审核
             current_step = plan[current_index]
-            if current_step.requires_review and state.review_status != ReviewStatus.APPROVED:
+            # 如果有 review_feedback，说明用户已给出反馈（可能是修改意见），应跳过审核直接执行
+            has_feedback = bool(state.review_feedback)
+            if current_step.requires_review and state.review_status != ReviewStatus.APPROVED and not has_feedback:
                 # 需要人工审核确认，路由到 review 节点
                 next_route = "review"
                 print(f"[Dispatcher] 步骤 {current_step.step_id} 需要人工审核确认")
             else:
+                if has_feedback:
+                    print(f"[Dispatcher] 存在用户反馈，跳过审核，携带反馈重新执行步骤")
                 next_route = "executor"
 
     print(f"[Dispatcher] 路由决策: {next_route}")

@@ -22,9 +22,39 @@ async def human_review_node(state: AgentState) -> Command:
     2. 生成审核上下文信息
     3. 返回审核状态
     
-    注意: 此节点使用 LangGraph 的 interrupt_before 机制
-    实际的审核操作通过 API 完成
+    注意: 
+    - 此节点使用 LangGraph 的 interrupt_before 机制
+    - 当从 interrupt 恢复时，review_status 已被 handle_review_decision 设置，
+      需要根据该状态路由，而不是覆盖它
     """
+    review_status = state.review_status
+    
+    # ── 检查是否已有用户响应（从 interrupt 恢复时） ──────────────────
+    if review_status == ReviewStatus.APPROVED:
+        # 用户已批准，清除审核状态，继续执行
+        print("[HumanReview] 用户已批准，继续执行")
+        return Command(
+            update={
+                "require_review": False,
+                "review_status": None,
+                "messages": [AIMessage(content="[HumanReview] 用户批准，继续执行")],
+            },
+            goto="dispatcher"
+        )
+    elif review_status == ReviewStatus.REJECTED:
+        # 用户已驳回，跳转到反馈处理节点
+        print(f"[HumanReview] 用户驳回，进入反馈处理。反馈: {state.review_feedback}")
+        return Command(
+            update={
+                "require_review": False,
+                # 保持 REJECTED 和 review_feedback，供 feedback_handler_node 使用
+            },
+            goto="feedback"
+        )
+    
+    # ── 原有逻辑：首次进入，等待审核 ─────────────────────────────────
+    # 注意：由于 interrupt_before=["review"]，正常流程不会执行到这里
+    # 只有在 interrupt 机制未生效时才会走到这段代码
     step_results = state.step_results
     plan = state.plan or []
     current_index = state.current_step_index
