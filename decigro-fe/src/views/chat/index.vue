@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, nextTick, onMounted, computed, reactive } from 'vue'
 import { Promotion, Warning, ChatLineRound, Plus, Delete, ChatDotSquare, Operation, Loading, ArrowDown } from '@element-plus/icons-vue'
-import aiRequest from '../../utils/aiRequest'
 import { useUserStore } from '../../stores/user'
 import { useChatStore, type ChatMessage } from '../../stores/chatStore'
 import { useAppStore } from '../../stores/app'
@@ -543,28 +542,6 @@ const handleSend = async () => {
     }
 }
 
-// 处理审核
-const handleReview = async (taskId: string, action: 'approve' | 'reject') => {
-    try {
-        const res = await aiRequest.post(`/review/${taskId}`, {
-            action,
-            feedback: action === 'reject' ? '已被用户驳回' : '通过'
-        }) as any
-
-        const msg = messages.value.find(m => m.taskId === taskId && m.requireReview)
-        if (msg) {
-            msg.content = res.message
-            msg.status = res.status
-            msg.requireReview = false
-        }
-        
-        ElMessage.success(`操作成功: ${action === 'approve' ? '已批准' : '已驳回'}`)
-    } catch (error) {
-        console.error('Review error:', error)
-        ElMessage.error('审核操作失败')
-    }
-}
-
 // 格式化时间
 const formatTime = (date: Date | string) => {
     const d = typeof date === 'string' ? new Date(date) : date
@@ -778,15 +755,12 @@ const getThoughtTree = (thoughts?: any[]) => {
 
                                 <div class="whitespace-pre-wrap leading-relaxed min-h-[1.5em]">{{ msg.content || (msg.status === 'running' ? '...' : '') }}</div>
                                 
-                                <!-- 审核区域 -->
-                                <div v-if="msg.requireReview" class="mt-4 pt-4 border-t border-dashed border-slate-100">
-                                    <p class="text-[11px] font-bold text-amber-600 mb-3 flex items-center uppercase tracking-wider">
-                                        <el-icon class="mr-1"><Warning /></el-icon> 人工审核确认
+                                <!-- 需要人工确认提示（对话式，无按钮） -->
+                                <div v-if="msg.requireReview" class="mt-3 pt-3 border-t border-dashed border-amber-200">
+                                    <p class="text-[11px] text-amber-600 flex items-center">
+                                        <el-icon class="mr-1"><Warning /></el-icon>
+                                        请在下方输入框直接回复您的决定
                                     </p>
-                                    <div class="flex space-x-3">
-                                        <el-button type="success" size="small" @click="handleReview(msg.taskId!, 'approve')" plain>批准执行</el-button>
-                                        <el-button type="danger" size="small" @click="handleReview(msg.taskId!, 'reject')" plain>驳回并中断</el-button>
-                                    </div>
                                 </div>
                             </div>
                             <div :class="['text-[10px] text-gray-400 px-1', msg.role === 'user' ? 'text-right' : 'text-left']">

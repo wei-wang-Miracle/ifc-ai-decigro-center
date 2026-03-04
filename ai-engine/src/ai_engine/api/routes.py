@@ -92,6 +92,75 @@ _active_workflows: dict[str, dict] = {}
 
 
 # ========================================
+# 人机回环：关键词 + LLM 意图检测
+# ========================================
+
+_APPROVE_KEYWORDS = [
+    "通过", "批准", "确认", "同意", "好的", "可以", "继续", "执行吧",
+    "approve", "yes", "ok", "没问题", "行", "好",
+]
+_REJECT_KEYWORDS = [
+    "驳回", "拒绝", "不同意", "不可以", "不行", "停止", "取消",
+    "reject", "no", "算了", "不要", "重新规划", "重来", "换个",
+    "撤", "撤销", "修改",
+]
+
+_REVIEW_INTENT_PROMPT = """判断以下用户回复是批准(approve)还是拒绝/修改(reject)某个AI待执行操作。
+
+用户回复：{query}
+
+只返回 "approve" 或 "reject"，无需其他任何内容。"""
+
+
+def _classify_review_by_keywords(query: str) -> str | None:
+    """关键词优先检测审核意图，返回 'approve'/'reject'/None（模糊待LLM处理）"""
+    q = query.strip().lower()
+    for kw in _APPROVE_KEYWORDS:
+        if kw.lower() in q:
+            return "approve"
+    for kw in _REJECT_KEYWORDS:
+        if kw.lower() in q:
+            return "reject"
+    return None
+
+
+async def _classify_review_by_llm(query: str) -> str:
+    """LLM 兜底检测审核意图（仅在关键词匹配失败时调用，节省 token）"""
+    try:
+        from ..config import get_settings
+        from langchain_openai import ChatOpenAI
+        settings = get_settings()
+        llm = ChatOpenAI(
+            model=settings.llm_model,
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_api_base,
+            temperature=0.0,
+            max_tokens=10,
+        )
+        prompt = _REVIEW_INTENT_PROMPT.format(query=query)
+        response = await llm.ainvoke(prompt)
+        result = response.content.strip().lower()
+        return "approve" if "approve" in result else "reject"
+    except Exception as e:
+        print(f"[ReviewDetect] LLM 检测失败，默认 reject: {e}")
+        return "reject"
+
+
+async def _detect_review_intent(query: str) -> tuple[str, str]:
+    """
+    检测用户回复中的审核意图（关键词优先 + LLM 兜底）
+    返回: (action, feedback)  action='approve'|'reject'
+    """
+    action = _classify_review_by_keywords(query)
+    if action is None:
+        print(f"[ReviewDetect] 关键词未命中，调用 LLM 检测...")
+        action = await _classify_review_by_llm(query)
+    feedback = query if action == "reject" else ""
+    print(f"[ReviewDetect] 意图={action}, feedback={feedback[:40] if feedback else ''}")
+    return action, feedback
+
+
+# ========================================
 # API 端点
 # ========================================
 
@@ -203,49 +272,71 @@ _THOUGHT_NODES = {"executor", "normal"}
 async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str] = Header(None, alias="X-Auth-Token")):
     """
     功能: 发起新的工作流任务 (流式响应)
-    参数: request - 包含用户查询
-    返回: SSE 流
+    若 task_id 对应一个待 review 的工作流，则作为 review 响应处理（对话式人机回环）。
     """
     from ..graph import create_workflow_graph, create_initial_state
 
-    # 生成 ID
     trace_id = f"trace_{uuid.uuid4().hex[:16]}"
-    task_id = request.task_id or f"task_{uuid.uuid4().hex[:12]}"
-    
-    # 创建工作流
-    workflow = create_workflow_graph()
-    
-    # 初始化状态
-    initial_state = create_initial_state(
-        query=request.query,
-        user_id=request.user_id,
-        session_id=request.session_id,
-        task_id=task_id,
-        trace_id=trace_id,
-        token=x_auth_token,
+
+    # ── 判断是否为 review 响应 ────────────────────────────────────────
+    is_review_response = bool(
+        request.task_id and request.task_id in _active_workflows
     )
-    
-    internal_thread_id = f"{request.session_id}_{task_id}"
-    config = {"configurable": {"thread_id": internal_thread_id}}
+
+    if is_review_response:
+        task_id = request.task_id
+        wf_data = _active_workflows[task_id]
+        workflow = wf_data["workflow"]
+        config = wf_data["config"]
+        _initial_state = None   # review 场景不需要
+    else:
+        task_id = request.task_id or f"task_{uuid.uuid4().hex[:12]}"
+        workflow = create_workflow_graph()
+        _initial_state = create_initial_state(
+            query=request.query,
+            user_id=request.user_id,
+            session_id=request.session_id,
+            task_id=task_id,
+            trace_id=trace_id,
+            token=x_auth_token,
+        )
+        config = {"configurable": {"thread_id": f"{request.session_id}_{task_id}"}}
 
     async def event_generator():
-        print(f"[Stream] 开始事件生成: thread_id={internal_thread_id}, query={request.query[:20]}...")
+        print(f"[Stream] 开始事件生成: task_id={task_id}, review={is_review_response}, query={request.query[:20]}...")
         # 发送 2KB 空格填充，强制代理刷新缓冲区
         yield ":" + " " * 2048 + "\n\n"
         try:
-            # 发送初始信息
             yield f"data: {json.dumps({'type': 'meta', 'task_id': task_id, 'trace_id': trace_id})}\n\n"
 
-            # 提前初始化 tool_reg，供工具调用事件复用
             from ..registry import get_tool_registry
             tool_reg = get_tool_registry()
 
-            # 当前所在节点（通过 LangGraph metadata 追踪）
             current_node = None
-            # 当前活跃的 step_id（随 agent_start/agent_end 更新，用于工具事件精确绑定）
             active_step_id = None
 
-            async for event in workflow.astream_events(initial_state, config, version="v2"):
+            # ── 确定状态输入 ──────────────────────────────────────────
+            if is_review_response:
+                # 检测用户意图（关键词优先 + LLM 兜底）
+                action, feedback = await _detect_review_intent(request.query)
+                from ..graph.nodes.human_review_node import handle_review_decision
+                state_input = handle_review_decision(
+                    state=wf_data.get("state", {}),
+                    action=action,
+                    feedback=feedback,
+                )
+                # 移除 active_workflows 记录（后面若还需 review 会重新加入）
+                if task_id in _active_workflows:
+                    del _active_workflows[task_id]
+                # 发送一个轻量提示节点，让前端有视觉反馈
+                stage_name = "审核确认" if action == "approve" else "反馈处理"
+                stage_node = "review" if action == "approve" else "feedback"
+                yield f"data: {json.dumps({'type': 'node_start', 'node': stage_node, 'display_name': stage_name})}\n\n"
+            else:
+                state_input = _initial_state
+
+            # ── 事件流 ───────────────────────────────────────────────
+            async for event in workflow.astream_events(state_input, config, version="v2"):
                 event_type = event["event"]
                 metadata = event.get("metadata", {})
                 ev_node = metadata.get("langgraph_node")
@@ -255,7 +346,6 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
                 # ── 节点进入 ──────────────────────────────────────────
                 if event_type == "on_chain_start":
                     name = event.get("name", "")
-                    # 精确匹配图中注册的节点名称，避免匹配子链
                     if name in _VISIBLE_NODES:
                         print(f"[Stream] 节点进场: {name}")
                         yield f"data: {json.dumps({'type': 'node_start', 'node': name, 'display_name': NODE_NAME_MAP.get(name, name)})}\n\n"
@@ -286,7 +376,6 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
                     if ev_name == "agent_start":
                         agent_name = event["data"]["agent"]
                         agent_alias = event["data"].get("alias", agent_name)
-                        # step_id 用于前端在多步骤场景下唯一标识一个 Agent 工作条目
                         step_id = event["data"].get("step_id", "")
                         active_step_id = step_id
                         print(f"[Stream] Agent 进场: {agent_name} ({agent_alias}) step={step_id}")
@@ -309,13 +398,11 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
                     content = ""
                     reasoning = ""
 
-                    # 提取推理链内容（Moonshot / DeepSeek 兼容）
                     if hasattr(chunk, "additional_kwargs"):
                         reasoning = chunk.additional_kwargs.get("reasoning_content", "")
                     if not reasoning and hasattr(chunk, "reasoning"):
                         reasoning = getattr(chunk, "reasoning", "") or ""
 
-                    # 提取正文内容
                     if hasattr(chunk, "content"):
                         content = chunk.content or ""
                     elif isinstance(chunk, dict):
@@ -326,22 +413,15 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
 
                     node_name = ev_node or current_node
 
-                    # 分类逻辑：
-                    #   is_json=True  → 结构化中间数据，前端完全隐藏
-                    #   is_thought=True → 思考/中间过程，展示在 Agent 面板，不进入主聊天流
-                    #   两者均为 False  → 最终正文，展示在主聊天流
-                    is_thought = bool(reasoning)  # 任何 reasoning 字段都属于思考
+                    is_thought = bool(reasoning)
                     is_json = False
 
                     if node_name in _JSON_NODES:
-                        # 规划/调度节点输出结构化 JSON，前端不可见
                         is_thought = True
                         is_json = True
                     elif node_name in _THOUGHT_NODES:
-                        # executor/normal 节点的 content 是 Agent 的行动中间过程
                         if content:
                             is_thought = True
-                    # responder 节点的 content 是最终正文，is_thought 保持 False
 
                     yield f"data: {json.dumps({'type': 'token', 'content': content, 'reasoning': reasoning, 'node': node_name, 'is_thought': is_thought, 'is_json': is_json}, ensure_ascii=False)}\n\n"
 
@@ -352,10 +432,8 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
                         output = event.get("data", {}).get("output")
                         yield f"data: {json.dumps({'type': 'node_result', 'node': name, 'output': str(output)}, ensure_ascii=False)}\n\n"
 
-                        # 为结构化节点提取可读的思考内容，单独发送给前端
                         if name == "intent_recognition" and output is not None:
                             try:
-                                # output 是 Command 对象，从 update 中拿 intent
                                 update = getattr(output, "update", {}) or {}
                                 intent = update.get("intent")
                                 if intent:
@@ -390,7 +468,7 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
                                     )
                                     parts.append(f"**执行步骤**\n{steps_desc}")
                                 if parts:
-                                    yield f"data: {json.dumps({'type': 'node_thinking', 'node': name, 'thinking': '\n\n'.join(parts)}, ensure_ascii=False)}\n\n"
+                                    yield f"data: {json.dumps({'type': 'node_thinking', 'node': name, 'thinking': chr(10).join(parts)}, ensure_ascii=False)}\n\n"
                             except Exception as ex:
                                 print(f"[Stream] 提取 planner 思考内容失败: {ex}")
 
@@ -407,7 +485,9 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
                 if snapshot.next and "review" in snapshot.next:
                     require_review = True
                     status = "pending_review"
-                    final_message = "任务需要人工审核"
+                    # final_message 此时已是 dispatcher 生成的对话式审核提示，无需覆盖
+                    if not final_message:
+                        final_message = "需要您确认后才能继续。请回复「通过」批准，或描述修改意见。"
 
             if require_review:
                 _active_workflows[task_id] = {
@@ -425,12 +505,12 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
-        event_generator(), 
+        event_generator(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # 禁用 Nginx 缓存
+            "X-Accel-Buffering": "no",
             "Content-Type": "text/event-stream",
         }
     )

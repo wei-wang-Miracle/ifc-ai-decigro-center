@@ -234,6 +234,48 @@ async def dispatcher_node(state: AgentState, config: RunnableConfig) -> Command:
             },
             goto="responder"
         )
+    elif next_route == "review":
+        # 路由到 review 节点前（interrupt_before 会在此处暂停），
+        # 生成对话式审核提示消息供用户阅读和回复
+        plan_list = state.plan or []
+        step_idx = state.current_step_index
+        step_results_list = state.step_results
+
+        current_step = plan_list[step_idx] if plan_list and step_idx < len(plan_list) else None
+
+        # 找到最近一个需要审核的步骤结果
+        pending_result = None
+        for r in reversed(step_results_list):
+            if r.require_review:
+                pending_result = r
+                break
+
+        step_desc = current_step.description if current_step else "当前操作"
+        result_output = (pending_result.output or "").strip() if pending_result else ""
+        tools = pending_result.tools_called if pending_result else []
+
+        review_parts = ["我已完成以下操作，需要您确认后才能继续：\n"]
+        review_parts.append(f"**操作描述：** {step_desc}")
+        if result_output:
+            review_parts.append(f"\n**执行结果：**\n{result_output}")
+        if tools:
+            review_parts.append(f"\n**调用工具：** {', '.join(tools)}")
+        review_parts.append(
+            "\n\n请回复您的决定：\n"
+            "- 回复「通过」或「确认」\u2192 批准并继续执行\n"
+            "- 描述修改意见 \u2192 我将根据反馈调整方案"
+        )
+        review_msg = "\n".join(review_parts)
+
+        return Command(
+            update={
+                "current_planner": current_planner,
+                "current_executor": current_executor,
+                "messages": [AIMessage(content=review_msg)],
+                "node_traces": state.node_traces + [nt],
+            },
+            goto=next_route
+        )
     else:
         return Command(
             update={

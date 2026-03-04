@@ -3,6 +3,7 @@ package com.ifc.decigro.buskernel.controller;
 import com.alibaba.fastjson2.JSONObject;
 import com.ifc.decigro.buskernel.common.annotation.ToolCard;
 import com.ifc.decigro.buskernel.common.api.Result;
+import com.ifc.decigro.buskernel.dto.CustomerGroupDetailRequest;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
@@ -37,7 +38,7 @@ public class GenericStarRocksController {
      * 接口：查询客群数据详情
      * 客群是指满足某一类标签筛选条件的客户群体
      *
-     * @param request 包含 sql 和 limit 的请求体
+     * @param request 包含 sql 和 limit 的请求体（使用 DTO 以驱动 @ToolInput Schema 自动注册）
      * @return 客群数据列表
      */
     @PostMapping("/customer-group-detail")
@@ -53,16 +54,13 @@ public class GenericStarRocksController {
     )
     public Result<List<JSONObject>> queryCustomerGroupDetail(
             @Parameter(description = "请求体，包含 sql（查询语句）和 limit（返回条数，默认100，最大1000）")
-            @RequestBody JSONObject request) {
+            @RequestBody CustomerGroupDetailRequest request) {
 
-        if (request == null || !request.containsKey("sql")) {
-            return Result.fail(400, "参数校验失败: 请求体不能缺少 'sql' 参数。请使用类似 {\"sql\": \"SELECT * FROM dm.sr_wide_client WHERE ...\", \"limit\": 100} 的 JSON 结构调用。");
-        }
-
-        String sql = request.getString("sql");
-        if (sql == null || sql.isBlank()) {
+        if (request == null || request.getSql() == null || request.getSql().isBlank()) {
             return Result.fail(400, "参数校验失败: 'sql' 不能为空。");
         }
+
+        String sql = request.getSql();
 
         // 安全校验：只允许 SELECT 语句
         String trimmedSql = sql.trim().toLowerCase();
@@ -76,8 +74,8 @@ public class GenericStarRocksController {
         }
 
         int limit = DEFAULT_LIMIT;
-        if (request.containsKey("limit")) {
-            limit = request.getIntValue("limit");
+        if (request.getLimit() != null) {
+            limit = request.getLimit();
             if (limit <= 0 || limit > MAX_LIMIT) {
                 return Result.fail(400, "参数校验失败: 'limit' 必须在 1 到 " + MAX_LIMIT + " 之间，当前值为: " + limit + "。");
             }
