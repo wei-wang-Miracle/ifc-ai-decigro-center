@@ -178,7 +178,11 @@ def create_dynamic_tool(tool_card: dict[str, Any], token: str = None) -> Structu
     # 如果 tool_parameters 是字符串（JSON），先解析
     if isinstance(tool_parameters, str):
         tool_parameters = json.loads(tool_parameters) if tool_parameters else []
-    
+
+    if not tool_parameters:
+        print(f"[ToolFactory] 警告: 工具 '{tool_name}' 的 tool_parameters 为空，"
+              f"LLM 传入的参数将被全部丢弃！请在管理端补充参数定义。")
+
     args_schema = create_pydantic_model_from_params(tool_name, tool_parameters)
     
     # 第二步：根据协议创建执行器

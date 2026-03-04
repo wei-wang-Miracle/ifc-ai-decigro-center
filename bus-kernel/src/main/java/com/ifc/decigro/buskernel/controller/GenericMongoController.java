@@ -3,9 +3,10 @@ package com.ifc.decigro.buskernel.controller;
 import com.alibaba.fastjson2.JSONObject;
 import com.ifc.decigro.buskernel.common.api.Result;
 import com.ifc.decigro.buskernel.common.annotation.ToolCard;
+import com.ifc.decigro.buskernel.dto.FundEtfFeaturesRequest;
 import com.ifc.decigro.buskernel.service.GenericMongoService;
-import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -31,30 +32,14 @@ public class GenericMongoController {
     /**
      * 接口：查询单只场内基金的基金特征值
      * 业务标识: fund-etf-features
-     * 
-     * @param fundCode 基金代码
-     * @return 基金特征值列表
      */
     @PostMapping("/fund-etf-features")
     @ToolCard(tool_name = "query_fund_etf_features", summary = "查询单只场内基金（ETF）的量化特征数据", alias = "查询单只场内基金的基金特征值", description = "Trigger: 当需要分析具体ETF（如510050、510300）的量化特征因子或提取模型输入特征时使用。Action: 根据传入的6位基金代码拉取该基金的详细特征指标列表。Constraint: 必须提供精确匹配的合法的6位纯数字格式基金代码作为参数。", tags = {
             "fund_analysis", "quantitative_data", "etf_features",
             "mongo_query" }, privileges = "public", input_examples = "{\"fundCode\": \"510050\"}", output_examples = "[{\"FUND_CODE\": \"510050\", \"OVERALL_RETURN_EXPECT\": 0.125, \"OVERALL_RISK\": 0.182, \"OVERALL_RETURN_LEVEL\": \"OVERALL_RL3\", \"IS_BROAD_MARKET_ETF\": 1, \"FUND_STYLE_RR\": \"高收益高风险\", \"COMPREHENSIVE_SCORE\": 88.5}]")
-    public Result<List<JSONObject>> queryFundEtfFeatures(
-            @Parameter(description = "基金代码请求体，如 {\"fundCode\": \"510050\"}") @RequestBody JSONObject request) {
-        // 第一步：校验请求体及必填参数
-        if (request == null || !request.containsKey("fundCode")) {
-            return Result.fail(400, "参数校验失败: 请求体不能缺少 'fundCode' 参数。请使用类似 {\"fundCode\": \"510050\"} 的 JSON 结构调用。");
-        }
-
-        String fundCode = request.getString("fundCode");
-
-        // 第二步：校验具体字段的格式规范（大模型有时可能会传入带有前缀的代码，如 sh510050）
-        if (fundCode == null || !fundCode.matches("^\\d{6}$")) {
-            return Result.fail(400, "参数校验失败: 'fundCode' 值必须是精确的 6 位纯数字格式（例如 510050）。当前传入的值为: '" + fundCode + "'。");
-        }
-
+    public Result<List<JSONObject>> queryFundEtfFeatures(@Valid @RequestBody FundEtfFeaturesRequest request) {
         Map<String, Object> params = new HashMap<>();
-        params.put("fundCode", fundCode);
+        params.put("fundCode", request.getFundCode());
         return dispatch("fund-etf-features", params);
     }
 
