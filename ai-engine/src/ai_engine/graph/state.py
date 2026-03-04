@@ -12,14 +12,15 @@ from langgraph.graph import add_messages
 
 
 class IntentType(str, Enum):
-    """意图类型枚举"""
-    TASK = "task"            # 需要执行任务
-    QUESTION = "question"    # 简单问答
-    CLARIFY = "clarify"      # 需要澄清
-    CHAT = "chat"            # 闲聊
-    INVALID = "invalid"      # 无效输入
-    END = "end"              # 结束对话
-    UNSUPPORTED = "unsupported" # 无法支持（无可用工具或 Agent）
+    """
+    意图类型枚举（简化版）
+    - TASK: 明确需要 PLANNER Agent 支持的复杂业务任务
+    - CHAT: 其他所有场景（闲聊、问答、澄清、引导、不支持等）
+    - END: 明确结束对话
+    """
+    TASK = "task"    # 需要 PLANNER 处理的复杂业务任务
+    CHAT = "chat"    # 其他所有：闲聊、问答、澄清、引导等
+    END = "end"      # 明确结束对话
 
 
 class ReviewStatus(str, Enum):

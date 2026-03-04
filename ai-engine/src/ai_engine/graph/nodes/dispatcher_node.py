@@ -158,50 +158,65 @@ async def _select_executor_agent(step: PlanStep, planner_name: str, token: str, 
 async def dispatcher_node(state: AgentState, config: RunnableConfig) -> Command:
     """
     功能: 调度中心节点 - 负责路由决策和 Agent 选择
+    
+    路由逻辑（简化版）：
+    - TASK 意图 → planner（需要规划的复杂任务）
+    - CHAT 意图 → normal（闲聊、问答、澄清、引导等）
+    - 有 plan 且未完成 → executor（继续执行）
+    - plan 执行完毕 → responder（汇总结果）
     """
     # 审计埋点
     nt = start_node_trace("dispatcher")
 
-    # 1. 路由决策逻辑 (原 _get_next_route)
+    # 1. 路由决策逻辑
     intent = state.intent
     plan = state.plan
     require_review = state.require_review
     
-    next_route = "intent"  # 默认返回意图识别
+    next_route = "normal"  # 默认走 normal 节点
     
+    # 优先处理审核流程
     if require_review:
         next_route = "review"
+    # 无意图时走 normal 兜底
     elif intent is None:
-        next_route = "intent"
-    elif intent.intent_type == IntentType.END or intent.intent_type == IntentType.INVALID:
+        next_route = "normal"
+    # END 意图直接结束（理论上不会到这里，intent_recognition 已处理）
+    elif intent.intent_type == IntentType.END:
         next_route = "__end__"
-    elif plan is None or len(plan) == 0:
-        next_route = "planner"
-    else:
-        current_index = state.current_step_index
-        if current_index >= len(plan):
-            next_route = "__end__"
+    # CHAT 意图 → normal 节点处理
+    elif intent.intent_type == IntentType.CHAT:
+        next_route = "normal"
+    # TASK 意图 → 需要判断是否已有 plan
+    elif intent.intent_type == IntentType.TASK:
+        if plan is None or len(plan) == 0:
+            # 无计划，需要规划
+            next_route = "planner"
         else:
-            # 检查当前步骤是否需要人机协同审核
-            current_step = plan[current_index]
-            # 如果有 review_feedback，说明用户已给出反馈（可能是修改意见），应跳过审核直接执行
-            has_feedback = bool(state.review_feedback)
-            if current_step.requires_review and state.review_status != ReviewStatus.APPROVED and not has_feedback:
-                # 需要人工审核确认，路由到 review 节点
-                next_route = "review"
-                print(f"[Dispatcher] 步骤 {current_step.step_id} 需要人工审核确认")
+            current_index = state.current_step_index
+            if current_index >= len(plan):
+                # 计划执行完毕
+                next_route = "__end__"
             else:
-                if has_feedback:
-                    print(f"[Dispatcher] 存在用户反馈，跳过审核，携带反馈重新执行步骤")
-                next_route = "executor"
+                # 检查当前步骤是否需要人机协同审核
+                current_step = plan[current_index]
+                has_feedback = bool(state.review_feedback)
+                if current_step.requires_review and state.review_status != ReviewStatus.APPROVED and not has_feedback:
+                    next_route = "review"
+                    print(f"[Dispatcher] 步骤 {current_step.step_id} 需要人工审核确认")
+                else:
+                    if has_feedback:
+                        print(f"[Dispatcher] 存在用户反馈，跳过审核，携带反馈重新执行步骤")
+                    next_route = "executor"
 
-    print(f"[Dispatcher] 路由决策: {next_route}")
+    print(f"[Dispatcher] 路由决策: {next_route} (意图: {intent.intent_type.value if intent else 'None'})")
     
     # 2. 状态更新变量
     current_planner = state.current_planner
     current_executor = state.current_executor
     
-    if next_route == "planner":
+    # 只有 TASK 意图且需要规划时才选择 Planner
+    if next_route == "planner" and intent and intent.intent_type == IntentType.TASK:
         # 路由到 planner 之前，选择具体的 Planner Agent
         current_planner = await _select_planner_agent(intent, state.token, config=config)
         if current_planner:
