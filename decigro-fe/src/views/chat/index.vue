@@ -14,8 +14,10 @@ const inputMessage = ref('')
 const isLoading = ref(false)
 const scrollContainer = ref<HTMLElement | null>(null)
 const agentPanelScroll = ref<HTMLElement | null>(null)
-// 控制思考过程展开/收起
+// 控制思考过程展开/收起（整体面板）
 const showThoughts = ref<Record<string, boolean>>({})
+// 控制单个节点的思考内容展开/收起
+const expandedNodeThinking = ref<Record<string, boolean>>({})
 // 控制 Agent 面板中思考过程的展开/收起
 const expandedThinking = ref<Record<string, boolean>>({})
 
@@ -307,14 +309,17 @@ const handleSend = async () => {
                                     const last = aiMessage.thoughts[aiMessage.thoughts.length - 1]
                                     if (last.status === 'running') last.status = 'success'
                                 }
-                                
+
                                 aiMessage.thoughts?.push({
-                                    id: `node-${Date.now()}-${Math.random()}`,
+                                    id: `node-${event.node}-${Date.now()}`,
                                     type: 'node_start',
+                                    nodeName: event.node,
                                     title: event.display_name || event.node,
                                     status: 'running',
                                     timestamp: Date.now(),
-                                    content: ''
+                                    content: '',
+                                    thinking: '',       // 流式推理内容
+                                    conclusion: ''      // 节点最终输出
                                 })
 
                             } else if (event.type === 'agent_start') {
@@ -423,11 +428,21 @@ const handleSend = async () => {
 
                             } else if (event.type === 'node_result') {
                                 // 标记节点完成
-                                const nodeThought = aiMessage.thoughts?.slice().reverse().find((t: any) => t.status === 'running')
+                                const nodeThought = aiMessage.thoughts?.slice().reverse().find((t: any) => t.status === 'running' && t.type === 'node_start')
                                 if (nodeThought) {
                                     nodeThought.status = 'success'
                                 }
                                 console.log(`[Node Result] ${event.node}:`, event.output)
+
+                            } else if (event.type === 'node_thinking') {
+                                // 后端为结构化节点解析出的可读思考内容（intent_recognition / planner）
+                                const targetNode = aiMessage.thoughts?.slice().reverse().find(
+                                    (t: any) => t.type === 'node_start' && t.nodeName === event.node
+                                )
+                                if (targetNode && event.thinking) {
+                                    targetNode.thinking = event.thinking
+                                }
+                                console.log(`[Node Thinking] ${event.node}:`, event.thinking)
 
                             } else if (event.type === 'token') {
                                 const { content, reasoning, is_thought, is_json, node } = event
@@ -436,25 +451,32 @@ const handleSend = async () => {
                                 if (is_json) continue
 
                                 if (is_thought) {
-                                    // ====== 思考流：分发到聊天气泡 + Agent 面板 ======
-                                    let activeThought = aiMessage.thoughts?.slice().reverse().find((t: any) => t.status === 'running')
+                                    // ====== 思考流：优先追加到当前活跃 node_start 节点 ======
+                                    const activeNode = aiMessage.thoughts?.slice().reverse().find(
+                                        (t: any) => t.type === 'node_start' && t.status === 'running'
+                                    )
 
-                                    if (!activeThought) {
-                                        const newThought = {
-                                            id: `auto-${Date.now()}`,
-                                            type: 'thinking' as const,
-                                            title: (node === 'responder' ? '整理思路...' : '深度思考中...'),
-                                            status: 'running' as const,
-                                            timestamp: Date.now(),
-                                            content: ''
+                                    if (activeNode) {
+                                        // 追加到节点的 thinking 字段（executor 节点的思考由协作面板处理）
+                                        if (reasoning) activeNode.thinking = (activeNode.thinking || '') + reasoning
+                                        else if (content) activeNode.thinking = (activeNode.thinking || '') + content
+                                    } else {
+                                        // 没有活跃节点时，fallback 到独立 thinking 气泡
+                                        let activeThought = aiMessage.thoughts?.slice().reverse().find((t: any) => t.type === 'thinking' && t.status === 'running')
+                                        if (!activeThought) {
+                                            const newThought = {
+                                                id: `auto-${Date.now()}`,
+                                                type: 'thinking' as const,
+                                                title: (node === 'responder' ? '整理思路...' : '深度思考中...'),
+                                                status: 'running' as const,
+                                                timestamp: Date.now(),
+                                                content: ''
+                                            }
+                                            aiMessage.thoughts?.push(newThought)
+                                            activeThought = newThought
                                         }
-                                        aiMessage.thoughts?.push(newThought)
-                                        activeThought = newThought
-                                    }
-
-                                    if (activeThought) {
-                                        if (reasoning) activeThought.content += reasoning
-                                        else if (content) activeThought.content += content
+                                        if (reasoning) activeThought.content = (activeThought.content || '') + reasoning
+                                        else if (content) activeThought.content = (activeThought.content || '') + content
                                     }
 
                                     // 同步思考内容到 Agent 面板（精确绑定到当前活跃 step）
@@ -557,23 +579,25 @@ const getThoughtTree = (thoughts?: any[]) => {
     let lastAgent: any = null
 
     thoughts.forEach(t => {
-        // 只处理结构化节点
         if (t.type === 'node_start') {
-            lastNode = { ...t, children: [] }
+            // 透传 thinking/conclusion/nodeName 字段，保持响应式引用
+            lastNode = t
+            if (!lastNode.children) lastNode.children = []
             tree.push(lastNode)
             lastAgent = null
         } else if (t.type === 'agent_start') {
-            lastAgent = { ...t, children: [] }
+            lastAgent = t
+            if (!lastAgent.children) lastAgent.children = []
             if (lastNode) {
-                lastNode.children.push(lastAgent)
+                if (!lastNode.children.includes(lastAgent)) lastNode.children.push(lastAgent)
             } else {
                 tree.push(lastAgent)
             }
         } else if (t.type === 'tool_start') {
             if (lastAgent) {
-                lastAgent.children.push(t)
+                if (!lastAgent.children.includes(t)) lastAgent.children.push(t)
             } else if (lastNode) {
-                lastNode.children.push(t)
+                if (!lastNode.children.includes(t)) lastNode.children.push(t)
             } else {
                 tree.push(t)
             }
@@ -686,53 +710,65 @@ const getThoughtTree = (thoughts?: any[]) => {
                                     ? 'bg-brand-600 text-white rounded-tr-none' 
                                     : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none']"
                             >
-                                <!-- 思考过程展示（精简版，详细内容在右侧面板） -->
+                                <!-- 思考过程展示：扁平三层树状结构 -->
                                 <div v-if="msg.thoughts && msg.thoughts.length > 0" class="mb-3 border-b border-dashed border-gray-200 pb-2">
-                                    <div 
-                                        class="flex items-center text-xs text-gray-500 cursor-pointer hover:text-brand-600 select-none"
+                                    <!-- 折叠控制头 -->
+                                    <div
+                                        class="flex items-center text-xs text-gray-400 cursor-pointer hover:text-brand-500 select-none mb-1.5"
                                         @click="showThoughts[msg.id || idx] = !showThoughts[msg.id || idx]"
                                     >
                                         <el-icon class="mr-1 animate-spin" v-if="msg.status === 'running'"><Loading /></el-icon>
                                         <el-icon class="mr-1" v-else><Operation /></el-icon>
-                                        <span>思考过程 ({{ msg.thoughts.length }} 步骤)</span>
-                                        <el-icon class="ml-1 transition-transform" :class="{ 'rotate-180': showThoughts[msg.id || idx] }"><ArrowDown /></el-icon>
+                                        <span>推理过程 ({{ getThoughtTree(msg.thoughts).length }} 个阶段)</span>
+                                        <el-icon class="ml-1 transition-transform" :class="{ 'rotate-180': showThoughts[msg.id || idx] || msg.status === 'running' }"><ArrowDown /></el-icon>
                                     </div>
-                                    
-                                    <div v-show="showThoughts[msg.id || idx] || msg.status === 'running'" class="mt-2 text-[11px] space-y-1 bg-slate-50/50 p-2.5 rounded-xl max-h-60 overflow-y-auto border border-slate-100/50">
-                                        <!-- 第一层：Node (如 planner, executor) -->
-                                        <div v-for="node in getThoughtTree(msg.thoughts)" :key="node.id" class="thought-node">
-                                            <div class="flex items-center py-0.5">
-                                                <div class="node-dot mr-2" :class="node.status"></div>
-                                                <span class="font-bold text-slate-600 uppercase tracking-tighter">{{ node.title }}</span>
+
+                                    <!-- 扁平树状内容 -->
+                                    <div v-show="showThoughts[msg.id || idx] || msg.status === 'running'" class="thought-tree">
+                                        <div v-for="node in getThoughtTree(msg.thoughts)" :key="node.id" class="thought-node-row">
+                                            <!-- Node 标题行 -->
+                                            <div class="thought-row-title">
+                                                <div class="node-dot flex-shrink-0" :class="node.status"></div>
+                                                <span class="thought-node-label">{{ node.title }}</span>
+                                                <span v-if="node.status === 'running'" class="thought-status-running">运行中</span>
+                                                <!-- 展开/收起思考内容 -->
+                                                <button
+                                                    v-if="node.thinking && node.status !== 'running'"
+                                                    class="thought-toggle"
+                                                    @click.stop="expandedNodeThinking[node.id] = !expandedNodeThinking[node.id]"
+                                                >{{ expandedNodeThinking[node.id] ? '收起' : '展开' }}</button>
                                             </div>
-                                            
-                                            <!-- 第二层：Agent (低于 Node 一级) -->
-                                            <div v-if="node.children && node.children.length > 0" class="ml-4 border-l border-slate-200 pl-3 space-y-1 my-1">
-                                                <div v-for="agent in node.children" :key="agent.id" class="thought-agent">
+
+                                            <!-- 节点思考内容：浅色背景内嵌，流式显示，完成后折叠 -->
+                                            <div
+                                                v-if="node.thinking"
+                                                :class="['thought-thinking-flat', { 'is-collapsed': node.status !== 'running' && !expandedNodeThinking[node.id] }]"
+                                            >{{ node.thinking }}<span v-if="node.status === 'running'" class="thought-cursor">_</span></div>
+
+                                            <!-- 第二层：Agent -->
+                                            <div v-if="node.children && node.children.length > 0" class="thought-indent">
+                                                <div v-for="agent in node.children" :key="agent.id">
                                                     <div v-if="agent.type === 'agent_start'">
-                                                        <div class="flex items-center py-0.5">
-                                                            <div class="agent-dot mr-2" :class="agent.status"></div>
-                                                            <span 
-                                                                class="font-semibold text-indigo-600 cursor-pointer hover:underline"
+                                                        <div class="thought-row-title">
+                                                            <div class="agent-dot flex-shrink-0" :class="agent.status"></div>
+                                                            <span
+                                                                class="thought-agent-label cursor-pointer hover:underline"
                                                                 @click="handleAgentClick(agent.title, msg)"
-                                                            >
-                                                                {{ agent.title }}
-                                                            </span>
+                                                            >{{ agent.title }}</span>
+                                                            <span v-if="agent.children && agent.children.length > 0" class="thought-tool-count">{{ agent.children.length }} 个工具</span>
                                                         </div>
-                                                        
-                                                        <!-- 第三层：Tool (低于 Agent 一级) -->
-                                                        <div v-if="agent.children && agent.children.length > 0" class="ml-4 border-l border-slate-200 pl-3 space-y-1 my-1">
-                                                            <div v-for="tool in agent.children" :key="tool.id" class="flex items-center py-0.5 thought-tool">
-                                                                <div class="tool-dot mr-2" :class="tool.status"></div>
-                                                                <span class="text-slate-500 italic">{{ tool.title }}</span>
+                                                        <!-- 第三层：Tool -->
+                                                        <div v-if="agent.children && agent.children.length > 0" class="thought-indent">
+                                                            <div v-for="tool in agent.children" :key="tool.id" class="thought-row-title thought-tool-row">
+                                                                <div class="tool-dot flex-shrink-0" :class="tool.status"></div>
+                                                                <span class="thought-tool-label">{{ tool.title }}</span>
                                                             </div>
                                                         </div>
                                                     </div>
-                                                    
-                                                    <!-- 处理 Node 下直接包含 Tool 的情况 -->
-                                                    <div v-else class="flex items-center py-0.5">
-                                                        <div class="tool-dot mr-2" :class="agent.status"></div>
-                                                        <span class="text-slate-500 italic">{{ agent.title }}</span>
+                                                    <!-- Node 直属 Tool -->
+                                                    <div v-else class="thought-row-title thought-tool-row">
+                                                        <div class="tool-dot flex-shrink-0" :class="agent.status"></div>
+                                                        <span class="thought-tool-label">{{ agent.title }}</span>
                                                     </div>
                                                 </div>
                                             </div>
@@ -1123,16 +1159,128 @@ const getThoughtTree = (thoughts?: any[]) => {
 .send-btn:hover { background-color: #1a5ac1; border-color: #1a5ac1; }
 .animate-bounce { animation: bounce 1s infinite; }
 @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
-/* ===== 思考过程树状样式 ===== */
-.node-dot, .agent-dot, .tool-dot { width: 6px; height: 6px; border-radius: 50%; }
-.node-dot.running, .agent-dot.running, .tool-dot.running { background: #3b82f6; animation: pulse 1.5s infinite; }
-.node-dot { background: #a855f7; } /* 紫色 Node */
-.agent-dot { background: #6366f1; } /* 靛青 Agent */
-.tool-dot { background: #f59e0b; } /* 橙色 Tool */
-.node-dot.success, .agent-dot.success, .tool-dot.success { background: #10b981; }
+/* ===== 思考过程：扁平树状布局 ===== */
+.thought-tree {
+    font-size: 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
 
-.thought-node { margin-top: 4px; }
-.thought-node:first-child { margin-top: 0; }
+/* Node 行 */
+.thought-node-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* 通用标题行：状态点 + 文字 + 操作 */
+.thought-row-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 18px;
+}
+
+/* Node 标签 */
+.thought-node-label {
+    font-weight: 700;
+    color: #475569;
+    font-size: 11px;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    flex: 1;
+}
+
+.thought-status-running {
+    font-size: 9px;
+    color: #3b82f6;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+/* 展开/收起按钮 */
+.thought-toggle {
+    font-size: 9px;
+    color: #94a3b8;
+    background: transparent;
+    border: none;
+    padding: 0 4px;
+    cursor: pointer;
+    flex-shrink: 0;
+    line-height: 1;
+}
+.thought-toggle:hover { color: #3b82f6; }
+
+/* 思考内容：浅色背景内嵌，流式显示，完成后折叠 */
+.thought-thinking-flat {
+    margin-left: 14px;
+    padding: 6px 10px;
+    background: #f8fafc;
+    border-left: 2px solid #e2e8f0;
+    border-radius: 0 4px 4px 0;
+    font-size: 11px;
+    color: #94a3b8;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+    transition: max-height 0.35s ease-out;
+}
+.thought-thinking-flat.is-collapsed {
+    max-height: 4.5em;
+    overflow: hidden;
+    mask-image: linear-gradient(to bottom, black 50%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 100%);
+}
+
+/* 缩进层（Agent / Tool 层） */
+.thought-indent {
+    margin-left: 14px;
+    padding-left: 10px;
+    border-left: 1px solid #e2e8f0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+/* Agent 标签 */
+.thought-agent-label {
+    color: #6366f1;
+    font-weight: 600;
+    font-size: 11px;
+    flex: 1;
+}
+
+.thought-tool-count {
+    color: #cbd5e1;
+    font-size: 10px;
+    flex-shrink: 0;
+}
+
+/* Tool 行 */
+.thought-tool-row { opacity: 0.8; }
+.thought-tool-label {
+    color: #94a3b8;
+    font-size: 10px;
+    font-style: italic;
+    flex: 1;
+}
+
+/* 光标 */
+.thought-cursor {
+    color: #94a3b8;
+    font-weight: 900;
+    animation: blink2 0.8s infinite;
+}
+@keyframes blink2 { 50% { opacity: 0; } }
+
+/* ===== 思考过程状态点（Node / Agent / Tool） ===== */
+.node-dot, .agent-dot, .tool-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.node-dot.running, .agent-dot.running, .tool-dot.running { background: #3b82f6; animation: pulse 1.5s infinite; }
+.node-dot { background: #a855f7; }
+.agent-dot { background: #6366f1; }
+.tool-dot { background: #f59e0b; }
+.node-dot.success, .agent-dot.success, .tool-dot.success { background: #10b981; }
 
 .delay-150 { animation-delay: 0.15s; }
 .delay-300 { animation-delay: 0.3s; }

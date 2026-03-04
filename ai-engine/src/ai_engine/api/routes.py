@@ -352,6 +352,48 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
                         output = event.get("data", {}).get("output")
                         yield f"data: {json.dumps({'type': 'node_result', 'node': name, 'output': str(output)}, ensure_ascii=False)}\n\n"
 
+                        # 为结构化节点提取可读的思考内容，单独发送给前端
+                        if name == "intent_recognition" and output is not None:
+                            try:
+                                # output 是 Command 对象，从 update 中拿 intent
+                                update = getattr(output, "update", {}) or {}
+                                intent = update.get("intent")
+                                if intent:
+                                    intent_type = getattr(intent, "intent_type", None)
+                                    confidence = getattr(intent, "confidence", None)
+                                    entities = getattr(intent, "entities", {})
+                                    parts = [f"意图类型：**{intent_type}**（置信度 {confidence:.0%}）"]
+                                    if entities:
+                                        ent_str = "、".join(f"{k}={v}" for k, v in entities.items())
+                                        parts.append(f"提取实体：{ent_str}")
+                                    clarify = getattr(intent, "clarification_needed", False)
+                                    if clarify:
+                                        q = getattr(intent, "clarification_question", "")
+                                        parts.append(f"需要澄清：{q}")
+                                    thinking_text = "\n".join(parts)
+                                    yield f"data: {json.dumps({'type': 'node_thinking', 'node': name, 'thinking': thinking_text}, ensure_ascii=False)}\n\n"
+                            except Exception as ex:
+                                print(f"[Stream] 提取 intent_recognition 思考内容失败: {ex}")
+
+                        elif name == "planner" and output is not None:
+                            try:
+                                update = getattr(output, "update", {}) or {}
+                                plan = update.get("plan", [])
+                                reasoning = update.get("plan_reasoning", "")
+                                parts = []
+                                if reasoning:
+                                    parts.append(f"**规划思路**\n{reasoning}")
+                                if plan:
+                                    steps_desc = "\n".join(
+                                        f"**步骤 {i+1}**：{getattr(s, 'description', str(s))}（由 {getattr(s, 'assigned_agent', '?')} 执行）"
+                                        for i, s in enumerate(plan)
+                                    )
+                                    parts.append(f"**执行步骤**\n{steps_desc}")
+                                if parts:
+                                    yield f"data: {json.dumps({'type': 'node_thinking', 'node': name, 'thinking': '\n\n'.join(parts)}, ensure_ascii=False)}\n\n"
+                            except Exception as ex:
+                                print(f"[Stream] 提取 planner 思考内容失败: {ex}")
+
             # ── 流结束：读取最终快照 ───────────────────────────────────
             snapshot = workflow.get_state(config)
             final_message = ""

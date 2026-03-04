@@ -278,6 +278,7 @@ async def planner_node(state: AgentState, config: RunnableConfig) -> Command:
         return Command(
             update={
                 "plan": plan,
+                "plan_reasoning": response.reasoning,
                 "current_step_index": 0,
                 "messages": [AIMessage(content=f"[Planner:{planner_name}] 已生成 {len(plan)} 步计划")],
                 "node_traces": state.node_traces + [nt],

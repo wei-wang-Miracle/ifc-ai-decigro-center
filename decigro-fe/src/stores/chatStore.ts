@@ -32,6 +32,10 @@ export interface ThoughtItem {
   status: "pending" | "running" | "success" | "failed";
   timestamp: number;
   details?: any;
+  // node_start 节点扩展字段
+  nodeName?: string;    // 节点原始名称（用于分类判断）
+  thinking?: string;    // 节点的流式推理内容
+  conclusion?: string;  // 节点最终结论/输出摘要
 }
 
 // 消息接口定义

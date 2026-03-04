@@ -178,6 +178,9 @@ class AgentState(BaseModel):
     # 错误信息
     error: Optional[str] = Field(default=None, description="工作流执行过程中产生的全局错误或异常信息")
 
+    # 规划思路（planner 节点写入，供前端展示）
+    plan_reasoning: Optional[str] = Field(default=None, description="Planner 制定计划时的推理过程")
+
     # 用户认证 Token (用于动态注册权限校验)
     token: Optional[str] = Field(default=None, description="用于 API 调用和权限控制的用户认证 Token")
 
