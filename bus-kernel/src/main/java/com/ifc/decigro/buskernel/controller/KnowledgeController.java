@@ -1,31 +1,42 @@
 package com.ifc.decigro.buskernel.controller;
 
+import com.alibaba.fastjson2.JSONArray;
+import com.alibaba.fastjson2.JSONObject;
 import com.ifc.decigro.buskernel.common.api.Result;
 import com.ifc.decigro.buskernel.common.annotation.ToolCard;
 import com.ifc.decigro.buskernel.dto.KnowledgeSearchRequest;
-import com.ifc.decigro.buskernel.service.KnowledgeProxyService;
+import com.ifc.decigro.buskernel.dto.KnowledgeSearchResult;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
-import java.util.Map;
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.*;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.RestTemplate;
 
 /**
  * 知识库检索控制器
  *
  * 仅提供知识库语义检索功能（search_knowledge_base）供 AI 引擎调用
  */
+@Slf4j
 @RestController
 @RequestMapping("/knowledge")
 @Tag(name = "知识库管理", description = "RAG 知识库检索 API")
 public class KnowledgeController {
 
-    @Autowired
-    private KnowledgeProxyService knowledgeProxyService;
+    @Value("${knowledge.search.url:https://agent.cnht.com.cn/v1/knowledge/search}")
+    private String knowledgeSearchUrl;
+
+    @Value("${knowledge.search.api-key:}")
+    private String knowledgeSearchApiKey;
+
+    private final RestTemplate restTemplate = new RestTemplate();
 
     /**
      * 知识库检索接口（供 ai-engine ToolCard 调用）
@@ -63,8 +74,60 @@ public class KnowledgeController {
             input_examples = "{\"query\": \"华夏中证香港内地国有企业ETF 513120 产品说明书\", \"k\": 5, \"search_mode\": \"HYBRID_SEARCH\"}",
             output_examples = "{\"code\": 200, \"message\": \"success\", \"data\": [{\"data_type\": \"RAW\", \"text\": \"## ETF特征完整数据字段清单\\n| 输出字段 | 类型 | 说明 |\\n|---|---|---|\\n| SHORT_TERM_RETURN_EXPECT | Float | 短期收益预期(%) |\", \"similarity\": 0.87, \"no\": 1, \"code\": \"El2TPMaI\", \"data_id\": \"s57StpwBdt2tq9rqj9k_\", \"file_id\": \"177259363533446378.md\"}]}"
     )
-    public Result<List<Map<String, Object>>> search(
+    public Result<List<KnowledgeSearchResult>> search(
             @Validated @RequestBody KnowledgeSearchRequest request) {
-        return knowledgeProxyService.search(request);
+        try {
+            // 第一步：构建请求体
+            JSONObject body = new JSONObject();
+            body.put("knowledge_code", Collections.singleton("El2TPMaI"));
+            body.put("query", request.getQuery());
+            body.put("k", String.valueOf(request.getK() != null ? request.getK() : 10));
+            body.put("search_mode", (request.getSearchMode() != null && !request.getSearchMode().isBlank())
+                    ? request.getSearchMode() : "VECTOR_SEARCH");
+
+            // 第二步：发送请求（携带 Bearer Token 鉴权）
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setBearerAuth(knowledgeSearchApiKey);
+            HttpEntity<JSONObject> requestEntity = new HttpEntity<>(body, headers);
+
+            ResponseEntity<JSONObject> response = restTemplate.exchange(
+                    knowledgeSearchUrl,
+                    HttpMethod.POST, requestEntity, JSONObject.class);
+
+            // 第三步：封装为 KnowledgeSearchResult 列表
+            JSONObject responseBody = response.getBody();
+            if (responseBody == null) {
+                return Result.fail("[知识库检索] 返回空响应，请稍后重试。");
+            }
+
+            JSONObject data = responseBody.getJSONObject("data");
+            if (data == null) {
+                return Result.fail("[知识库检索] 响应格式异常，data 字段为空。");
+            }
+
+            JSONArray list = data.getJSONArray("list");
+            if (list == null) {
+                return Result.success(new ArrayList<>());
+            }
+
+            // 转换为 KnowledgeSearchResult 列表
+            List<KnowledgeSearchResult> resultList = new ArrayList<>();
+            for (int i = 0; i < list.size(); i++) {
+                JSONObject item = list.getJSONObject(i);
+                KnowledgeSearchResult result = new KnowledgeSearchResult();
+                result.setList(Collections.singletonList(item));
+                resultList.add(result);
+            }
+            return Result.success(resultList);
+
+        } catch (HttpClientErrorException e) {
+            log.warn("[KnowledgeController] 知识库检索请求参数错误: {}", e.getResponseBodyAsString());
+            return Result.fail(400, "[AI调用错误] 知识库检索接口拒绝了本次请求，原因：" + e.getResponseBodyAsString()
+                    + "。请检查参数后重试。");
+        } catch (Exception e) {
+            log.error("[KnowledgeController] 知识库检索失败", e);
+            return Result.fail("[知识库检索] 服务调用失败，错误信息：" + e.getMessage() + "。若问题持续，请联系系统管理员。");
+        }
     }
 }
