@@ -242,6 +242,8 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
 
             # 当前所在节点（通过 LangGraph metadata 追踪）
             current_node = None
+            # 当前活跃的 step_id（随 agent_start/agent_end 更新，用于工具事件精确绑定）
+            active_step_id = None
 
             async for event in workflow.astream_events(initial_state, config, version="v2"):
                 event_type = event["event"]
@@ -263,10 +265,9 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
                     tool_name = event.get("name", "")
                     tool_summary = tool_reg._user_tool_summaries.get(x_auth_token, {}).get(tool_name, {})
                     tool_alias = tool_summary.get("tool_alias", tool_name)
-                    # 工具归属的节点（用于前端精确绑定到正确的 Agent 条目）
                     tool_node = ev_node or current_node
-                    print(f"[Stream] 工具调用开始: {tool_name} | node={tool_node}")
-                    yield f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name, 'tool_alias': tool_alias, 'node': tool_node, 'input': event.get('data', {}).get('input', {})}, ensure_ascii=False)}\n\n"
+                    print(f"[Stream] 工具调用开始: {tool_name} | node={tool_node} | step={active_step_id}")
+                    yield f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name, 'tool_alias': tool_alias, 'node': tool_node, 'step_id': active_step_id, 'input': event.get('data', {}).get('input', {})}, ensure_ascii=False)}\n\n"
 
                 # ── 工具调用结束 ──────────────────────────────────────
                 elif event_type == "on_tool_end":
@@ -276,8 +277,8 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
                     output_str = str(output) if output is not None else ""
                     tool_summary = tool_reg._user_tool_summaries.get(x_auth_token, {}).get(tool_name, {})
                     tool_alias = tool_summary.get("tool_alias", tool_name)
-                    print(f"[Stream] 工具调用结束: {tool_name} | node={tool_node}")
-                    yield f"data: {json.dumps({'type': 'tool_end', 'tool': tool_name, 'tool_alias': tool_alias, 'node': tool_node, 'output': output_str}, ensure_ascii=False)}\n\n"
+                    print(f"[Stream] 工具调用结束: {tool_name} | node={tool_node} | step={active_step_id}")
+                    yield f"data: {json.dumps({'type': 'tool_end', 'tool': tool_name, 'tool_alias': tool_alias, 'node': tool_node, 'step_id': active_step_id, 'output': output_str}, ensure_ascii=False)}\n\n"
 
                 # ── 自定义事件（agent_start / agent_end）─────────────
                 elif event_type == "on_custom_event":
@@ -287,12 +288,15 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
                         agent_alias = event["data"].get("alias", agent_name)
                         # step_id 用于前端在多步骤场景下唯一标识一个 Agent 工作条目
                         step_id = event["data"].get("step_id", "")
+                        active_step_id = step_id
                         print(f"[Stream] Agent 进场: {agent_name} ({agent_alias}) step={step_id}")
                         yield f"data: {json.dumps({'type': 'agent_start', 'agent': agent_name, 'agent_alias': agent_alias, 'step_id': step_id}, ensure_ascii=False)}\n\n"
                     elif ev_name == "agent_end":
                         agent_name = event["data"]["agent"]
                         step_id = event["data"].get("step_id", "")
                         success = event["data"].get("success", True)
+                        if active_step_id == step_id:
+                            active_step_id = None
                         print(f"[Stream] Agent 结束: {agent_name} step={step_id} success={success}")
                         yield f"data: {json.dumps({'type': 'agent_end', 'agent': agent_name, 'step_id': step_id, 'success': success}, ensure_ascii=False)}\n\n"
 

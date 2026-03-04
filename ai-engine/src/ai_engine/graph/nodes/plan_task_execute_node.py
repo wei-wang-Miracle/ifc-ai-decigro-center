@@ -40,48 +40,55 @@ async def _execute_with_tool_loop(
     final_output = ""
     
     
-    for _ in range(max_iterations):
+    for iteration in range(max_iterations):
+        print(f"[Executor] 工具循环第 {iteration + 1}/{max_iterations} 轮，LLM 请求中...")
         response = await llm_with_tools.ainvoke(messages, config=config)
         messages.append(response)
-        
+
         # 检查是否有工具调用
         if not (hasattr(response, "tool_calls") and response.tool_calls):
             final_output = response.content
+            print(f"[Executor] 第 {iteration + 1} 轮无工具调用，LLM 直接返回，内容长度: {len(final_output or '')}")
             break
-            
+
+        print(f"[Executor] 第 {iteration + 1} 轮 LLM 请求 {len(response.tool_calls)} 个工具: {[tc.get('name') for tc in response.tool_calls]}")
         # 处理工具调用
         for tool_call in response.tool_calls:
             tool_name = tool_call.get("name", "")
             tools_called.append(tool_name)
             tool_start_ts = time.time()  # 工具调用计时开始
-            
+            tool_args = tool_call.get("args", {})
+            print(f"[Executor] 调用工具 '{tool_name}'，参数: {tool_args}")
+
             # 1. 检查是否为受保护工具
             if tool_registry.is_protected(tool_name, token):
                 require_review = True
                 print(f"[Executor] 触发受保护工具 '{tool_name}'，需要人工审核")
-            
+
             # 2. 从注册中心获取工具
             tool = tool_registry.get_tool(tool_name, token)
             if tool:
                 try:
-                    tool_args = tool_call.get("args", {})
                     tool_result = await tool.ainvoke(tool_args, config=config)
-                    print(f"[Executor] 工具 '{tool_name}' 执行成功")
-                    
+                    latency_ms = int((time.time() - tool_start_ts) * 1000)
+                    result_str = str(tool_result) if tool_result is not None else "执行成功"
+                    print(f"[Executor] 工具 '{tool_name}' 执行成功，耗时 {latency_ms}ms，返回: {result_str[:200]}")
+
                     messages.append(ToolMessage(
                         tool_call_id=tool_call["id"],
-                        content=str(tool_result) if tool_result is not None else "执行成功"
+                        content=result_str
                     ))
                     # 审计：记录工具调用成功
                     tool_trace_snapshots.append(build_tool_snapshot(
                         tool_name=tool_name,
                         input_args=tool_args,
                         output_result=str(tool_result) if tool_result else None,
-                        latency_ms=int((time.time() - tool_start_ts) * 1000),
+                        latency_ms=latency_ms,
                         status="SUCCESS",
                     ))
                 except Exception as e:
-                    print(f"[Executor] 工具 '{tool_name}' 执行失败: {e}")
+                    latency_ms = int((time.time() - tool_start_ts) * 1000)
+                    print(f"[Executor] 工具 '{tool_name}' 执行失败，耗时 {latency_ms}ms，错误: {e}")
                     messages.append(ToolMessage(
                         tool_call_id=tool_call["id"],
                         content=f"错误: {str(e)}"
@@ -90,11 +97,12 @@ async def _execute_with_tool_loop(
                     tool_trace_snapshots.append(build_tool_snapshot(
                         tool_name=tool_name,
                         input_args=tool_call.get("args", {}),
-                        latency_ms=int((time.time() - tool_start_ts) * 1000),
+                        latency_ms=latency_ms,
                         status="FAILED",
                         error_message=str(e),
                     ))
             else:
+                print(f"[Executor] 工具 '{tool_name}' 未在注册中心找到")
                 messages.append(ToolMessage(
                     tool_call_id=tool_call["id"],
                     content=f"错误: 找不到工具 {tool_name}"

@@ -384,8 +384,9 @@ const handleSend = async () => {
                                     status: 'running',
                                     timestamp: Date.now()
                                 })
-                                // 同步到 Agent 面板（精确绑定到当前活跃 step）
-                                const toolEntry = getEntryByStepId(activeStepId.value)
+                                // 同步到 Agent 面板（优先用事件携带的 step_id，回退到 activeStepId）
+                                const toolStepId = event.step_id || activeStepId.value
+                                const toolEntry = getEntryByStepId(toolStepId)
                                 if (toolEntry) {
                                     toolEntry.tools.push({
                                         name: event.tool,
@@ -406,8 +407,9 @@ const handleSend = async () => {
                                 if (thought) {
                                     thought.status = 'success'
                                 }
-                                // 同步到 Agent 面板（精确绑定到当前活跃 step）
-                                const toolEntry = getEntryByStepId(activeStepId.value)
+                                // 同步到 Agent 面板（优先用事件携带的 step_id，回退到 activeStepId）
+                                const toolStepId = event.step_id || activeStepId.value
+                                const toolEntry = getEntryByStepId(toolStepId)
                                 if (toolEntry) {
                                     const tool = toolEntry.tools.slice().reverse().find(
                                         (t: AgentToolCall) => t.name === event.tool || t.alias === toolAlias

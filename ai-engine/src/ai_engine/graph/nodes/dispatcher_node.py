@@ -88,10 +88,13 @@ async def _select_planner_agent(intent: IntentObject, token: str, config: Runnab
     )
     
     try:
+        print(f"[Dispatcher] LLM 选择 Planner，候选: {agent_names}")
         response = await llm.ainvoke(prompt, config=config)
         agent_name = response.content.strip()
+        print(f"[Dispatcher] LLM 返回 Planner 选择: '{agent_name}'")
         if agent_name in descriptions:
             return agent_name
+        print(f"[Dispatcher] Planner '{agent_name}' 不在候选列表，回退到: {agent_names[0]}")
         return _get_fallback_agent(agent_names)
     except Exception as e:
         print(f"[Dispatcher] Planner 选择失败: {e}")
@@ -140,10 +143,13 @@ async def _select_executor_agent(step: PlanStep, planner_name: str, token: str, 
     )
 
     try:
+        print(f"[Dispatcher] LLM 选择 Executor，步骤: '{step.description[:50]}...' 候选: {agent_names}")
         response = await llm.ainvoke(prompt, config=config)
         agent_name = response.content.strip()
+        print(f"[Dispatcher] LLM 返回 Executor 选择: '{agent_name}'")
         if agent_name in descriptions:
             return agent_name
+        print(f"[Dispatcher] Executor '{agent_name}' 不在候选列表，回退到: {agent_names[0]}")
         return _get_fallback_agent(agent_names)
     except Exception as e:
         print(f"[Dispatcher] Executor 选择失败: {e}")

@@ -3,6 +3,11 @@ AI 引擎主应用入口
 FastAPI 应用配置和启动
 """
 
+import sys
+# 强制 stdout/stderr 无缓冲，确保 print 日志在重定向时实时写入文件
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI

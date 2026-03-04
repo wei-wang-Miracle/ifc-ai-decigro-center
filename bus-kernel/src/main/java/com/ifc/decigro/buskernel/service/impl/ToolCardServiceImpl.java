@@ -103,16 +103,17 @@ public class ToolCardServiceImpl implements ToolCardService {
 
     /**
      * 实现获取可用工具列表
-     * 规则: isOnline = true AND toolPrivileges = 'public'
-     * (注意: 根据用户要求，已删除用户/角色的个性化 toolList 逻辑，改为由 Agent 驱动，此处仅返回公开工具)
+     * 规则: isOnline = true
+     * 注意: 不再按 toolPrivileges 过滤 —— public/protected 均返回摘要。
+     * 权限控制由 Agent 的 boundTools 机制承担，未绑定的 protected 工具
+     * 即使出现在摘要里，也不会被 Agent 调用。
      */
     @Override
     public List<ToolCardSummaryVO> getAvailableTools(String username) {
         QueryWrapper queryWrapper = QueryWrapper.create()
                 .select(TOOL_CARD.TOOL_NAME, TOOL_CARD.TOOL_ALIAS, TOOL_CARD.TOOL_DESCRIPTION, TOOL_CARD.TOOL_TAGS)
                 .from(TOOL_CARD)
-                .where(TOOL_CARD.IS_ONLINE.eq(true))
-                .and(TOOL_CARD.TOOL_PRIVILEGES.eq("public"));
+                .where(TOOL_CARD.IS_ONLINE.eq(true));
 
         return toolCardMapper.selectListByQueryAs(queryWrapper, ToolCardSummaryVO.class);
     }
