@@ -2,7 +2,6 @@ package com.ifc.decigro.buskernel.service;
 
 import com.ifc.decigro.buskernel.common.api.Result;
 import com.ifc.decigro.buskernel.dto.KnowledgeSearchRequest;
-import com.ifc.decigro.buskernel.dto.KnowledgeSearchResult;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
@@ -16,6 +15,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +35,12 @@ public class KnowledgeProxyService {
 
     @Value("${ai.rag.base-url:http://localhost:8002/api/rag}")
     private String aiRagBaseUrl;
+
+    @Value("${knowledge.search.url:https://agent.cnht.com.cn/v1/knowledge/search}")
+    private String knowledgeSearchUrl;
+
+    @Value("${knowledge.search.api-key:}")
+    private String knowledgeSearchApiKey;
 
     private final RestTemplate restTemplate = new RestTemplate();
 
@@ -180,67 +186,48 @@ public class KnowledgeProxyService {
     /**
      * 执行知识库语义检索（供 ai-engine 调用，包装为 ToolCard 出参）
      *
-     * 功能: 将强类型 KnowledgeSearchRequest 转换为 ai-rag 接受的 snake_case Map，
-     * 调用 ai-rag /knowledge/search 接口，再将响应的原始 Map 解析为结构化的
-     * KnowledgeSearchResult 返回，方便 AI Agent 精准解析出参。
+     * 功能: 将 KnowledgeSearchRequest 转换为外部知识库检索 API 的参数格式，
+     * 调用 https://agent.cnht.com.cn/v1/knowledge/search，直接透传 data.list 原始结果。
      */
-    public Result<KnowledgeSearchResult> search(KnowledgeSearchRequest request) {
+    public Result<List<Map<String, Object>>> search(KnowledgeSearchRequest request) {
         try {
-            // 第一步：构建发往 ai-rag 的参数体（字段名与 Python SearchRequest 模型对齐）
+            // 第一步：构建请求体
             Map<String, Object> body = new HashMap<>();
+            body.put("knowledge_code", Collections.singleton("El2TPMaI"));
             body.put("query", request.getQuery());
-            body.put("top_k", request.getTopK() != null ? request.getTopK() : 5);
-            if (request.getDocType() != null && !request.getDocType().isBlank()) {
-                body.put("doc_type", request.getDocType());
-            }
+            body.put("k", String.valueOf(request.getK() != null ? request.getK() : 10));
+            body.put("search_mode", (request.getSearchMode() != null && !request.getSearchMode().isBlank())
+                    ? request.getSearchMode() : "VECTOR_SEARCH");
 
-            // 第二步：发送请求到 ai-rag 微服务
+            // 第二步：发送请求（携带 Bearer Token 鉴权）
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setBearerAuth(knowledgeSearchApiKey);
             HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(body, headers);
 
             ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
-                    aiRagBaseUrl + "/knowledge/search",
+                    knowledgeSearchUrl,
                     HttpMethod.POST, requestEntity, (Class<Map<String, Object>>) (Class<?>) Map.class);
 
-            // 第三步：将 ai-rag 原始响应解析为强类型 KnowledgeSearchResult
+            // 第三步：透传 data 字段原始内容
             Map<String, Object> responseBody = response.getBody();
             if (responseBody == null) {
-                return Result.fail("[知识库检索] ai-rag 返回空响应，请稍后重试。");
+                return Result.fail("[知识库检索] 返回空响应，请稍后重试。");
             }
 
-            // 解析 data 字段（ai-rag 返回 {code, message, data: [...]}）
-            Object dataObj = responseBody.get("data");
-            List<KnowledgeSearchResult.Item> items = new ArrayList<>();
-
-            if (dataObj instanceof List<?> rawList) {
-                // 遍历 ai-rag 返回的 SearchResult 列表，逐项映射为 KnowledgeSearchResult.Item
-                for (Object rawItem : rawList) {
-                    if (rawItem instanceof Map) {
-                        // 强转为 Map<String, Object>，ai-rag 使用 Jackson 序列化，key 均为 String 类型
-                        @SuppressWarnings("unchecked")
-                        Map<String, Object> itemMap = (Map<String, Object>) rawItem;
-                        KnowledgeSearchResult.Item item = new KnowledgeSearchResult.Item();
-                        item.setContent(String.valueOf(itemMap.getOrDefault("content", "")));
-                        item.setDocId(String.valueOf(itemMap.getOrDefault("doc_id", "")));
-                        item.setDocName(String.valueOf(itemMap.getOrDefault("doc_name", "")));
-                        item.setDocType(String.valueOf(itemMap.getOrDefault("doc_type", "")));
-                        Object scoreObj = itemMap.get("score");
-                        item.setScore(scoreObj instanceof Number ? ((Number) scoreObj).doubleValue() : 0.0);
-                        Object chunkCountObj = itemMap.get("chunk_count");
-                        item.setChunkCount(chunkCountObj instanceof Number ? ((Number) chunkCountObj).intValue() : 0);
-                        items.add(item);
-                    }
-                }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> data = (Map<String, Object>) responseBody.get("data");
+            if (data == null) {
+                return Result.fail("[知识库检索] 响应格式异常，data 字段为空。");
             }
 
-            KnowledgeSearchResult result = new KnowledgeSearchResult(items, items.size());
-            return Result.success(result);
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> list = (List<Map<String, Object>>) data.get("list");
+            return Result.success(list);
 
         } catch (HttpClientErrorException e) {
-            // 客户端错误（4xx）通常是参数问题，透传给 AI 以便自我修正
             log.warn("[KnowledgeProxy] 知识库检索请求参数错误: {}", e.getResponseBodyAsString());
-            return Result.fail(400, "[AI调用错误] ai-rag 拒绝了本次请求，原因：" + e.getResponseBodyAsString()
+            return Result.fail(400, "[AI调用错误] 知识库检索接口拒绝了本次请求，原因：" + e.getResponseBodyAsString()
                     + "。请检查参数后重试。");
         } catch (Exception e) {
             log.error("[KnowledgeProxy] 知识库检索失败", e);
@@ -251,6 +238,7 @@ public class KnowledgeProxyService {
     /**
      * 通用 GET 请求封装
      */
+    @SuppressWarnings("unchecked")
     private Result<Object> doGet(String path) {
         try {
             ResponseEntity<Map<String, Object>> response = restTemplate.exchange(aiRagBaseUrl + path, HttpMethod.GET,

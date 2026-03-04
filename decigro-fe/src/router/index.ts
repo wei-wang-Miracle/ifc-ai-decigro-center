@@ -87,12 +87,6 @@ const router = createRouter({
           component: () => import("../views/audit/index.vue"),
           meta: { title: "审计监控" },
         },
-        {
-          path: "/knowledge/list",
-          name: "KnowledgeManagement",
-          component: () => import("../views/knowledge/index.vue"),
-          meta: { title: "知识库管理" },
-        },
       ],
     },
   ],

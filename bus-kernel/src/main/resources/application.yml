@@ -78,6 +78,14 @@ ai:
     base-url: http://localhost:8002/api/rag
 
 # ========================================
+# 外部知识库检索 API 配置
+# ========================================
+knowledge:
+  search:
+    url: https://agent.cnht.com.cn/v1/knowledge/search
+    api-key: Link_2913g0cRQZnzOqEYSYPbmEvaxZ9iTLi2j38wR2opF6
+
+# ========================================
 # StarRocks 数据源配置
 # ========================================
 starrocks:
