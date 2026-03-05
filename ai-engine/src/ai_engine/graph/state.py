@@ -185,6 +185,11 @@ class AgentState(BaseModel):
     # 用户认证 Token (用于动态注册权限校验)
     token: Optional[str] = Field(default=None, description="用于 API 调用和权限控制的用户认证 Token")
 
+    # 上下文管理：由 ContextManager 在请求开始时注入，节点直接读取使用
+    context_turns_summary: str = Field(default="", description="近期对话摘要（由 ContextManager 压缩注入）")
+    context_entities_summary: str = Field(default="", description="当前会话追踪到的关键实体摘要")
+    context_task_memory_summary: str = Field(default="", description="历史相关任务执行结果摘要（跨轮次记忆）")
+
     # 审计追踪：各图节点的执行记录（由各节点自行追加）
     node_traces: list[dict] = Field(
         default_factory=list,
@@ -198,7 +203,10 @@ def create_initial_state(
     session_id: str,
     task_id: str = "",
     trace_id: str = "",
-    token: Optional[str] = None
+    token: Optional[str] = None,
+    context_turns_summary: str = "",
+    context_entities_summary: str = "",
+    context_task_memory_summary: str = "",
 ) -> AgentState:
     """
     功能: 创建初始状态
@@ -209,6 +217,9 @@ def create_initial_state(
         task_id - 任务标识（可选，首次请求时自动生成）
         trace_id - 链路追踪 ID（每次请求必须生成）
         token - 用户认证 Token（可选）
+        context_turns_summary - 近期对话摘要（由 ContextManager 注入）
+        context_entities_summary - 实体追踪摘要（由 ContextManager 注入）
+        context_task_memory_summary - 历史任务记忆摘要（由 ContextManager 注入）
     返回: 初始化的 AgentState
     """
     import uuid
@@ -231,5 +242,8 @@ def create_initial_state(
         current_executor=None,
         error=None,
         token=token,
+        context_turns_summary=context_turns_summary,
+        context_entities_summary=context_entities_summary,
+        context_task_memory_summary=context_task_memory_summary,
         node_traces=[],
     )

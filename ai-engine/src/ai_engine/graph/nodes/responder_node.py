@@ -3,9 +3,8 @@ from langgraph.types import Command
 from ..state import AgentState
 from ...audit import submit_trace, start_node_trace, finish_node_trace
 from ...config import get_settings
+from ...context import get_context_manager
 from langchain_openai import ChatOpenAI
-
-
 from langchain_core.runnables import RunnableConfig
 
 
@@ -16,6 +15,7 @@ async def responder_node(state: AgentState, config: RunnableConfig) -> Command:
     1. 提取所有步骤执行结果
     2. 调用 LLM 生成最终汇总响应 (流式)
     3. 触发审计数据采集
+    4. 记录本轮对话和任务结果到 ContextManager（跨轮次记忆）
     """
     # 审计埋点
     nt = start_node_trace("responder")
@@ -39,7 +39,6 @@ async def responder_node(state: AgentState, config: RunnableConfig) -> Command:
             summary = "处理请求时发生错误。"
     else:
         # 复杂任务场景：有 step_results，需要 LLM 汇总
-        # 创建 LLM 实例用于最终汇总
         llm = ChatOpenAI(
             model=settings.llm_model,
             api_key=settings.openai_api_key,
@@ -47,8 +46,7 @@ async def responder_node(state: AgentState, config: RunnableConfig) -> Command:
             temperature=settings.llm_temperature,
             streaming=True
         )
-        
-        # 准备上下文
+
         results_context = "\n".join([
             f"### 步骤 {r.step_id} 结果:\n{r.output if r.success else '失败: ' + r.error}"
             for r in step_results
@@ -70,7 +68,6 @@ async def responder_node(state: AgentState, config: RunnableConfig) -> Command:
 请基于以上信息生成最终回答。"""
 
         try:
-            # 调用 LLM 生成输出
             messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=human_prompt)
@@ -79,7 +76,6 @@ async def responder_node(state: AgentState, config: RunnableConfig) -> Command:
             summary = response.content
         except Exception as e:
             print(f"[Responder] 调用 LLM 失败: {e}")
-            # 降级方案
             last_result = step_results[-1]
             summary = last_result.output if last_result.success else f"执行失败: {last_result.error}"
 
@@ -88,6 +84,39 @@ async def responder_node(state: AgentState, config: RunnableConfig) -> Command:
 
     # 合并完整的 node_traces
     all_node_traces = state.node_traces + [nt]
+
+    # ── 记录本轮对话和任务结果到 ContextManager ──────────────────
+    if state.session_id:
+        ctx_mgr = get_context_manager()
+        intent_type = state.intent.intent_type.value if state.intent else "chat"
+        original_query = (state.intent.entities.get("original_query", "") or query) if state.intent else query
+        rewritten_query = query
+
+        # 只有 TASK 场景才构建任务记忆
+        task_memory = None
+        if step_results:
+            task_memory = ctx_mgr.build_task_memory(
+                task_id=state.task_id,
+                turn_id=state.task_id,
+                query=original_query,
+                step_results=step_results,
+                final_response=summary,
+            )
+
+        # 异步记录（不阻塞响应）
+        import asyncio
+        asyncio.create_task(ctx_mgr.record_turn(
+            session_id=state.session_id,
+            user_id=state.user_id,
+            turn_id=state.task_id,
+            query=original_query,
+            rewritten_query=rewritten_query,
+            response=summary,
+            intent_type=intent_type,
+            entities=state.intent.entities if state.intent else {},
+            task_memory=task_memory,
+        ))
+        print(f"[Responder] 已触发上下文记录: session={state.session_id}, intent={intent_type}")
 
     # 异步提交审计数据
     submit_trace(state, summary, all_node_traces)
@@ -99,4 +128,3 @@ async def responder_node(state: AgentState, config: RunnableConfig) -> Command:
         },
         goto="__end__"
     )
-

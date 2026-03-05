@@ -117,6 +117,7 @@ async def _execute_step_with_agent(
     config: RunnableConfig = None,
     review_feedback: str = None,
     step_results: list[StepResult] = None,
+    task_memory_summary: str = "",
 ) -> StepResult:
     """
     功能: 使用指定 Agent 执行步骤 (Async)
@@ -127,6 +128,7 @@ async def _execute_step_with_agent(
         config - 运行时配置
         review_feedback - 用户审核反馈
         step_results - 之前步骤的执行结果（共享黑板）
+        task_memory_summary - 历史相关任务记忆摘要（跨轮次上下文）
     返回: StepResult 执行结果
     """
     agent_registry = get_agent_registry()
@@ -181,6 +183,12 @@ async def _execute_step_with_agent(
         f"## 当前任务\n{step.description}",
         f"\n## 用户原始需求\n{query}",
     ]
+
+    # 历史任务记忆：如有相关历史结论可直接复用，避免重复调用工具
+    if task_memory_summary:
+        execution_prompt_parts.append(
+            f"\n## 历史相关任务结论（可直接参考，无需重复查询相同数据）\n{task_memory_summary}"
+        )
     
     # 共享黑板：加入之前步骤的执行结果，供当前步骤参考
     if step_results:
@@ -393,6 +401,7 @@ async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> C
     token = state.token
     review_feedback = state.review_feedback  # 获取用户反馈（如有）
     previous_step_results = list(state.step_results)  # 共享黑板：之前步骤的执行结果
+    task_memory_summary = state.context_task_memory_summary or ""  # 跨轮次历史记忆
     result, tool_trace_snapshots, used_system_prompt = await _execute_step_with_agent(
         step=current_step,
         agent_name=current_executor,
@@ -401,6 +410,7 @@ async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> C
         config=config,
         review_feedback=review_feedback,
         step_results=previous_step_results,
+        task_memory_summary=task_memory_summary,
     )
 
     # 发送 Agent 结束事件

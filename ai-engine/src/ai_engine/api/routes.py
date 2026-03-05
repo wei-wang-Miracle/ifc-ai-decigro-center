@@ -292,6 +292,15 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
     else:
         task_id = request.task_id or f"task_{uuid.uuid4().hex[:12]}"
         workflow = create_workflow_graph()
+
+        # 从 ContextManager 获取跨轮次上下文摘要，注入初始状态
+        from ..context import get_context_manager
+        ctx_mgr = get_context_manager()
+        ctx_window = ctx_mgr.build_context_window(
+            session_id=request.session_id,
+            current_query=request.query,
+        )
+
         _initial_state = create_initial_state(
             query=request.query,
             user_id=request.user_id,
@@ -299,6 +308,9 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
             task_id=task_id,
             trace_id=trace_id,
             token=x_auth_token,
+            context_turns_summary=ctx_window.recent_turns_summary,
+            context_entities_summary=ctx_window.tracked_entities_summary,
+            context_task_memory_summary=ctx_window.relevant_task_memory_summary,
         )
         config = {"configurable": {"thread_id": f"{request.session_id}_{task_id}"}}
 

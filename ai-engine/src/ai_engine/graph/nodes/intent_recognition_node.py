@@ -5,9 +5,7 @@
 2. 二元意图判断：TASK（需要 PLANNER）或 CHAT（其他所有）
 """
 
-from typing import Any
-
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.types import Command
 from pydantic import BaseModel, Field
@@ -17,6 +15,7 @@ from langchain_core.runnables import RunnableConfig
 from ...config import get_settings
 from ...registry import get_agent_registry
 from ...audit import start_node_trace, finish_node_trace, build_agent_snapshot
+from ...context import get_context_manager
 
 
 class IntentResult(BaseModel):
@@ -49,14 +48,14 @@ INTENT_RECOGNITION_PROMPT = """你是一个意图识别与查询重写专家。
 ## 可用 PLANNER Agent（只有这些能处理 TASK）
 {planner_descriptions}
 
-## 对话历史
-{history}
+## 会话上下文（近期对话记录与关键实体）
+{context_summary}
 
 ## 当前用户输入
 {query}
 
 ## 输出要求
-返回 JSON 格式的意图识别结果。
+返回 JSON 格式的意图识别结果。查询重写时请结合会话上下文补全指代词和省略信息。
 """
 
 
@@ -72,36 +71,44 @@ def _get_llm() -> ChatOpenAI:
     )
 
 
-def _format_history(messages: list) -> str:
-    """格式化对话历史"""
-    if not messages:
-        return "无历史对话"
-    
-    history_lines = []
-    for msg in messages[-6:]:  # 只取最近 6 条
-        role = "用户" if isinstance(msg, HumanMessage) else "助手"
-        content = msg.content[:200] + "..." if len(msg.content) > 200 else msg.content
-        history_lines.append(f"[{role}]: {content}")
-    
-    return "\n".join(history_lines) if history_lines else "无历史对话"
+def _build_context_summary(state: AgentState) -> str:
+    """
+    构建注入 Prompt 的上下文摘要。
+    优先使用 ContextManager 注入的压缩摘要（跨轮次），
+    补充当前 session 内 messages 中的最近几条作为实时上下文。
+    """
+    parts = []
+
+    # 跨轮次历史摘要（由 ContextManager 在请求入口注入）
+    if state.context_turns_summary:
+        parts.append(f"### 近期对话记录\n{state.context_turns_summary}")
+
+    # 实体追踪
+    if state.context_entities_summary:
+        parts.append(f"### 关键实体\n{state.context_entities_summary}")
+
+    # 历史任务结论（跨轮次）
+    if state.context_task_memory_summary:
+        parts.append(f"### 历史相关任务结论\n{state.context_task_memory_summary}")
+
+    return "\n\n".join(parts) if parts else "无历史对话上下文"
 
 
 async def intent_recognition_node(state: AgentState, config: RunnableConfig) -> Command:
     """
     功能: 意图识别节点（简化版）
     职责:
-    1. 查询重写（基于上下文）
+    1. 查询重写（基于 ContextManager 注入的跨轮次上下文）
     2. 二元意图判断：TASK / CHAT / END
     3. 统一路由到 dispatcher
     """
     query = state.query
     token = state.token
-    messages = state.messages
 
     nt = start_node_trace("intent_recognition")
 
     agent_registry = get_agent_registry()
-    
+
     # 只获取 PLANNER Agent 描述（这是判断 TASK 的关键依据）
     planner_agents = agent_registry.get_agent_descriptions(token, agent_type="PLANNER")
     planner_descriptions = "\n".join([
@@ -109,24 +116,24 @@ async def intent_recognition_node(state: AgentState, config: RunnableConfig) -> 
         for name, desc in planner_agents.items()
     ]) if planner_agents else "暂无可用 PLANNER Agent"
 
-    # 格式化历史
-    history = _format_history(messages)
+    # 构建上下文摘要（跨轮次 + 实体追踪）
+    context_summary = _build_context_summary(state)
 
     prompt = INTENT_RECOGNITION_PROMPT.format(
         planner_descriptions=planner_descriptions,
-        history=history,
+        context_summary=context_summary,
         query=query,
     )
-    
+
     try:
         llm = _get_llm()
         structured_llm = llm.with_structured_output(IntentResult)
-        
+
         result: IntentResult = await structured_llm.ainvoke(
-            [HumanMessage(content=prompt)], 
+            [HumanMessage(content=prompt)],
             config=config
         )
-        
+
         # 映射到 IntentType 枚举
         intent_type_map = {
             "task": IntentType.TASK,
@@ -134,33 +141,29 @@ async def intent_recognition_node(state: AgentState, config: RunnableConfig) -> 
             "end": IntentType.END,
         }
         mapped_type = intent_type_map.get(result.intent_type.lower(), IntentType.CHAT)
-        
+
         intent = IntentObject(
             intent_type=mapped_type,
             confidence=result.confidence,
             entities={
-                "rewritten_query": result.rewritten_query, 
+                "rewritten_query": result.rewritten_query,
                 "reasoning": result.reasoning,
                 "original_query": query,
             },
         )
-        
+
         # 使用重写后的查询（如果有变化）
         effective_query = result.rewritten_query if result.rewritten_query else query
-        
+
         print(f"[IntentNode] 原始查询: {query}")
         if effective_query != query:
             print(f"[IntentNode] 重写查询: {effective_query}")
         print(f"[IntentNode] 识别结果: type={mapped_type.value}, confidence={result.confidence}")
         print(f"[IntentNode] 判断理由: {result.reasoning}")
-        
-        # 路由决策：简化为两路
-        # END 直接结束，其他都走 dispatcher 统一调度
-        if mapped_type == IntentType.END:
-            goto = "__end__"
-        else:
-            goto = "dispatcher"
-            
+
+        # 路由决策：END 直接结束，其他走 dispatcher 统一调度
+        goto = "__end__" if mapped_type == IntentType.END else "dispatcher"
+
         # 审计埋点
         intent_result = f"type={mapped_type.value}, rewritten={effective_query != query}"
         agent_snap = build_agent_snapshot(
@@ -173,13 +176,13 @@ async def intent_recognition_node(state: AgentState, config: RunnableConfig) -> 
         return Command(
             update={
                 "intent": intent,
-                "query": effective_query,  # 更新为重写后的查询
+                "query": effective_query,       # 更新为重写后的查询
                 "messages": [HumanMessage(content=query)],  # 保留原始用户输入
                 "node_traces": state.node_traces + [nt],
             },
             goto=goto
         )
-    
+
     except Exception as e:
         print(f"[IntentNode] 意图识别异常: {e}")
         finish_node_trace(nt, "FAILED")
