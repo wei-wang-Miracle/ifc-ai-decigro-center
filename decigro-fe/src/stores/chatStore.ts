@@ -211,12 +211,17 @@ export const useChatStore = defineStore("chat", () => {
     agentLog?: any[];
   }) {
     try {
+      // 显式构造发送对象，避免 ...message 把原始数组类型的 agentLog 带入请求体
       await request.post("/ai/chat/messages", {
-        ...message,
+        sessionId: message.sessionId,
+        taskId: message.taskId,
+        traceId: message.traceId,
+        role: message.role,
+        content: message.content,
         thoughtLog: message.thoughts
           ? JSON.stringify(message.thoughts)
           : undefined,
-        agent_log: message.agentLog
+        agentLog: message.agentLog
           ? JSON.stringify(message.agentLog)
           : undefined,
       });

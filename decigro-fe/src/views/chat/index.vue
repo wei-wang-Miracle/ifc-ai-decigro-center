@@ -5,6 +5,16 @@ import { useUserStore } from '../../stores/user'
 import { useChatStore, type ChatMessage } from '../../stores/chatStore'
 import { useAppStore } from '../../stores/app'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
+
+// 配置 marked：使用 GFM 语法，换行保留
+marked.setOptions({ breaks: true, gfm: true })
+
+const renderMarkdown = (text: string): string => {
+    if (!text) return ''
+    return DOMPurify.sanitize(marked.parse(text) as string)
+}
 
 const userStore = useUserStore()
 const chatStore = useChatStore()
@@ -756,7 +766,12 @@ const getThoughtTree = (thoughts?: any[]) => {
                                     </div>
                                 </div>
 
-                                <div class="whitespace-pre-wrap leading-relaxed min-h-[1.5em]">{{ msg.content || (msg.status === 'running' ? '...' : '') }}</div>
+                                <div
+                                    v-if="msg.content"
+                                    class="markdown-body leading-relaxed min-h-[1.5em]"
+                                    v-html="renderMarkdown(msg.content)"
+                                ></div>
+                                <div v-else class="leading-relaxed min-h-[1.5em] text-slate-400">{{ msg.status === 'running' ? '...' : '' }}</div>
                                 
                                 <!-- 需要人工确认提示（对话式，无按钮） -->
                                 <div v-if="msg.requireReview" class="mt-3 pt-3 border-t border-dashed border-amber-200">
@@ -1261,4 +1276,54 @@ const getThoughtTree = (thoughts?: any[]) => {
 
 .delay-150 { animation-delay: 0.15s; }
 .delay-300 { animation-delay: 0.3s; }
+
+/* ===== Markdown 渲染样式 ===== */
+.markdown-body { font-size: 14px; line-height: 1.7; color: inherit; }
+.markdown-body :deep(p) { margin: 0 0 0.6em; }
+.markdown-body :deep(p:last-child) { margin-bottom: 0; }
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3),
+.markdown-body :deep(h4) { font-weight: 700; margin: 0.8em 0 0.4em; line-height: 1.3; }
+.markdown-body :deep(h1) { font-size: 1.3em; }
+.markdown-body :deep(h2) { font-size: 1.15em; }
+.markdown-body :deep(h3) { font-size: 1.05em; }
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) { padding-left: 1.4em; margin: 0.4em 0 0.6em; }
+.markdown-body :deep(li) { margin: 0.2em 0; }
+.markdown-body :deep(code) {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12px;
+    background: rgba(100, 116, 139, 0.12);
+    padding: 1px 5px;
+    border-radius: 4px;
+}
+.markdown-body :deep(pre) {
+    background: #1e293b;
+    border-radius: 6px;
+    padding: 10px 14px;
+    overflow-x: auto;
+    margin: 0.6em 0;
+}
+.markdown-body :deep(pre code) {
+    background: transparent;
+    padding: 0;
+    font-size: 12px;
+    color: #e2e8f0;
+}
+.markdown-body :deep(blockquote) {
+    border-left: 3px solid #cbd5e1;
+    padding-left: 10px;
+    color: #94a3b8;
+    margin: 0.5em 0;
+}
+.markdown-body :deep(table) { border-collapse: collapse; width: 100%; margin: 0.6em 0; font-size: 13px; }
+.markdown-body :deep(th),
+.markdown-body :deep(td) { border: 1px solid #e2e8f0; padding: 5px 10px; text-align: left; }
+.markdown-body :deep(th) { background: #f8fafc; font-weight: 600; }
+.markdown-body :deep(hr) { border: none; border-top: 1px solid #e2e8f0; margin: 0.8em 0; }
+.markdown-body :deep(a) { color: #3b82f6; text-decoration: underline; }
+/* 用户气泡（深色背景）内的代码块 */
+.bg-brand-600 .markdown-body :deep(code) { background: rgba(255,255,255,0.15); }
+.bg-brand-600 .markdown-body :deep(a) { color: #bfdbfe; }
 </style>
