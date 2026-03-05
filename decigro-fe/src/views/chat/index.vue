@@ -501,6 +501,9 @@ const handleSend = async () => {
                                 aiMessage.status = event.status
                                 aiMessage.requireReview = event.require_review
 
+                                // 将 agentLog 同步回消息对象，使点击联动时能恢复面板数据
+                                aiMessage.agentLog = [...agentWorkEntries]
+
                                 // 异步持久化 AI 回复到数据库
                                 chatStore.saveMessageToServer({
                                     sessionId: chatStore.currentSessionId!,

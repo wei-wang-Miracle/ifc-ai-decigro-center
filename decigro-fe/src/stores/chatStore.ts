@@ -216,7 +216,7 @@ export const useChatStore = defineStore("chat", () => {
         thoughtLog: message.thoughts
           ? JSON.stringify(message.thoughts)
           : undefined,
-        agentLog: message.agentLog
+        agent_log: message.agentLog
           ? JSON.stringify(message.agentLog)
           : undefined,
       });
