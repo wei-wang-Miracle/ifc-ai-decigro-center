@@ -15,7 +15,7 @@ from langchain_core.runnables import RunnableConfig
 from ...config import get_settings
 from ...registry import get_agent_registry
 from ...audit import start_node_trace, finish_node_trace, build_agent_snapshot
-from ...context import get_context_manager
+from ...context import get_context_manager, get_long_term_memory_manager
 
 
 class IntentResult(BaseModel):
@@ -71,13 +71,16 @@ def _get_llm() -> ChatOpenAI:
     )
 
 
-def _build_context_summary(state: AgentState) -> str:
+def _build_context_summary(state: AgentState, long_term_ctx: str = "") -> str:
     """
     构建注入 Prompt 的上下文摘要。
-    优先使用 ContextManager 注入的压缩摘要（跨轮次），
-    补充当前 session 内 messages 中的最近几条作为实时上下文。
+    按优先级合并：长期记忆 > 跨轮次历史摘要 > 实体追踪 > 历史任务结论
     """
     parts = []
+
+    # 长期记忆（跨会话事实与经验）
+    if long_term_ctx:
+        parts.append(f"### 用户长期记忆（事实与经验）\n{long_term_ctx}")
 
     # 跨轮次历史摘要（由 ContextManager 在请求入口注入）
     if state.context_turns_summary:
@@ -98,14 +101,19 @@ async def intent_recognition_node(state: AgentState, config: RunnableConfig) -> 
     """
     功能: 意图识别节点（简化版）
     职责:
-    1. 查询重写（基于 ContextManager 注入的跨轮次上下文）
-    2. 二元意图判断：TASK / CHAT / END
-    3. 统一路由到 dispatcher
+    1. 检索长期记忆（用户事实与经验），注入上下文
+    2. 查询重写（基于 ContextManager 注入的跨轮次上下文）
+    3. 二元意图判断：TASK / CHAT / END
+    4. 统一路由到 dispatcher
     """
     query = state.query
     token = state.token
 
     nt = start_node_trace("intent_recognition")
+
+    # ── 检索长期记忆（在 LLM 调用前完成，注入上下文）────────────
+    ltm = get_long_term_memory_manager()
+    long_term_ctx = await ltm.retrieve_long_term_context(state.user_id, query)
 
     agent_registry = get_agent_registry()
 
@@ -116,8 +124,8 @@ async def intent_recognition_node(state: AgentState, config: RunnableConfig) -> 
         for name, desc in planner_agents.items()
     ]) if planner_agents else "暂无可用 PLANNER Agent"
 
-    # 构建上下文摘要（跨轮次 + 实体追踪）
-    context_summary = _build_context_summary(state)
+    # 构建上下文摘要（跨轮次 + 实体追踪 + 长期记忆）
+    context_summary = _build_context_summary(state, long_term_ctx)
 
     prompt = INTENT_RECOGNITION_PROMPT.format(
         planner_descriptions=planner_descriptions,
@@ -176,8 +184,9 @@ async def intent_recognition_node(state: AgentState, config: RunnableConfig) -> 
         return Command(
             update={
                 "intent": intent,
-                "query": effective_query,       # 更新为重写后的查询
-                "messages": [HumanMessage(content=query)],  # 保留原始用户输入
+                "query": effective_query,
+                "long_term_context": long_term_ctx,     # 写入 State 供后续节点使用
+                "messages": [HumanMessage(content=query)],
                 "node_traces": state.node_traces + [nt],
             },
             goto=goto

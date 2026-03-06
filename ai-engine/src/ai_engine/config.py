@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     # ========================================
     # 数据库配置
     # ========================================
-    database_url: str = "postgresql://postgres:password@localhost:5432/decigro"
+    database_url: str = "postgresql://postgres:123456@127.0.0.1:5432/decigro"
     
     # ========================================
     # LLM 配置

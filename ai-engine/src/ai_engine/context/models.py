@@ -2,9 +2,10 @@
 上下文管理模块 - 数据模型
 """
 
+import uuid
 from dataclasses import dataclass, field
-from typing import Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Any
 
 
 @dataclass
@@ -18,7 +19,7 @@ class ConversationTurn:
     rewritten_query: str                    # 重写后的查询
     response: str                           # 系统最终响应
     intent_type: str                        # 意图类型（task/chat/end）
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     # 任务相关（intent=task 时有值）
     task_summary: str = ""                  # 任务执行摘要（各步骤结果压缩）
@@ -42,7 +43,7 @@ class TaskMemory:
     entities: dict[str, Any]               # 从本次任务中提取的关键实体
     step_outputs: dict[str, str]           # step_id -> 压缩后的输出摘要
     final_output_summary: str              # 最终输出的压缩摘要（≤500 字）
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass
@@ -53,8 +54,8 @@ class SessionContext:
     """
     session_id: str
     user_id: str
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    updated_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     # 对话历史（滑动窗口，保留最近 N 轮）
     turns: list[ConversationTurn] = field(default_factory=list)
@@ -94,7 +95,7 @@ class ContextWindow:
             self.current_task_step_context,
         ])
 
-    def to_prompt_block(self, sections: list[str] = None) -> str:
+    def to_prompt_block(self, sections: list[str] = None) -> str:  # noqa: B006
         """
         将上下文窗口序列化为可注入 Prompt 的文本块。
         sections 指定要包含哪些部分，None 表示全部。
@@ -117,3 +118,57 @@ class ContextWindow:
         if not parts:
             return ""
         return "\n\n".join(parts)
+
+
+# ── 长期记忆数据模型 ──────────────────────────────────────────────
+
+@dataclass
+class SemanticProfile:
+    """
+    语义记忆 - 用户事实快照（Profile 模式）。
+    拆分为多个领域子文档，防止单文档过大导致 LLM 生成出错。
+    每个 user_id 只有一份，通过 JSON Patch 方式增量更新。
+    """
+    user_id: str
+    basic_info: dict[str, Any] = field(default_factory=dict)   # 基本信息（角色、偏好等）
+    work_prefs: dict[str, Any] = field(default_factory=dict)   # 工作偏好
+    domain_facts: dict[str, Any] = field(default_factory=dict) # 领域事实（基金偏好、客群等）
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def to_prompt_text(self) -> str:
+        """序列化为可注入 Prompt 的文本"""
+        parts = []
+        if self.basic_info:
+            parts.append(f"基本信息: {self.basic_info}")
+        if self.work_prefs:
+            parts.append(f"工作偏好: {self.work_prefs}")
+        if self.domain_facts:
+            parts.append(f"领域事实: {self.domain_facts}")
+        return "\n".join(parts) if parts else ""
+
+
+@dataclass
+class EpisodicExperience:
+    """
+    情景记忆 - 成功任务经验（Collection 模式）。
+    每次成功的复杂任务完成后追加一条，供后续作为 few-shot 样例语义检索。
+    """
+    experience_id: str = field(default_factory=lambda: uuid.uuid4().hex[:16])
+    user_id: str = ""
+    task_summary: str = ""            # 任务简要描述
+    intent_type: str = ""             # 意图类型
+    key_entities: dict[str, Any] = field(default_factory=dict)  # 涉及的关键实体
+    execution_trace: str = ""         # 压缩的执行轨迹（步骤 + 工具调用）
+    outcome: str = ""                 # 最终结论摘要
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def to_prompt_text(self) -> str:
+        """序列化为可注入 Prompt 的 few-shot 样例文本"""
+        lines = [f"[经验 {self.experience_id[:8]}] {self.task_summary}"]
+        if self.key_entities:
+            lines.append(f"  涉及实体: {self.key_entities}")
+        if self.execution_trace:
+            lines.append(f"  执行路径: {self.execution_trace}")
+        if self.outcome:
+            lines.append(f"  执行结论: {self.outcome}")
+        return "\n".join(lines)

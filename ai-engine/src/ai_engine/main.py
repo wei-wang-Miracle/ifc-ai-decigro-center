@@ -15,60 +15,62 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .api import router as workflow_router
-from .registry import get_tool_registry, get_agent_registry
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     功能: 应用生命周期管理
-    参数: app - FastAPI 应用实例
-    返回: 异步上下文管理器
-    
+
     启动时:
-    - 初始化配置
-    - 加载工具注册中心
-    - 加载 Agent 注册中心
-    
+    - 初始化 PostgreSQL 连接池
+    - 初始化 AsyncPostgresSaver（短期记忆 checkpointer）
+    - 初始化 AsyncPostgresStore（长期记忆 Store）+ 注入 LongTermMemoryManager
+    - 编译持久化 workflow，挂载到 app.state
+
     关闭时:
-    - 清理资源
+    - 关闭连接池，清理资源
     """
-    # 启动时初始化
     print("[AI Engine] 正在启动...")
-    
+
     settings = get_settings()
     print(f"[AI Engine] LLM Model: {settings.llm_model}")
-    
-    # 预加载逻辑已移除，因为现在采用基于 Token 的动态注册
-    print("[AI Engine] 启动完成! (等待首个用户请求触发动态注册)")
-    
+
+    # ── 初始化 PostgreSQL 连接池 ──────────────────────────────────
+    from psycopg_pool import AsyncConnectionPool
+    from .graph import create_workflow_graph_async
+
+    pool = AsyncConnectionPool(
+        conninfo=settings.database_url,
+        min_size=2,
+        max_size=10,
+        open=False,
+    )
+    await pool.open()
+    app.state.pg_pool = pool
+    print("[AI Engine] PostgreSQL 连接池已初始化")
+
+    # ── 编译持久化 workflow（同时初始化 checkpointer + Store）────
+    app.state.workflow = await create_workflow_graph_async(pool)
+    print("[AI Engine] 持久化 Workflow 已就绪（AsyncPostgresSaver + AsyncPostgresStore）")
+
     print("[AI Engine] 启动完成!")
-    
+
     yield  # 应用运行中
-    
-    # 关闭时清理
+
+    # ── 关闭时清理 ────────────────────────────────────────────────
     print("[AI Engine] 正在关闭...")
-    
-    # 关闭 BusKernel 客户端
+
+    await app.state.pg_pool.close()
+    print("[AI Engine] PostgreSQL 连接池已关闭")
+
     from .api.bus_kernel_client import get_bus_kernel_client
     try:
-        client = get_bus_kernel_client()
-        client.close()
+        get_bus_kernel_client().close()
         print("[AI Engine] BusKernel 客户端已关闭")
-    except:
+    except Exception:
         pass
 
-    # 关闭数据库连接池 (API 模式通常不需要直连数据库，此处设为可选)
-    try:
-        from .db.manager import HAS_POOL
-        if HAS_POOL:
-            from .db import get_db_manager
-            db = get_db_manager()
-            db.close()
-            print("[AI Engine] 数据库连接已关闭")
-    except Exception as e:
-        print(f"[AI Engine] 数据库关闭跳过: {e}")
-    
     print("[AI Engine] 已关闭")
 
 

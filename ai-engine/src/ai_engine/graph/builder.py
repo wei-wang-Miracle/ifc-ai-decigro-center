@@ -3,13 +3,10 @@ StateGraph 构建器
 构建完整的 LangGraph 工作流
 """
 
-from typing import Literal
-
-from langgraph.graph import StateGraph, END
-from langgraph.types import Command
+from langgraph.graph import StateGraph
 from langgraph.checkpoint.memory import MemorySaver
 
-from .state import AgentState, IntentType, ReviewStatus
+from .state import AgentState
 from .nodes import (
     intent_recognition_node,
     dispatcher_node,
@@ -22,25 +19,10 @@ from .nodes import (
 )
 
 
-
-def create_workflow_graph(checkpointer=None):
-    """
-    功能: 创建完整的工作流程图 (LangGraph 1.0 架构)
-    参数: checkpointer - 可选的检查点保存器
-    返回: 编译后的 StateGraph 实例
-    
-    流程图结构:
-    START -> intent_recognition (内部路由) -> {dispatcher, __end__}
-    dispatcher (内部路由) -> {planner, executor, review, __end__}
-    planner -> dispatcher
-    executor -> dispatcher
-    review -> dispatcher (或被 interrupt)
-    feedback -> dispatcher
-    """
-    # 创建 StateGraph
+def _build_workflow(checkpointer) -> object:
+    """内部：构建并编译 StateGraph，注入指定 checkpointer"""
     workflow = StateGraph(AgentState)
-    
-    # 1. 添加节点
+
     workflow.add_node("intent_recognition", intent_recognition_node)
     workflow.add_node("dispatcher", dispatcher_node)
     workflow.add_node("planner", planner_node)
@@ -49,36 +31,59 @@ def create_workflow_graph(checkpointer=None):
     workflow.add_node("feedback", feedback_handler_node)
     workflow.add_node("responder", responder_node)
     workflow.add_node("normal", normal_node)
-    
-    # 2. 设置入口点
+
     workflow.set_entry_point("intent_recognition")
-    
-    # 3. 添加固定边 (大部分路由已移动到节点内部的 Command 中)
-    # 虽然 Command handled 很多，但明确的 node 间跳转依然可以用 add_edge
-    # 注意：在 LangGraph 1.0 中，如果节点返回 Command(goto=...)，则不需要显式的边缘定义。
-    # 为了保持图的清晰性，我们保留节点声明。
-    
-    # 4. 编译工作流
-    if checkpointer is None:
-        checkpointer = MemorySaver()
-    
-    compiled = workflow.compile(
-        checkpointer=checkpointer,
-    )
-    
-    return compiled
+
+    return workflow.compile(checkpointer=checkpointer)
 
 
-# 全局工作流实例
+def create_workflow_graph(checkpointer=None):
+    """
+    同步入口（兼容测试与非持久化场景）。
+    checkpointer 为 None 时使用 MemorySaver（进程内存，重启即失）。
+    """
+    return _build_workflow(checkpointer or MemorySaver())
+
+
+async def create_workflow_graph_async(pool) -> object:
+    """
+    异步入口（生产场景）：使用 AsyncPostgresSaver 持久化短期记忆。
+    在 lifespan 中调用，pool 为已初始化的 AsyncConnectionPool。
+
+    同时初始化长期记忆 Store（AsyncPostgresStore），注入全局单例。
+    """
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    from langgraph.store.postgres.aio import AsyncPostgresStore
+    from ..context import get_long_term_memory_manager
+    from ..config import get_settings
+
+    settings = get_settings()
+
+    # setup() 内含 CREATE INDEX CONCURRENTLY，必须通过 from_conn_string
+    # （内部使用 autocommit=True 的单连接）执行迁移，不能在事务块中运行
+    async with AsyncPostgresSaver.from_conn_string(settings.database_url) as tmp:
+        await tmp.setup()
+
+    async with AsyncPostgresStore.from_conn_string(settings.database_url) as tmp_store:
+        await tmp_store.setup()
+
+    # 运行时 checkpointer / store 使用连接池（高并发复用）
+    checkpointer = AsyncPostgresSaver(pool)
+    store = AsyncPostgresStore(pool)
+
+    # 将 Store 注入长期记忆管理器单例
+    ltm = get_long_term_memory_manager()
+    ltm.set_store(store)
+
+    return _build_workflow(checkpointer)
+
+
+# 全局工作流实例（开发/测试场景使用）
 _workflow = None
 
 
 def get_workflow():
-    """
-    功能: 获取全局工作流实例
-    参数: 无
-    返回: 编译后的 StateGraph
-    """
+    """获取全局工作流实例（MemorySaver，仅用于开发/测试）"""
     global _workflow
     if _workflow is None:
         _workflow = create_workflow_graph()

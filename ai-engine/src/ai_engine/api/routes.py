@@ -6,7 +6,7 @@ FastAPI 路由定义
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Header
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Header, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 import json
@@ -165,44 +165,36 @@ async def _detect_review_intent(query: str) -> tuple[str, str]:
 # ========================================
 
 @router.post("/chat", response_model=ChatResponse)
-async def start_workflow(request: ChatRequest, x_auth_token: Optional[str] = Header(None, alias="X-Auth-Token")):
+async def start_workflow(
+    request: ChatRequest,
+    req: Request,
+    x_auth_token: Optional[str] = Header(None, alias="X-Auth-Token"),
+):
     """
-    功能: 发起新的工作流任务
-    参数: request - 包含用户查询、用户ID、会话ID、可选任务ID
-    返回: 任务ID、链路追踪ID和执行状态
-    
-    流程:
-    1. 生成 trace_id（每次请求必生成）
-    2. 检查是否复用已有 task_id 或生成新 task_id
-    3. 创建工作流实例并初始化状态
-    4. 运行工作流直到完成或需要审核
-    5. 返回结果
+    功能: 发起新的工作流任务（非流式）
     """
     try:
-        from ..graph import create_workflow_graph, create_initial_state
-        
-        # 每次请求生成新的 trace_id（链路追踪）
+        from ..graph import create_initial_state
+
         trace_id = f"trace_{uuid.uuid4().hex[:16]}"
-        
-        # 任务 ID 逻辑：如果前端传入且上一任务未完成则复用，否则生成新的
         task_id = request.task_id or f"task_{uuid.uuid4().hex[:12]}"
-        
-        # 创建工作流
-        workflow = create_workflow_graph()
-        
-        # 初始化状态
+
+        # 从 app.state 获取预初始化的持久化 workflow
+        workflow = getattr(req.app.state, "workflow", None)
+        if workflow is None:
+            from ..graph import create_workflow_graph
+            workflow = create_workflow_graph()
+
         initial_state = create_initial_state(
             query=request.query,
             user_id=request.user_id,
             session_id=request.session_id,
             task_id=task_id,
             trace_id=trace_id,
-            token=x_auth_token,  # 传递 Token
+            token=x_auth_token,
         )
-        
-        # 配置（LangGraph 内部仍使用 thread_id 概念，但对外隐藏）
-        internal_thread_id = f"{request.session_id}_{task_id}"
-        config = {"configurable": {"thread_id": internal_thread_id}}
+
+        config = {"configurable": {"thread_id": request.session_id}}
         
         # 运行工作流
         result = None
@@ -269,14 +261,24 @@ _JSON_NODES = {"intent_recognition", "planner", "dispatcher"}
 _THOUGHT_NODES = {"executor", "normal"}
 
 @router.post("/chat/stream")
-async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str] = Header(None, alias="X-Auth-Token")):
+async def start_workflow_stream(
+    request: ChatRequest,
+    req: Request,
+    x_auth_token: Optional[str] = Header(None, alias="X-Auth-Token"),
+):
     """
     功能: 发起新的工作流任务 (流式响应)
     若 task_id 对应一个待 review 的工作流，则作为 review 响应处理（对话式人机回环）。
     """
-    from ..graph import create_workflow_graph, create_initial_state
+    from ..graph import create_initial_state
 
     trace_id = f"trace_{uuid.uuid4().hex[:16]}"
+
+    # 从 app.state 获取预初始化的持久化 workflow（降级为临时 MemorySaver）
+    _app_workflow = getattr(req.app.state, "workflow", None)
+    if _app_workflow is None:
+        from ..graph import create_workflow_graph
+        _app_workflow = create_workflow_graph()
 
     # ── 判断是否为 review 响应 ────────────────────────────────────────
     is_review_response = bool(
@@ -291,13 +293,24 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
         _initial_state = None   # review 场景不需要
     else:
         task_id = request.task_id or f"task_{uuid.uuid4().hex[:12]}"
-        workflow = create_workflow_graph()
+        workflow = _app_workflow
 
         # 从 ContextManager 获取跨轮次上下文摘要，注入初始状态
         from ..context import get_context_manager
         ctx_mgr = get_context_manager()
+
+        # 从 checkpointer 恢复的 messages 构建短期记忆摘要
+        # （此处暂用轻量摘要；messages 会在节点执行时由 checkpointer 自动恢复）
+        session_config = {"configurable": {"thread_id": request.session_id}}
+        try:
+            snapshot = await workflow.aget_state(session_config)
+            existing_messages = snapshot.values.get("messages", []) if snapshot and snapshot.values else []
+        except Exception:
+            existing_messages = []
+
         ctx_window = ctx_mgr.build_context_window(
             session_id=request.session_id,
+            messages=existing_messages,
             current_query=request.query,
         )
 
@@ -310,9 +323,9 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
             token=x_auth_token,
             context_turns_summary=ctx_window.recent_turns_summary,
             context_entities_summary=ctx_window.tracked_entities_summary,
-            context_task_memory_summary=ctx_window.relevant_task_memory_summary,
         )
-        config = {"configurable": {"thread_id": f"{request.session_id}_{task_id}"}}
+        # thread_id 统一为 session_id，checkpointer 按 session 隔离
+        config = {"configurable": {"thread_id": request.session_id}}
 
     async def event_generator():
         print(f"[Stream] 开始事件生成: task_id={task_id}, review={is_review_response}, query={request.query[:20]}...")
@@ -482,7 +495,7 @@ async def start_workflow_stream(request: ChatRequest, x_auth_token: Optional[str
                                 print(f"[Stream] 提取 planner 思考内容失败: {ex}")
 
             # ── 流结束：读取最终快照 ───────────────────────────────────
-            snapshot = workflow.get_state(config)
+            snapshot = await workflow.aget_state(config)
             final_message = ""
             require_review = False
             status = "completed"

@@ -189,6 +189,7 @@ class AgentState(BaseModel):
     context_turns_summary: str = Field(default="", description="近期对话摘要（由 ContextManager 压缩注入）")
     context_entities_summary: str = Field(default="", description="当前会话追踪到的关键实体摘要")
     context_task_memory_summary: str = Field(default="", description="历史相关任务执行结果摘要（跨轮次记忆）")
+    long_term_context: str = Field(default="", description="从长期记忆检索到的用户事实与经验摘要（跨会话）")
 
     # 审计追踪：各图节点的执行记录（由各节点自行追加）
     node_traces: list[dict] = Field(
@@ -207,6 +208,7 @@ def create_initial_state(
     context_turns_summary: str = "",
     context_entities_summary: str = "",
     context_task_memory_summary: str = "",
+    long_term_context: str = "",
 ) -> AgentState:
     """
     功能: 创建初始状态
@@ -220,6 +222,7 @@ def create_initial_state(
         context_turns_summary - 近期对话摘要（由 ContextManager 注入）
         context_entities_summary - 实体追踪摘要（由 ContextManager 注入）
         context_task_memory_summary - 历史任务记忆摘要（由 ContextManager 注入）
+        long_term_context - 长期记忆检索结果（由 LongTermMemoryManager 注入）
     返回: 初始化的 AgentState
     """
     import uuid
@@ -245,5 +248,6 @@ def create_initial_state(
         context_turns_summary=context_turns_summary,
         context_entities_summary=context_entities_summary,
         context_task_memory_summary=context_task_memory_summary,
+        long_term_context=long_term_context,
         node_traces=[],
     )

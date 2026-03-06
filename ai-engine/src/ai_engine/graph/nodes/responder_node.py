@@ -3,7 +3,7 @@ from langgraph.types import Command
 from ..state import AgentState
 from ...audit import submit_trace, start_node_trace, finish_node_trace
 from ...config import get_settings
-from ...context import get_context_manager
+from ...context import get_context_manager, get_long_term_memory_manager
 from langchain_openai import ChatOpenAI
 from langchain_core.runnables import RunnableConfig
 
@@ -85,38 +85,28 @@ async def responder_node(state: AgentState, config: RunnableConfig) -> Command:
     # 合并完整的 node_traces
     all_node_traces = state.node_traces + [nt]
 
-    # ── 记录本轮对话和任务结果到 ContextManager ──────────────────
+    # ── 记录本轮实体追踪 + 触发长期记忆 Reflection ──────────────
     if state.session_id:
         ctx_mgr = get_context_manager()
         intent_type = state.intent.intent_type.value if state.intent else "chat"
         original_query = (state.intent.entities.get("original_query", "") or query) if state.intent else query
-        rewritten_query = query
+        entities = state.intent.entities if state.intent else {}
 
-        # 只有 TASK 场景才构建任务记忆
-        task_memory = None
+        # 更新 session 级实体追踪缓存（轻量，不写 DB）
+        ctx_mgr.update_entities(state.session_id, entities)
+
+        # TASK 场景：触发后台异步 Reflection，更新长期记忆（不阻塞）
         if step_results:
-            task_memory = ctx_mgr.build_task_memory(
+            ltm = get_long_term_memory_manager()
+            ltm.trigger_reflection_async(
+                user_id=state.user_id,
                 task_id=state.task_id,
-                turn_id=state.task_id,
                 query=original_query,
                 step_results=step_results,
                 final_response=summary,
             )
 
-        # 异步记录（不阻塞响应）
-        import asyncio
-        asyncio.create_task(ctx_mgr.record_turn(
-            session_id=state.session_id,
-            user_id=state.user_id,
-            turn_id=state.task_id,
-            query=original_query,
-            rewritten_query=rewritten_query,
-            response=summary,
-            intent_type=intent_type,
-            entities=state.intent.entities if state.intent else {},
-            task_memory=task_memory,
-        ))
-        print(f"[Responder] 已触发上下文记录: session={state.session_id}, intent={intent_type}")
+        print(f"[Responder] 已更新实体追踪: session={state.session_id}, intent={intent_type}")
 
     # 异步提交审计数据
     submit_trace(state, summary, all_node_traces)
