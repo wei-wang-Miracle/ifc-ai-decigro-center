@@ -143,9 +143,11 @@ class LongTermMemoryManager:
         """在情景记忆 Collection 中检索与 query 相关的经验"""
         try:
             namespace = ("users", user_id, _NS_EPISODIC)
-            # LangGraph Store 支持语义检索（若后端支持向量）；
-            # 若后端不支持，退回到全量加载取最近 Top-K
-            items = await self._store.asearch(namespace, query=query, limit=_TOP_K_EPISODIC)
+            # 优先尝试语义检索（需要 pgvector）；无向量时降级为全量加载取最近 Top-K
+            try:
+                items = await self._store.asearch(namespace, query=query, limit=_TOP_K_EPISODIC)
+            except Exception:
+                items = await self._store.alist(namespace, limit=_TOP_K_EPISODIC)
             if not items:
                 return ""
             lines = []
@@ -161,6 +163,7 @@ class LongTermMemoryManager:
                     outcome=exp_data.get("outcome", ""),
                 )
                 lines.append(exp.to_prompt_text())
+            logger.info("[LongTermMemory] 检索到情景记忆 %d 条: user=%s", len(lines), user_id)
             return "\n\n".join(lines)
         except Exception as e:
             logger.warning("[LongTermMemory] 检索情景记忆失败: %s", e)

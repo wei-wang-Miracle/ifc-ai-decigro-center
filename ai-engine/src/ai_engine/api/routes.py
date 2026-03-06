@@ -97,13 +97,16 @@ _active_workflows: dict[str, dict] = {}
 
 _APPROVE_KEYWORDS = [
     "通过", "批准", "确认", "同意", "好的", "可以", "继续", "执行吧",
-    "approve", "yes", "ok", "没问题", "行", "好",
+    "approve", "yes", "ok", "没问题",
 ]
 _REJECT_KEYWORDS = [
     "驳回", "拒绝", "不同意", "不可以", "不行", "停止", "取消",
     "reject", "no", "算了", "不要", "重新规划", "重来", "换个",
-    "撤", "撤销", "修改",
+    "撤", "撤销", "修改", "调整", "重点关注",
 ]
+
+# 否定前缀：approve 关键词前出现这些字，视为否定，交 LLM 处理
+_NEGATION_PREFIXES = ["不", "没", "别", "勿", "莫"]
 
 _REVIEW_INTENT_PROMPT = """判断以下用户回复是批准(approve)还是拒绝/修改(reject)某个AI待执行操作。
 
@@ -113,14 +116,31 @@ _REVIEW_INTENT_PROMPT = """判断以下用户回复是批准(approve)还是拒�
 
 
 def _classify_review_by_keywords(query: str) -> str | None:
-    """关键词优先检测审核意图，返回 'approve'/'reject'/None（模糊待LLM处理）"""
+    """关键词优先检测审核意图，返回 'approve'/'reject'/None（模糊待LLM处理）
+
+    策略：
+    1. reject 优先检查，避免否定句被 approve 关键词抢先命中
+    2. approve 关键词加否定前缀保护，命中后检查前 2 字符是否含否定词，有则回落 LLM
+    3. 单字、短词等容易误判的词不列入关键词，由 LLM 兜底处理
+    """
     q = query.strip().lower()
-    for kw in _APPROVE_KEYWORDS:
-        if kw.lower() in q:
-            return "approve"
+
+    # reject 优先：含明确否定/修改意图的词直接判定
     for kw in _REJECT_KEYWORDS:
         if kw.lower() in q:
             return "reject"
+
+    # approve：检查关键词是否被否定前缀修饰（如「不好」中的「好」应回落 LLM）
+    for kw in _APPROVE_KEYWORDS:
+        kw_lower = kw.lower()
+        idx = q.find(kw_lower)
+        if idx == -1:
+            continue
+        prefix_window = q[max(0, idx - 2):idx]
+        if any(neg in prefix_window for neg in _NEGATION_PREFIXES):
+            continue
+        return "approve"
+
     return None
 
 
