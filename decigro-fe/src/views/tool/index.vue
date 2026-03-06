@@ -798,7 +798,7 @@ onMounted(() => {
     height: 100%;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 10px;
 }
 
 /* --- 顶部操作栏 --- */
@@ -806,7 +806,7 @@ onMounted(() => {
     background: #fff;
     border: 1px solid #1a1a1a;
     border-radius: 2px;
-    padding: 16px 20px;
+    padding: 10px 16px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -886,11 +886,11 @@ onMounted(() => {
 .card-grid {
     flex: 1;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
     align-content: start;
-    gap: 16px;
+    gap: 12px;
     overflow-y: auto;
-    padding: 4px;
+    padding: 2px;
 }
 
 /* --- 工具卡片 --- */
@@ -898,7 +898,7 @@ onMounted(() => {
     background: #fff;
     border: 1px solid #1a1a1a;
     border-radius: 2px;
-    padding: 16px;
+    padding: 12px;
     position: relative;
     cursor: pointer;
     transition: all 0.15s ease;
@@ -907,7 +907,7 @@ onMounted(() => {
 
 .tool-card:hover {
     border-width: 2px;
-    padding: 15px;
+    padding: 11px;
     box-shadow: 3px 3px 0 rgba(0,0,0,0.12);
 }
 

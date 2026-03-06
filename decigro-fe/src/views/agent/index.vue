@@ -577,8 +577,8 @@ onMounted(() => fetchList())
 </template>
 
 <style scoped>
-.agent-registry { height: 100%; display: flex; flex-direction: column; gap: 16px; font-family: 'Inter', sans-serif; }
-.header-bar { background: #fff; border: 2px solid #000; padding: 16px; display: flex; justify-content: space-between; align-items: center; box-shadow: 4px 4px 0 #000; }
+.agent-registry { height: 100%; display: flex; flex-direction: column; gap: 10px; font-family: 'Inter', sans-serif; }
+.header-bar { background: #fff; border: 2px solid #000; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; box-shadow: 4px 4px 0 #000; }
 .header-left { display: flex; align-items: center; gap: 12px; }
 .header-icon { width: 40px; height: 40px; background: #000; display: flex; align-items: center; justify-content: center; border-radius: 4px; }
 .header-title { font-weight: 800; font-size: 18px; margin: 0; }
@@ -586,18 +586,18 @@ onMounted(() => fetchList())
 .badge-container { display: flex; flex-direction: column; align-items: center; perspective: 1000px; transform-origin: top center; cursor: pointer; transition: transform 0.2s; }
 
 /* 布局调整 */
-.main-content { flex: 1; display: flex; gap: 24px; padding: 20px; overflow-y: hidden; background: #f8faff; height: 0; min-height: 0;}
+.main-content { flex: 1; display: flex; gap: 16px; padding: 12px; overflow-y: hidden; background: #f8faff; height: 0; min-height: 0;}
 .planner-column { flex: 1; display: flex; flex-direction: column; background: #fff; border-radius: 12px; border: 2px solid #e2e8f0; overflow: hidden; }
 .executor-column { flex: 3; display: flex; flex-direction: column; background: #fff; border-radius: 12px; border: 2px solid #e2e8f0; overflow: hidden; }
 
-.column-title { margin: 0; padding: 16px; font-size: 16px; font-weight: 800; border-bottom: 2px solid #e2e8f0; background: #f1f5f9; display: flex; align-items: center;}
+.column-title { margin: 0; padding: 10px 14px; font-size: 13px; font-weight: 800; border-bottom: 2px solid #e2e8f0; background: #f1f5f9; display: flex; align-items: center;}
 .filter-hint { margin-left: auto; color: #f59e0b; font-size: 12px; background: #fef3c7; padding: 2px 8px; border-radius: 4px; border: 1px solid #fcd34d; font-weight: normal; }
 
-.badge-wall { flex: 1; overflow-y: auto; padding: 40px 20px; }
+.badge-wall { flex: 1; overflow-y: auto; padding: 28px 16px; }
 /* 强制列数 */
-.planner-wall { display: grid; grid-template-columns: repeat(1, 1fr); gap: 60px 12px; justify-items: center; }
+.planner-wall { display: grid; grid-template-columns: repeat(1, 1fr); gap: 48px 12px; justify-items: center; }
 /* >= 3列的弹性网格 */
-.executor-wall { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 60px 24px; justify-items: center; }
+.executor-wall { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 48px 20px; justify-items: center; }
 
 /* 选中 Planner 高亮提示 */
 .badge-container.is-active .badge-front { border-color: #f59e0b; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.3); }

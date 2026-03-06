@@ -923,7 +923,7 @@ const getThoughtTree = (thoughts?: any[]) => {
                                     </button>
                                 </div>
                                 <div :class="['ap-thought-text-flat', { 'is-collapsed': entry.status !== 'running' && !expandedThinking[entry.id] }]">
-                                    {{ entry.thinking }}
+                                    <div class="markdown-body" v-html="renderMarkdown(entry.thinking)"></div>
                                     <span v-if="entry.status === 'running'" class="ap-cursor-flat">_</span>
                                 </div>
                             </div>
@@ -1106,12 +1106,28 @@ const getThoughtTree = (thoughts?: any[]) => {
     margin-left: -1px;
 }
 .ap-thought-text-flat {
-    font-size: 13px;
+    font-size: 11px;
     color: #94a3b8; /* 字体颜色弱化 */
-    line-height: 1.6;
-    white-space: pre-wrap;
+    line-height: 1.45;
     transition: max-height 0.4s ease-out;
 }
+.ap-thought-text-flat :deep(.markdown-body) {
+    font-size: 11px;
+    line-height: 1.45;
+    color: #94a3b8;
+}
+.ap-thought-text-flat :deep(.markdown-body p) { margin: 0 0 0.3em; }
+.ap-thought-text-flat :deep(.markdown-body p:last-child) { margin-bottom: 0; }
+.ap-thought-text-flat :deep(.markdown-body h1),
+.ap-thought-text-flat :deep(.markdown-body h2),
+.ap-thought-text-flat :deep(.markdown-body h3),
+.ap-thought-text-flat :deep(.markdown-body h4) { font-size: 11px; font-weight: 700; margin: 0.4em 0 0.2em; }
+.ap-thought-text-flat :deep(.markdown-body ul),
+.ap-thought-text-flat :deep(.markdown-body ol) { padding-left: 1.2em; margin: 0.2em 0 0.3em; }
+.ap-thought-text-flat :deep(.markdown-body li) { margin: 0.1em 0; }
+.ap-thought-text-flat :deep(.markdown-body code) { font-size: 10px; padding: 0 3px; }
+.ap-thought-text-flat :deep(.markdown-body pre) { padding: 5px 8px; margin: 0.3em 0; }
+.ap-thought-text-flat :deep(.markdown-body pre code) { font-size: 10px; }
 .ap-thought-text-flat.is-collapsed {
     max-height: 4.8em !important; /* 约三行高度 */
     overflow: hidden !important;

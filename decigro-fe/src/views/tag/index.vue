@@ -409,22 +409,22 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex h-full gap-4 overflow-hidden">
+  <div class="flex h-full gap-3 overflow-hidden">
     <!-- 左侧分类树 (20%) -->
-    <div class="w-1/5 min-w-[240px] bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col">
+    <div class="w-1/5 min-w-[200px] bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col">
         <!-- 树顶部 -->
-        <div class="p-4 border-b border-gray-100 flex justify-between items-center">
+        <div class="p-3 border-b border-gray-100 flex justify-between items-center">
             <div class="flex items-center space-x-2">
                 <el-icon class="text-brand-500"><Collection /></el-icon>
-                <span class="font-bold text-gray-700">标签分类</span>
+                <span class="font-bold text-gray-700 text-sm">标签分类</span>
             </div>
             <el-button :icon="Plus" size="small" circle @click="handleAddCategory(0)" />
         </div>
-        
+
         <!-- 全部标签按钮 -->
-        <div class="px-3 pt-3">
-            <div 
-                class="px-3 py-2 rounded-lg cursor-pointer flex items-center space-x-2 transition-colors"
+        <div class="px-2 pt-2">
+            <div
+                class="px-3 py-1.5 rounded-lg cursor-pointer flex items-center space-x-2 transition-colors text-sm"
                 :class="selectedCategory === null ? 'bg-brand-50 text-brand-600' : 'hover:bg-gray-50 text-gray-600'"
                 @click="handleShowAll">
                 <el-icon><FolderOpened /></el-icon>
@@ -433,7 +433,7 @@ onMounted(() => {
         </div>
 
         <!-- 分类树 -->
-        <div class="flex-1 overflow-auto p-3" v-loading="categoryLoading">
+        <div class="flex-1 overflow-auto p-2" v-loading="categoryLoading">
             <el-tree
                 :data="categoryTree"
                 node-key="id"
@@ -456,19 +456,19 @@ onMounted(() => {
     </div>
 
     <!-- 右侧标签列表 (80%) -->
-    <div class="flex-1 min-w-0 flex flex-col space-y-4 overflow-hidden">
+    <div class="flex-1 min-w-0 flex flex-col space-y-3 overflow-hidden">
         <!-- 顶部操作栏 -->
-        <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-wrap gap-4 justify-between items-center bg-gradient-to-r from-white to-slate-50">
+        <div class="bg-white px-4 py-2.5 rounded-xl shadow-sm border border-gray-100 flex flex-wrap gap-3 justify-between items-center bg-gradient-to-r from-white to-slate-50">
             <!-- 左侧：标题与新增 -->
             <div class="flex items-center space-x-3">
-                <div class="w-9 h-9 bg-brand-50 rounded-lg flex items-center justify-center text-brand-600 flex-shrink-0">
-                    <el-icon :size="18"><PriceTag /></el-icon>
+                <div class="w-8 h-8 bg-brand-50 rounded-lg flex items-center justify-center text-brand-600 flex-shrink-0">
+                    <el-icon :size="16"><PriceTag /></el-icon>
                 </div>
                 <div class="min-w-0 mr-2">
-                    <h3 class="text-base font-bold text-gray-800 truncate">{{ selectedCategoryName }}</h3>
+                    <h3 class="text-sm font-bold text-gray-800 truncate">{{ selectedCategoryName }}</h3>
                     <p class="text-[10px] text-gray-400">共 {{ tagTotal }} 个</p>
                 </div>
-                <el-button type="primary" :icon="Plus" @click="handleAddTag" class="flex-shrink-0">
+                <el-button type="primary" :icon="Plus" size="small" @click="handleAddTag" class="flex-shrink-0">
                     新增
                 </el-button>
             </div>
@@ -489,7 +489,7 @@ onMounted(() => {
         </div>
 
         <!-- 表格区域 -->
-        <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex-1 flex flex-col overflow-hidden">
+        <div class="bg-white px-4 py-3 rounded-xl shadow-sm border border-gray-100 flex-1 flex flex-col overflow-hidden">
             <el-table v-loading="tagLoading" :data="tagTableData" style="width: 100%" height="100%" class="custom-table flex-1">
                 <el-table-column prop="tagField" label="字段名" width="150">
                     <template #default="scope">

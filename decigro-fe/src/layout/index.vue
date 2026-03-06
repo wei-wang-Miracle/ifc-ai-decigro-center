@@ -209,16 +209,16 @@ const breadcrumbs = computed(() => {
         </header>
 
         <!-- 内容渲染区 -->
-        <main 
+        <main
             :class="[
                 'flex-1 overflow-auto transition-all duration-300',
-                route.path === '/chat/index' ? 'p-0' : 'p-6'
+                route.path === '/chat/index' ? 'p-0' : 'p-4'
             ]"
         >
-             <div 
+             <div
                 :class="[
                     'h-full transition-all duration-300',
-                    route.path === '/chat/index' ? 'max-w-none' : 'max-w-7xl mx-auto'
+                    route.path === '/chat/index' ? 'max-w-none' : 'max-w-none'
                 ]"
              >
                 <RouterView />
