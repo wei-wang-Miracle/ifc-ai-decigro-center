@@ -102,7 +102,8 @@ class StepResult(BaseModel):
     """
     step_id: str = Field(description="对应步骤的 ID")
     success: bool = Field(default=True, description="步骤是否执行成功")
-    output: str = Field(default="", description="步骤执行的输出结果或回答")
+    output: str = Field(default="", description="步骤执行的完整输出（含推理过程），供后续步骤作为上下文参考")
+    conclusion: str = Field(default="", description="步骤执行的核心结论（简洁版），用于人工审核时向用户展示")
     error: str = Field(default="", description="执行失败时的错误信息")
     tools_called: list[str] = Field(default_factory=list, description="该步骤实际调用的工具名称列表")
     require_review: bool = Field(default=False, description="该步骤的结果是否触发了安全策略，需要人工审核")

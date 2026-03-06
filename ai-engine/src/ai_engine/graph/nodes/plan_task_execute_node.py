@@ -22,6 +22,40 @@ from ...audit import (
 from langchain_core.callbacks.manager import adispatch_custom_event
 
 
+async def _extract_conclusion(output: str, step_description: str, config: RunnableConfig = None) -> str:
+    """
+    功能: 从步骤完整输出中提取核心结论（去除推理过程），供人工审核时展示
+    策略: 使用 LLM 精简，失败时回退到截断输出
+    """
+    if not output:
+        return ""
+    # 输出较短时无需调用 LLM
+    if len(output) <= 300:
+        return output
+    try:
+        settings = get_settings()
+        llm = ChatOpenAI(
+            model=settings.llm_model,
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_api_base,
+            temperature=0.0,
+            max_tokens=600,
+        )
+        prompt = (
+            f"以下是 AI 完成「{step_description}」后的完整输出，其中包含分析推理过程和最终结论。\n\n"
+            f"请提取其中的**核心结论**，以简洁的 Markdown 格式输出（保留关键数据和结论性语句），"
+            f"去除推理分析过程。字数控制在 300 字以内。\n\n"
+            f"完整输出：\n{output}"
+        )
+        response = await llm.ainvoke([HumanMessage(content=prompt)], config=config)
+        conclusion = response.content.strip()
+        print(f"[Executor] 结论提取完成，原始长度={len(output)}，结论长度={len(conclusion)}")
+        return conclusion
+    except Exception as e:
+        print(f"[Executor] 结论提取失败，回退截断: {e}")
+        return output[:300] + "…"
+
+
 async def _execute_with_tool_loop(
     llm_with_tools: Any,
     messages: list[Any],
@@ -446,6 +480,12 @@ async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> C
     # 审核由步骤的 requires_review 字段决定（步骤级人机回环），而非工具保护状态
     if current_step.requires_review and result.success:
         current_step.status = StepStatus.NEEDS_REVIEW
+
+        # 提取结论摘要（仅含核心结论，去除推理过程，供用户审核时阅读）
+        conclusion = await _extract_conclusion(result.output, current_step.description, config)
+        result = result.model_copy(update={"conclusion": conclusion})
+        step_results[-1] = result
+
         print(f"[Executor] 步骤 {current_step.step_id} 标记为需要人工审核（步骤已执行完毕，等待确认）")
         return Command(
             update={

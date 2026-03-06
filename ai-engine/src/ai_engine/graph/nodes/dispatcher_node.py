@@ -262,13 +262,16 @@ async def dispatcher_node(state: AgentState, config: RunnableConfig) -> Command:
                     break
 
         step_desc = current_step.description if current_step else "当前操作"
-        result_output = (pending_result.output or "").strip() if pending_result else ""
+        # 优先使用 conclusion（结论摘要），回落到 output 截断
+        conclusion = (pending_result.conclusion or pending_result.output or "").strip() if pending_result else ""
+        if not conclusion and pending_result:
+            conclusion = (pending_result.output or "")[:300].strip()
 
-        # 审核内容仅展示步骤描述和执行结果，用户对结果负责，不感知工具细节
+        # 审核内容仅展示步骤描述和核心结论，用户对结论负责，不感知工具细节和推理过程
         review_parts = ["我已完成以下操作，需要您确认后才能继续：\n"]
         review_parts.append(f"**步骤描述：** {step_desc}")
-        if result_output:
-            review_parts.append(f"\n**执行结果：**\n{result_output}")
+        if conclusion:
+            review_parts.append(f"\n**执行结论：**\n{conclusion}")
         review_parts.append(
             "\n\n请回复您的决定：\n"
             "- 回复「通过」或「确认」\u2192 批准并继续执行\n"
