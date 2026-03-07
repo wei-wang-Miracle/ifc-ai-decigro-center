@@ -65,7 +65,7 @@ _REFLECTION_SYSTEM = """你是一个智能记忆提炼专家。请分析刚刚�
 
 _REFLECTION_HUMAN = """任务信息：
 - 用户查询：{query}
-- 意图类型：task
+- 意图类型：{intent_type}
 - 步骤执行结果：
 {step_results_text}
 - 最终响应摘要：{final_response}
@@ -178,6 +178,7 @@ class LongTermMemoryManager:
         query: str,
         step_results: list,
         final_response: str,
+        intent_type: str = "task",
     ) -> None:
         """
         触发后台异步 Reflection。非阻塞，在当前事件循环中 create_task。
@@ -186,7 +187,7 @@ class LongTermMemoryManager:
         if not self._store or not user_id:
             return
         asyncio.create_task(
-            self._run_reflection(user_id, task_id, query, step_results, final_response),
+            self._run_reflection(user_id, task_id, query, step_results, final_response, intent_type),
             name=f"reflection_{task_id}",
         )
         logger.info("[LongTermMemory] 已触发后台 Reflection: task=%s user=%s", task_id, user_id)
@@ -198,6 +199,7 @@ class LongTermMemoryManager:
         query: str,
         step_results: list,
         final_response: str,
+        intent_type: str = "task",
     ) -> None:
         """
         后台 Reflection 主逻辑：
@@ -230,6 +232,7 @@ class LongTermMemoryManager:
 
             human_content = _REFLECTION_HUMAN.format(
                 query=query,
+                intent_type=intent_type,
                 step_results_text=step_results_text,
                 final_response=final_response[:300],
                 current_profile=current_profile_text,

@@ -143,16 +143,16 @@ async def responder_node(state: AgentState, config: RunnableConfig) -> Command:
         # 更新 session 级实体追踪缓存（轻量，不写 DB）
         ctx_mgr.update_entities(state.session_id, entities)
 
-        # TASK 场景：触发后台异步 Reflection，更新长期记忆（不阻塞）
-        if step_results:
-            ltm = get_long_term_memory_manager()
-            ltm.trigger_reflection_async(
-                user_id=state.user_id,
-                task_id=state.task_id,
-                query=original_query,
-                step_results=step_results,
-                final_response=summary,
-            )
+        # 触发后台异步 Reflection，更新长期记忆（不阻塞）
+        ltm = get_long_term_memory_manager()
+        ltm.trigger_reflection_async(
+            user_id=state.user_id,
+            task_id=state.task_id,
+            query=original_query,
+            step_results=step_results,
+            final_response=summary,
+            intent_type=intent_type,
+        )
 
         print(f"[Responder] 已更新实体追踪: session={state.session_id}, intent={intent_type}")
 

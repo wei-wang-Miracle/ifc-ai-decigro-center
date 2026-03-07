@@ -21,19 +21,17 @@ class FeedbackClassification(BaseModel):
 import re
 
 _REPLAN_KEYWORDS = ["重新规划", "换个方案", "重做", "from scratch", "start over"]
-
-# 匹配 6 位纯数字基金代码（如 513120、510300 等）
-_FUND_CODE_PATTERN = re.compile(r'\b\d{6}\b')
-
 _FEEDBACK_CLASSIFY_PROMPT = """判断用户对 AI 输出的反馈是否需要"全量重新规划"。
 
+当前正在执行的任务：{current_query}
+
 需要全量重新规划的情况（满足任意一项即是）：
-1. **主体变更**：用户更换了任务的核心主体（如：更换基金代码、更换产品、更换目标对象等）
+1. **主体变更**：用户反馈中涉及的核心主体（基金代码、产品、目标对象等）与当前任务不同
 2. **任务变更**：用户要求的业务目标发生了本质改变（如：从生成销售方案改为分析客群画像、从推荐客群改为风险评估等），导致原有步骤和工具调用不再适用
 3. **明确重做**：用户明确要求重新规划、重做或换个方案
 
 仅需调整当前步骤的情况（满足以下全部条件）：
-- 主体未变（相同的基金代码、产品、目标等）
+- 主体未变（与当前任务相同的基金代码、产品、目标等）
 - 业务目标未变（仍是同一类任务）
 - 用户只是对当前步骤的执行细节有修改意见（如：聚焦某个维度、调整筛选条件、补充某些指标等）
 
@@ -53,15 +51,10 @@ def _classify_feedback_by_pattern(feedback: str) -> bool | None:
     # 明确重做关键词
     if any(kw in feedback for kw in _REPLAN_KEYWORDS):
         return True
-
-    # 出现 6 位基金代码 → 主体变更，需全量重新规划
-    if _FUND_CODE_PATTERN.search(feedback):
-        return True
-
     return None
 
 
-async def _classify_feedback(feedback: str) -> bool:
+async def _classify_feedback(feedback: str, current_query: str = "") -> bool:
     """
     使用关键词/正则 + LLM 判断反馈是否需要全量重新规划
     返回: True=需要重新规划, False=仅调整当前步骤
@@ -88,7 +81,10 @@ async def _classify_feedback(feedback: str) -> bool:
             max_tokens=100,
         )
         structured_llm = llm.with_structured_output(FeedbackClassification)
-        prompt = _FEEDBACK_CLASSIFY_PROMPT.format(feedback=feedback)
+        prompt = _FEEDBACK_CLASSIFY_PROMPT.format(
+            current_query=current_query or "（未知）",
+            feedback=feedback,
+        )
         result: FeedbackClassification = await structured_llm.ainvoke([HumanMessage(content=prompt)])
         print(f"[FeedbackHandler] LLM 分类: needs_replan={result.needs_replan}, 理由={result.reasoning}")
         return result.needs_replan
@@ -125,7 +121,7 @@ async def feedback_handler_node(state: AgentState) -> Command:
 
     print(f"[FeedbackHandler] 处理反馈: {review_feedback}")
 
-    should_replan = await _classify_feedback(review_feedback)
+    should_replan = await _classify_feedback(review_feedback, current_query=state.query)
 
     if should_replan:
         # 全量重新规划：清空计划、已有步骤结果和索引，让 Dispatcher 路由到 Planner

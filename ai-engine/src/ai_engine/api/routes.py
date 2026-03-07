@@ -110,6 +110,12 @@ _NEGATION_PREFIXES = ["不", "没", "别", "勿", "莫"]
 
 _REVIEW_INTENT_PROMPT = """判断以下用户回复是批准(approve)还是拒绝/修改(reject)某个AI待执行操作。
 
+当前正在执行的任务：{current_task}
+
+判断规则：
+- approve：用户对当前任务表示认可、同意、确认，希望继续执行
+- reject：用户否定、修改、调整当前任务，或者提出了涉及不同主体/目标的新需求（即使语气友好，只要任务主体或目标发生了变化，也应归为 reject）
+
 用户回复：{query}
 
 只返回 "approve" 或 "reject"，无需其他任何内容。"""
@@ -144,7 +150,7 @@ def _classify_review_by_keywords(query: str) -> str | None:
     return None
 
 
-async def _classify_review_by_llm(query: str) -> str:
+async def _classify_review_by_llm(query: str, current_task: str) -> str:
     """LLM 兜底检测审核意图（仅在关键词匹配失败时调用，节省 token）"""
     try:
         from ..config import get_settings
@@ -157,7 +163,7 @@ async def _classify_review_by_llm(query: str) -> str:
             temperature=0.0,
             max_tokens=10,
         )
-        prompt = _REVIEW_INTENT_PROMPT.format(query=query)
+        prompt = _REVIEW_INTENT_PROMPT.format(current_task=current_task, query=query)
         response = await llm.ainvoke(prompt)
         result = response.content.strip().lower()
         return "approve" if "approve" in result else "reject"
@@ -166,7 +172,7 @@ async def _classify_review_by_llm(query: str) -> str:
         return "reject"
 
 
-async def _detect_review_intent(query: str) -> tuple[str, str]:
+async def _detect_review_intent(query: str, current_task: str = "") -> tuple[str, str]:
     """
     检测用户回复中的审核意图（关键词优先 + LLM 兜底）
     返回: (action, feedback)  action='approve'|'reject'
@@ -174,7 +180,7 @@ async def _detect_review_intent(query: str) -> tuple[str, str]:
     action = _classify_review_by_keywords(query)
     if action is None:
         print(f"[ReviewDetect] 关键词未命中，调用 LLM 检测...")
-        action = await _classify_review_by_llm(query)
+        action = await _classify_review_by_llm(query, current_task)
     feedback = query if action == "reject" else ""
     print(f"[ReviewDetect] 意图={action}, feedback={feedback[:40] if feedback else ''}")
     return action, feedback
@@ -363,7 +369,9 @@ async def start_workflow_stream(
             # ── 确定状态输入 ──────────────────────────────────────────
             if is_review_response:
                 # 检测用户意图（关键词优先 + LLM 兜底）
-                action, feedback = await _detect_review_intent(request.query)
+                # 从已保存的 state 中提取当前任务查询，作为"任务主体"上下文传入 LLM
+                current_task = wf_data.get("state", {}).get("query", "")
+                action, feedback = await _detect_review_intent(request.query, current_task)
                 # 移除 active_workflows 记录（后面若还需 review 会重新加入）
                 if task_id in _active_workflows:
                     del _active_workflows[task_id]
