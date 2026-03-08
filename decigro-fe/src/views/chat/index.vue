@@ -226,14 +226,6 @@ const handleSend = async () => {
     })
     chatStore.addMessage(userMessage)
 
-    // 异步持久化用户消息到数据库（通过 bus-kernel）
-    chatStore.saveMessageToServer({
-        sessionId: chatStore.currentSessionId!,
-        taskId: chatStore.currentTaskId || undefined,
-        role: 'user',
-        content: userQuery
-    })
-
     // 首条消息发送后，异步更新会话标题为消息内容（通过 bus-kernel PUT 接口）
     if (chatStore.messages.length === 1 && chatStore.currentSession?.sessionTitle === '新会话') {
         chatStore.updateSessionTitle(chatStore.currentSessionId!, userQuery)
@@ -514,7 +506,14 @@ const handleSend = async () => {
                                 // 将 agentLog 同步回消息对象，使点击联动时能恢复面板数据
                                 aiMessage.agentLog = [...agentWorkEntries]
 
-                                // 异步持久化 AI 回复到数据库
+                                // 异步持久化用户消息和 AI 回复到数据库（统一在流结束时存，避免重复）
+                                chatStore.saveMessageToServer({
+                                    sessionId: chatStore.currentSessionId!,
+                                    taskId: event.task_id,
+                                    traceId: aiMessage.traceId,
+                                    role: 'user',
+                                    content: userQuery
+                                })
                                 chatStore.saveMessageToServer({
                                     sessionId: chatStore.currentSessionId!,
                                     taskId: event.task_id,

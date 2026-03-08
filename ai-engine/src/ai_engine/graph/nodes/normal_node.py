@@ -19,6 +19,7 @@ from ...registry import get_tool_registry, get_agent_registry
 _NORMAL_SYSTEM_PROMPT_TEMPLATE = """你是一个专业、友好的 AI 助理。
 你擅长回答用户的日常问题、进行轻松的对话，并在需要时调用可用工具来获取准确信息。
 
+{user_memory_section}
 ## 系统能力
 除了日常对话外，本系统还支持以下核心功能：
 
@@ -43,20 +44,20 @@ _NORMAL_SYSTEM_PROMPT_TEMPLATE = """你是一个专业、友好的 AI 助理。
 """
 
 
-def _build_system_prompt(token: str) -> str:
+def _build_system_prompt(token: str, long_term_context: str = "") -> str:
     """
     动态构建系统提示词，包含实际可用的工具和智能体信息
     """
     tool_registry = get_tool_registry()
     agent_registry = get_agent_registry()
-    
+
     # 获取 public 工具摘要
     all_tool_summaries = tool_registry.get_all_tool_summaries(token)
     public_tool_summaries = [
-        s for s in all_tool_summaries 
+        s for s in all_tool_summaries
         if s.get("tool_privileges") == "public"
     ]
-    
+
     if public_tool_summaries:
         tool_lines = []
         for summary in public_tool_summaries:
@@ -66,10 +67,10 @@ def _build_system_prompt(token: str) -> str:
         public_tools_section = "\n".join(tool_lines)
     else:
         public_tools_section = "当前无可直接使用的工具。"
-    
+
     # 获取 PLANNER 类型的 Agent 摘要
     planner_descriptions = agent_registry.get_agent_descriptions(token, agent_type="PLANNER")
-    
+
     if planner_descriptions:
         agent_lines = []
         for name, desc in planner_descriptions.items():
@@ -77,8 +78,15 @@ def _build_system_prompt(token: str) -> str:
         planner_agents_section = "\n".join(agent_lines)
     else:
         planner_agents_section = "当前无可调用的复杂任务智能体。"
-    
+
+    # 长期记忆注入（跨会话用户事实与经验）
+    if long_term_context:
+        user_memory_section = f"## 用户记忆（跨会话）\n{long_term_context}\n\n"
+    else:
+        user_memory_section = ""
+
     return _NORMAL_SYSTEM_PROMPT_TEMPLATE.format(
+        user_memory_section=user_memory_section,
         public_tools_section=public_tools_section,
         planner_agents_section=planner_agents_section,
     )
@@ -107,8 +115,10 @@ async def normal_node(state: AgentState, config: RunnableConfig) -> Command:
     public_tools = tool_registry.get_public_tools(token) if token else []
     print(f"[Normal] 加载 public 工具数量: {len(public_tools)}")
 
-    # 动态构建系统提示词（包含 PLANNER agent 和工具信息）
-    system_prompt = _build_system_prompt(token) if token else _NORMAL_SYSTEM_PROMPT_TEMPLATE.format(
+    # 动态构建系统提示词（包含 PLANNER agent、工具信息和长期记忆）
+    long_term_ctx = state.long_term_context or ""
+    system_prompt = _build_system_prompt(token, long_term_ctx) if token else _NORMAL_SYSTEM_PROMPT_TEMPLATE.format(
+        user_memory_section="",
         public_tools_section="当前无可直接使用的工具。",
         planner_agents_section="当前无可调用的复杂任务智能体。",
     )

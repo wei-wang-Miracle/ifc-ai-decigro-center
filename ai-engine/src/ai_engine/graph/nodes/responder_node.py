@@ -6,54 +6,6 @@ from ...config import get_settings
 from ...context import get_context_manager, get_long_term_memory_manager
 from langchain_openai import ChatOpenAI
 from langchain_core.runnables import RunnableConfig
-import threading
-
-
-def _save_message_async(state: AgentState, ai_response: str) -> None:
-    """
-    后台线程将用户消息和 AI 回复持久化到 bus-kernel /ai/chat/messages。
-    不阻塞主流程，失败静默记录。
-    """
-    def _do_save():
-        try:
-            from ...api.bus_kernel_client import get_bus_kernel_client
-            client = get_bus_kernel_client()
-            headers = {"X-Auth-Token": state.token} if state.token else {}
-
-            # 保存用户消息：优先使用原始查询（IntentNode 可能将 state.query 替换为重写后的版本）
-            original_query = (
-                state.intent.entities.get("original_query") or state.query
-                if state.intent else state.query
-            )
-            client.client.post(
-                f"{client.base_url}/ai/chat/messages",
-                json={
-                    "sessionId": state.session_id,
-                    "taskId": state.task_id,
-                    "traceId": state.trace_id,
-                    "role": "user",
-                    "content": original_query,
-                },
-                headers=headers,
-            )
-
-            # 保存 AI 回复
-            client.client.post(
-                f"{client.base_url}/ai/chat/messages",
-                json={
-                    "sessionId": state.session_id,
-                    "taskId": state.task_id,
-                    "traceId": state.trace_id,
-                    "role": "assistant",
-                    "content": ai_response,
-                },
-                headers=headers,
-            )
-            print(f"[Responder] 消息已持久化: session={state.session_id}")
-        except Exception as e:
-            print(f"[Responder] 消息持久化失败: {e}")
-
-    threading.Thread(target=_do_save, daemon=True).start()
 
 
 async def responder_node(state: AgentState, config: RunnableConfig) -> Command:
@@ -155,9 +107,6 @@ async def responder_node(state: AgentState, config: RunnableConfig) -> Command:
         )
 
         print(f"[Responder] 已更新实体追踪: session={state.session_id}, intent={intent_type}")
-
-    # ── 持久化消息到 bus-kernel（后台线程，不阻塞）───────────────
-    _save_message_async(state, summary)
 
     # 异步提交审计数据
     submit_trace(state, summary, all_node_traces)

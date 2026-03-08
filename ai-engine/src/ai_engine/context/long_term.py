@@ -61,7 +61,8 @@ _REFLECTION_SYSTEM = """你是一个智能记忆提炼专家。请分析刚刚�
 - semantic_patch 中只填写有新增/变更的字段，没有变化的领域留空 {}
 - experience.execution_trace 请压缩为不超过 300 字的关键步骤描述
 - experience.outcome 请压缩为不超过 200 字
-- 如果任务失败或是普通闲聊，has_valuable_experience 设为 false"""
+- **新事实检测适用于所有意图类型**：无论是闲聊还是任务，只要用户透露了客观事实（身份、姓名、职位、偏好等），就应设 has_new_facts=true
+- 如果任务失败或是普通闲聊（无有价值的执行轨迹），has_valuable_experience 设为 false"""
 
 _REFLECTION_HUMAN = """任务信息：
 - 用户查询：{query}
