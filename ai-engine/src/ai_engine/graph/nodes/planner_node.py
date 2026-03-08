@@ -51,7 +51,7 @@ _PLANNER_TASK_PROMPT = """## 可用 Executor Agent 及其绑定工具
 2. 步骤之间的依赖关系要明确
 3. 每个步骤尽量只做一件事
 4. 考虑失败情况的处理
-5. **人机协同判断**：对于涉及敏感操作（如删除数据、修改配置、资金操作等）或需要用户确认的关键决策节点，请将 requires_review 设为 true
+5. **人机协同审核**：requires_review 表示该步骤执行完毕后，需要用户审核执行结论再决定是否继续，而不是执行前的授权确认。对于执行结论具有重要影响、用户需要知晓并确认的步骤（如：生成最终方案、产出关键分析报告、执行写操作或资金操作等），请将 requires_review 设为 true。纯粹的数据查询、信息收集等中间步骤通常不需要审核。
 6. **能力边界评估（重要）**：在生成步骤前，你必须严格判断每一个子任务是否都有对应的 Executor 及 Tool Card 可以执行。
    - 如果用户需求中存在任何子任务，在上述可用 Executor/工具列表中找不到能完成它的能力，必须将 feasible 设为 false，并在 infeasible_reason 中详细说明缺少哪些能力。
    - 禁止在 feasible=false 时生成任何执行步骤（steps 应为空列表）。
@@ -64,7 +64,7 @@ _PLANNER_TASK_PROMPT = """## 可用 Executor Agent 及其绑定工具
 - assigned_agent: 指定执行的 Executor Agent 名称（必须是上方列表中存在的 Agent）
 - expected_tools: 预计需要的工具列表（必须是该 Executor 绑定的工具）
 - dependencies: 依赖的步骤 ID 列表 (如 ["1"])
-- requires_review: 是否需要人工审核确认 (布尔值，默认 false，对于关键决策节点设为 true)
+- requires_review: 步骤执行完毕后是否需要用户审核结论再继续 (布尔值，默认 false，仅对产出关键结果或执行写操作的最终步骤设为 true)
 """
 
 
@@ -262,6 +262,7 @@ async def planner_node(state: AgentState, config: RunnableConfig) -> Command:
 
         print(f"[Planner] LLM 响应内容: {response}")
         print(f"[Planner] 成功生成计划: {len(plan)} 个步骤")
+
         for step in plan:
             print(f"  - [{step.step_id}] {step.description} (Agent: {step.assigned_agent}, Tools: {step.expected_tools}, Deps: {step.dependencies})")
 

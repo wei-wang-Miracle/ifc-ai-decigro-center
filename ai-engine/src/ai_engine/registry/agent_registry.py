@@ -65,7 +65,11 @@ class AgentConfig:
     @property
     def reasoning_framework(self) -> str | None:
         return self._detail.get("reasoning_framework") if self._detail else None
-    
+
+    @property
+    def require_review(self) -> bool:
+        return self._detail.get("require_review", False) if self._detail else False
+
     @property
     def raw_bound_tools(self) -> list[str] | None:
         if not self._detail:
@@ -209,6 +213,7 @@ class AgentRegistry:
                     "bound_agents": detail_data.get("boundAgents", []),
                     "agent_type": detail_data.get("agentType", "EXECUTOR"),
                     "reasoning_framework": detail_data.get("reasoningFramework"),
+                    "require_review": detail_data.get("requireReview", False),
                 }
                 agent.set_detail(detail)
             else:

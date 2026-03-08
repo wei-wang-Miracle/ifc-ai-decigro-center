@@ -477,8 +477,11 @@ async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> C
     step_results = list(state.step_results)
     step_results.append(result)
 
-    # 审核由步骤的 requires_review 字段决定（步骤级人机回环），而非工具保护状态
-    if current_step.requires_review and result.success:
+    # 审核触发条件（步骤执行完毕后判断）：
+    # 1. 步骤自身 requires_review=True（由 Planner LLM 判断的关键输出步骤）
+    # 2. 执行该步骤的 AgentCard 配置了 require_review=True（管理员在 Executor 级别配置的兜底审核）
+    agent_requires_review = bool(agent_config and agent_config.require_review)
+    if (current_step.requires_review or agent_requires_review) and result.success:
         current_step.status = StepStatus.NEEDS_REVIEW
 
         # 提取结论摘要（仅含核心结论，去除推理过程，供用户审核时阅读）
