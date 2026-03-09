@@ -80,11 +80,3 @@ async def create_workflow_graph_async(pool) -> object:
 
 # 全局工作流实例（开发/测试场景使用）
 _workflow = None
-
-
-def get_workflow():
-    """获取全局工作流实例（MemorySaver，仅用于开发/测试）"""
-    global _workflow
-    if _workflow is None:
-        _workflow = create_workflow_graph()
-    return _workflow

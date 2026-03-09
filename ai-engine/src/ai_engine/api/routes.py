@@ -36,55 +36,6 @@ class ChatRequest(BaseModel):
     task_id: Optional[str] = Field(default=None, description="任务标识（可选，若上一任务未完成则复用）")
 
 
-class ChatResponse(BaseModel):
-    """
-    功能: 发起任务响应模型
-    """
-    task_id: str = Field(..., description="任务标识")
-    trace_id: str = Field(..., description="链路追踪 ID")
-    status: str = Field(..., description="执行状态")
-    message: str = Field(..., description="响应消息")
-    require_review: bool = Field(default=False, description="是否需要人工审核")
-
-
-class ReviewRequest(BaseModel):
-    """
-    功能: 提交审核请求模型
-    """
-    action: str = Field(..., description="审核动作: approve 或 reject")
-    feedback: Optional[str] = Field(default="", description="审核反馈（驳回时必填）")
-
-
-class ReviewResponse(BaseModel):
-    """
-    功能: 审核响应模型
-    """
-    task_id: str
-    trace_id: str
-    status: str
-    message: str
-
-
-class PendingReview(BaseModel):
-    """
-    功能: 待审核任务信息
-    """
-    task_id: str
-    trace_id: str
-    query: str
-    current_step: str
-    tools_called: list[str]
-    context: str
-
-
-class PendingReviewsResponse(BaseModel):
-    """
-    功能: 待审核任务列表响应
-    """
-    count: int
-    reviews: list[PendingReview]
-
-
 # ========================================
 # 工作流实例存储（简单内存存储，生产环境应使用 Redis）
 # ========================================
@@ -101,8 +52,7 @@ _APPROVE_KEYWORDS = [
 ]
 _REJECT_KEYWORDS = [
     "驳回", "拒绝", "不同意", "不可以", "不行", "停止", "取消",
-    "reject", "no", "算了", "不要", "重新规划", "重来", "换个",
-    "撤", "撤销", "修改", "调整", "重点关注",
+    "reject", "no", "算了", "不要", "重新规划", "重来", "换个", "调整", "重点关注",
 ]
 
 # 否定前缀：approve 关键词前出现这些字，视为否定，交 LLM 处理
@@ -190,81 +140,6 @@ async def _detect_review_intent(query: str, current_task: str = "") -> tuple[str
 # API 端点
 # ========================================
 
-@router.post("/chat", response_model=ChatResponse)
-async def start_workflow(
-    request: ChatRequest,
-    req: Request,
-    x_auth_token: Optional[str] = Header(None, alias="X-Auth-Token"),
-):
-    """
-    功能: 发起新的工作流任务（非流式）
-    """
-    try:
-        from ..graph import create_initial_state
-
-        trace_id = f"trace_{uuid.uuid4().hex[:16]}"
-        task_id = request.task_id or f"task_{uuid.uuid4().hex[:12]}"
-
-        # 从 app.state 获取预初始化的持久化 workflow
-        workflow = getattr(req.app.state, "workflow", None)
-        if workflow is None:
-            from ..graph import create_workflow_graph
-            workflow = create_workflow_graph()
-
-        initial_state = create_initial_state(
-            query=request.query,
-            user_id=request.user_id,
-            session_id=request.session_id,
-            task_id=task_id,
-            trace_id=trace_id,
-            token=x_auth_token,
-        )
-
-        config = {"configurable": {"thread_id": request.session_id}}
-        
-        # 运行工作流
-        result = None
-        require_review = False
-        final_message = ""
-        
-        async for event in workflow.astream(initial_state, config):
-            result = event
-            
-            # 检查是否有节点输出
-            for node_name, node_output in event.items():
-                if isinstance(node_output, dict):
-                    # 检查是否需要审核
-                    if node_output.get("require_review"):
-                        require_review = True
-                        final_message = "任务需要人工审核"
-                        break
-                    
-                    # 获取消息
-                    messages = node_output.get("messages", [])
-                    if messages:
-                        final_message = messages[-1].content if hasattr(messages[-1], 'content') else str(messages[-1])
-        
-        # 存储工作流状态（用于后续审核），key 使用 task_id
-        if require_review:
-            _active_workflows[task_id] = {
-                "workflow": workflow,
-                "config": config,
-                "state": result,
-                "trace_id": trace_id,
-            }
-        
-        return ChatResponse(
-            task_id=task_id,
-            trace_id=trace_id,
-            status="pending_review" if require_review else "completed",
-            message=final_message or "任务已完成",
-            require_review=require_review,
-        )
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"工作流执行失败: {str(e)}")
-
-
 # 节点名称友好映射（覆盖所有注册节点）
 NODE_NAME_MAP = {
     "intent_recognition": "意图识别",
@@ -300,7 +175,7 @@ async def start_workflow_stream(
 
     trace_id = f"trace_{uuid.uuid4().hex[:16]}"
 
-    # 从 app.state 获取预初始化的持久化 workflow（降级为临时 MemorySaver）
+    # 从 app.state 获取预初始化的持久化 workflow
     _app_workflow = getattr(req.app.state, "workflow", None)
     if _app_workflow is None:
         from ..graph import create_workflow_graph
@@ -564,123 +439,6 @@ async def start_workflow_stream(
             "Content-Type": "text/event-stream",
         }
     )
-
-
-@router.get("/pending_reviews", response_model=PendingReviewsResponse)
-async def get_pending_reviews():
-    """
-    功能: 获取所有待审核的任务列表
-    参数: 无
-    返回: 待审核任务列表
-    """
-    pending_reviews = []
-    
-    for task_id, workflow_data in _active_workflows.items():
-        state = workflow_data.get("state", {})
-        trace_id = workflow_data.get("trace_id", "")
-        
-        # 从状态中提取相关信息
-        query = ""
-        current_step = ""
-        tools_called = []
-        
-        # 遍历状态获取信息
-        for node_name, node_state in state.items():
-            if isinstance(node_state, dict):
-                if "query" in node_state:
-                    query = node_state["query"]
-                if "plan" in node_state and node_state["plan"]:
-                    plan = node_state["plan"]
-                    current_index = node_state.get("current_step_index", 0)
-                    if current_index < len(plan):
-                        current_step = plan[current_index].description
-                if "step_results" in node_state:
-                    for result in node_state["step_results"]:
-                        tools_called.extend(result.tools_called)
-        
-        pending_reviews.append(PendingReview(
-            task_id=task_id,
-            trace_id=trace_id,
-            query=query,
-            current_step=current_step,
-            tools_called=tools_called,
-            context="待审核",
-        ))
-    
-    return PendingReviewsResponse(
-        count=len(pending_reviews),
-        reviews=pending_reviews,
-    )
-
-
-@router.post("/review/{task_id}", response_model=ReviewResponse)
-async def submit_review(task_id: str, request: ReviewRequest):
-    """
-    功能: 提交人工审核结果
-    参数:
-        task_id - 任务ID
-        request - 审核动作和反馈
-    返回: 审核结果和后续状态
-    
-    动作:
-    - approve: 审核通过，继续执行
-    - reject: 审核驳回，需要提供反馈
-    """
-    # 检查任务是否存在
-    if task_id not in _active_workflows:
-        raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在或已完成")
-    
-    workflow_data = _active_workflows[task_id]
-    workflow = workflow_data["workflow"]
-    config = workflow_data["config"]
-    trace_id = workflow_data.get("trace_id", "")
-    
-    # 验证请求
-    if request.action.lower() not in ["approve", "reject"]:
-        raise HTTPException(status_code=400, detail="action 必须是 'approve' 或 'reject'")
-    
-    if request.action.lower() == "reject" and not request.feedback:
-        raise HTTPException(status_code=400, detail="驳回时必须提供 feedback")
-    
-    try:
-        from langgraph.types import Command as LGCommand
-
-        # 用 Command(resume=...) 恢复图执行，将审核结果传入 interrupt() 的返回值
-        resume_input = LGCommand(resume={"action": request.action, "feedback": request.feedback or ""})
-
-        # 恢复工作流执行
-        result = None
-        final_message = ""
-        require_review = False
-
-        async for event in workflow.astream(resume_input, config):
-            result = event
-            for node_name, node_output in event.items():
-                if isinstance(node_output, dict):
-                    if node_output.get("require_review"):
-                        require_review = True
-                    messages = node_output.get("messages", [])
-                    if messages:
-                        final_message = messages[-1].content if hasattr(messages[-1], 'content') else str(messages[-1])
-        
-        # 如果还需要审核，更新状态
-        if require_review:
-            _active_workflows[task_id]["state"] = result
-            status = "pending_review"
-        else:
-            # 任务完成，移除记录
-            del _active_workflows[task_id]
-            status = "completed"
-        
-        return ReviewResponse(
-            task_id=task_id,
-            trace_id=trace_id,
-            status=status,
-            message=final_message or f"审核{request.action}完成",
-        )
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"处理审核失败: {str(e)}")
 
 
 # ========================================
