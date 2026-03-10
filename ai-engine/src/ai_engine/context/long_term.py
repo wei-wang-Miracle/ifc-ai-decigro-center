@@ -207,7 +207,12 @@ class LongTermMemoryManager:
         1. 调用 LLM 分析任务轨迹，输出严格 JSON
         2. 有新事实 -> JSON Patch 更新 SemanticProfile 对应子文档
         3. 有优质经验 -> 生成 EpisodicExperience 追加到 Collection
+
+        对 429（API 过载/限流）错误使用指数退避重试，最多重试 3 次。
         """
+        _MAX_RETRIES = 3
+        _RETRY_BASE_DELAY = 2.0   # 初始等待秒数，实际等待: 2s / 4s / 8s
+
         try:
             from ..config import get_settings
             settings = get_settings()
@@ -244,8 +249,29 @@ class LongTermMemoryManager:
                 HumanMessage(content=human_content),
             ]
 
-            response = await llm.ainvoke(messages)
-            raw = response.content.strip()
+            # LLM 调用 + 指数退避重试（针对 429 过载/限流）
+            raw = ""
+            for attempt in range(1, _MAX_RETRIES + 1):
+                try:
+                    response = await llm.ainvoke(messages)
+                    raw = response.content.strip()
+                    break
+                except Exception as llm_err:
+                    err_str = str(llm_err)
+                    is_rate_limit = "429" in err_str or "overloaded" in err_str.lower() or "rate_limit" in err_str.lower()
+                    if is_rate_limit and attempt < _MAX_RETRIES:
+                        delay = _RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                        logger.warning(
+                            "[LongTermMemory] Reflection LLM 429，第 %d/%d 次重试，等待 %.0fs: task=%s",
+                            attempt, _MAX_RETRIES, delay, task_id
+                        )
+                        await asyncio.sleep(delay)
+                    else:
+                        raise
+
+            if not raw:
+                logger.warning("[LongTermMemory] Reflection LLM 返回空内容: task=%s", task_id)
+                return
 
             # 解析严格 JSON（剥离可能的代码块标记）
             if raw.startswith("```"):

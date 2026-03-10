@@ -104,9 +104,9 @@ def _build_context_summary(state: AgentState, long_term_ctx: str = "") -> str:
 
 async def intent_recognition_node(state: AgentState, config: RunnableConfig) -> Command:
     """
-    功能: 意图识别节点（简化版）
+    功能：意图识别节点（简化版）
     职责:
-    1. 检索长期记忆（用户事实与经验），注入上下文
+    1. 使用初始化阶段准备的长期记忆（优先）或自行检索（备用）
     2. 查询重写（基于 ContextManager 注入的跨轮次上下文）
     3. 二元意图判断：TASK / CHAT / END
     4. 统一路由到 dispatcher
@@ -116,10 +116,9 @@ async def intent_recognition_node(state: AgentState, config: RunnableConfig) -> 
 
     nt = start_node_trace("intent_recognition")
 
-    # ── 检索长期记忆（在 LLM 调用前完成，注入上下文）────────────
-    ltm = get_long_term_memory_manager()
-    long_term_ctx = await ltm.retrieve_long_term_context(state.user_id, query)
-
+    # ── 使用初始化阶段准备的长期记忆 ────────────
+    # 优先使用 state 中已有的 long_term_context（由 routes.py 初始化时检索）
+    long_term_ctx = state.long_term_context or ""
     agent_registry = get_agent_registry()
 
     # 只获取 PLANNER Agent 描述（这是判断 TASK 的关键依据）
