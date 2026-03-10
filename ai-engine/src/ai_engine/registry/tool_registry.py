@@ -91,6 +91,8 @@ class ToolRegistry:
                 "tool_description": detail.get("toolDescription"),
                 "tool_protocol": detail.get("toolProtocol"),
                 "url_path": detail.get("urlPath"),
+                "tool_method": detail.get("toolMethod", "POST"),
+                "tool_headers": detail.get("toolHeaders"),
                 "tool_parameters": detail.get("toolParameters"),
                 "reference_target": detail.get("referenceTarget"),
             }

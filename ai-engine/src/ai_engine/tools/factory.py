@@ -93,35 +93,43 @@ def create_pydantic_model_from_params(
 def create_http_executor(
     url_path: str,
     method: str = "POST",
-    token: str = None
+    token: str = None,
+    extra_headers: dict[str, str] | None = None
 ) -> Callable[..., str]:
     """
     功能: 创建 HTTP 工具执行器
     参数:
-        url_path - API 路径（相对路径或完整 URL）
+        url_path - API 路径（相对路径走 Bus Kernel，完整 URL 直接请求）
         method - HTTP 方法 (GET/POST/PUT/DELETE)
+        token - 用户身份 Token（自动注入 X-Auth-Token，仅对 Bus Kernel 请求有效）
+        extra_headers - 工具卡片中配置的自定义请求头
     返回: 可调用的执行器函数
     """
     settings = get_settings()
-    
+    is_bus_kernel = not (url_path.startswith("http://") or url_path.startswith("https://"))
+
     # 判断是相对路径还是完整 URL
-    if url_path.startswith("http://") or url_path.startswith("https://"):
-        full_url = url_path
-    else:
+    if is_bus_kernel:
         # 相对路径，拼接 Bus Kernel 基础 URL
         base_url = settings.bus_kernel_base_url.rstrip("/")
         full_url = f"{base_url}{url_path}"
-    
+    else:
+        full_url = url_path
+
     def executor(**kwargs) -> str:
         """
         功能: 执行 HTTP 请求并返回结果
-        参数: kwargs - 传递给工具的参数（将作为请求体发送）
+        参数: kwargs - 传递给工具的参数（GET 作为查询参数，POST/PUT 作为 JSON 请求体）
         返回: API 响应的 JSON 字符串
         """
         headers = {}
-        if token:
+        # 注入自定义请求头
+        if extra_headers:
+            headers.update(extra_headers)
+        # Bus Kernel 请求自动注入 Token
+        if token and is_bus_kernel:
             headers["X-Auth-Token"] = token
-            
+
         try:
             with httpx.Client(timeout=30.0) as client:
                 if method.upper() == "GET":
@@ -134,7 +142,7 @@ def create_http_executor(
                     response = client.delete(full_url, params=kwargs, headers=headers)
                 else:
                     return json.dumps({"error": f"不支持的 HTTP 方法: {method}"})
-                
+
                 response.raise_for_status()
                 return response.text
         except httpx.HTTPStatusError as e:
@@ -147,7 +155,7 @@ def create_http_executor(
             return json.dumps({
                 "error": f"请求异常: {str(e)}"
             })
-    
+
     return executor
 
 
@@ -188,7 +196,9 @@ def create_dynamic_tool(tool_card: dict[str, Any], token: str = None) -> Structu
     # 第二步：根据协议创建执行器
     if tool_protocol == "http":
         url_path = tool_card.get("url_path", "")
-        executor = create_http_executor(url_path, token=token)
+        method = tool_card.get("tool_method", "POST") or "POST"
+        extra_headers = tool_card.get("tool_headers") or {}
+        executor = create_http_executor(url_path, method=method, token=token, extra_headers=extra_headers)
     elif tool_protocol == "reference":
         # Reference 协议：本地引用，暂时返回模拟执行器
         reference_target = tool_card.get("reference_target", "")

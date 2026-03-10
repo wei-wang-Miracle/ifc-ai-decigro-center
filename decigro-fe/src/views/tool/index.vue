@@ -18,6 +18,11 @@ interface ToolParameter {
     param_example: string
 }
 
+interface ToolHeader {
+    key: string
+    value: string
+}
+
 interface ToolCard {
     toolName: string
     toolAlias: string
@@ -27,6 +32,8 @@ interface ToolCard {
     toolPrivileges: string
     toolProtocol: string
     urlPath: string
+    toolMethod: string
+    toolHeaders: Record<string, string> | null
     referenceTarget: string
     toolParameters: ToolParameter[]  // 入参定义
     outputSchema: ToolParameter[]    // 出参定义（结构与入参相同）
@@ -52,7 +59,7 @@ const dialogVisible = ref(false)
 const dialogTitle = ref('')
 const isEdit = ref(false)
 const formRef = ref<FormInstance>()
-const form = reactive<ToolCard>({
+const form = reactive<ToolCard & { _headers: ToolHeader[] }>({
     toolName: '',
     toolAlias: '',
     toolDescription: '',
@@ -61,6 +68,8 @@ const form = reactive<ToolCard>({
     toolPrivileges: 'public',
     toolProtocol: 'http',
     urlPath: '',
+    toolMethod: 'POST',
+    toolHeaders: null,
     referenceTarget: '',
     toolParameters: [],
     outputSchema: [],
@@ -69,7 +78,8 @@ const form = reactive<ToolCard>({
     isOnline: false,
     createTime: '',
     updateTime: '',
-    managerBy: ''
+    managerBy: '',
+    _headers: []  // 内部用于编辑的 header 行列表
 })
 
 const formRules = reactive<FormRules>({
@@ -102,6 +112,9 @@ const privilegesOptions = [
 
 // --- 参数类型选项 ---
 const paramTypeOptions = ['string', 'number', 'boolean', 'array', 'object']
+
+// --- HTTP Method 选项 ---
+const httpMethodOptions = ['GET', 'POST', 'PUT', 'DELETE']
 
 // ============================================
 // 第二部分：计算属性
@@ -208,6 +221,11 @@ const handleEdit = (card: ToolCard) => {
     if (!form.toolTags) form.toolTags = []
     if (!form.inputExamples) form.inputExamples = ''
     if (!form.outputExamples) form.outputExamples = ''
+    if (!form.toolMethod) form.toolMethod = 'POST'
+    // 将 toolHeaders 对象转为行数组用于编辑
+    form._headers = form.toolHeaders
+        ? Object.entries(form.toolHeaders).map(([key, value]) => ({ key, value }))
+        : []
     dialogVisible.value = true
 }
 
@@ -256,7 +274,12 @@ const submitForm = async (formEl: FormInstance | undefined) => {
     await formEl.validate(async (valid) => {
         if (valid) {
             try {
-                await request.post('/tool/save', form)
+                // 将行数组转回对象，空则设 null
+                const headersObj = form._headers.filter(h => h.key.trim())
+                    .reduce((acc, h) => ({ ...acc, [h.key.trim()]: h.value }), {} as Record<string, string>)
+                const payload = { ...form, toolHeaders: Object.keys(headersObj).length ? headersObj : null }
+                delete (payload as any)._headers
+                await request.post('/tool/save', payload)
                 ElMessage.success(`${dialogTitle.value}成功`)
                 dialogVisible.value = false
                 fetchList()
@@ -277,6 +300,8 @@ const resetForm = () => {
         toolPrivileges: 'public',
         toolProtocol: 'http',
         urlPath: '',
+        toolMethod: 'POST',
+        toolHeaders: null,
         referenceTarget: '',
         toolParameters: [],
         outputSchema: [],
@@ -285,7 +310,8 @@ const resetForm = () => {
         isOnline: false,
         createTime: '',
         updateTime: '',
-        managerBy: ''
+        managerBy: '',
+        _headers: []
     })
     formRef.value?.resetFields()
 }
@@ -333,6 +359,15 @@ const handleRemoveTag = (tag: string) => {
     if (index > -1) {
         form.toolTags.splice(index, 1)
     }
+}
+
+// --- Header 管理 ---
+const handleAddHeader = () => {
+    form._headers.push({ key: '', value: '' })
+}
+
+const handleRemoveHeader = (index: number) => {
+    form._headers.splice(index, 1)
 }
 
 // --- 分页 ---
@@ -416,7 +451,7 @@ onMounted(() => {
             
             <!-- 协议标签 -->
             <div class="protocol-badge">
-                {{ card.toolProtocol === 'http' ? 'HTTP' : 'REF' }}
+                {{ card.toolProtocol === 'http' ? (card.toolMethod || 'POST') : 'REF' }}
             </div>
             
             <!-- 卡片内容 -->
@@ -549,23 +584,62 @@ onMounted(() => {
                     <el-col :span="8">
                         <el-form-item label="协议类型" prop="toolProtocol">
                             <el-select v-model="form.toolProtocol" class="w-full">
-                                <el-option 
-                                    v-for="opt in protocolOptions" 
-                                    :key="opt.value" 
-                                    :label="opt.label" 
+                                <el-option
+                                    v-for="opt in protocolOptions"
+                                    :key="opt.value"
+                                    :label="opt.label"
                                     :value="opt.value" />
                             </el-select>
                         </el-form-item>
                     </el-col>
-                    <el-col :span="16">
-                        <el-form-item v-if="form.toolProtocol === 'http'" label="URL Path">
-                            <el-input v-model="form.urlPath" placeholder="/api/v1/xxx" class="mono-input" />
+                    <el-col v-if="form.toolProtocol === 'http'" :span="8">
+                        <el-form-item label="Method">
+                            <el-select v-model="form.toolMethod" class="w-full">
+                                <el-option v-for="m in httpMethodOptions" :key="m" :label="m" :value="m" />
+                            </el-select>
                         </el-form-item>
-                        <el-form-item v-else label="引用目标">
+                    </el-col>
+                </el-row>
+                <el-row v-if="form.toolProtocol === 'http'">
+                    <el-col :span="24">
+                        <el-form-item label="URL Path">
+                            <el-input v-model="form.urlPath" placeholder="/api/v1/xxx 或 https://..." class="mono-input" />
+                        </el-form-item>
+                    </el-col>
+                </el-row>
+                <el-row v-else>
+                    <el-col :span="24">
+                        <el-form-item label="引用目标">
                             <el-input v-model="form.referenceTarget" placeholder="目标服务/表名" class="mono-input" />
                         </el-form-item>
                     </el-col>
                 </el-row>
+                <!-- 自定义 Headers（仅 HTTP 协议显示） -->
+                <template v-if="form.toolProtocol === 'http'">
+                    <div class="section-title" style="margin-top: 4px;">
+                        ▸ 自定义请求头
+                        <span class="hint-text">（X-Auth-Token 由系统自动注入，无需配置）</span>
+                        <el-button size="small" :icon="Plus" @click="handleAddHeader">添加 Header</el-button>
+                    </div>
+                    <el-table v-if="form._headers.length" :data="form._headers" border size="small" class="param-table">
+                        <el-table-column label="Key" width="200">
+                            <template #default="scope">
+                                <el-input v-model="scope.row.key" size="small" placeholder="Header-Name" class="mono-input" />
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="Value">
+                            <template #default="scope">
+                                <el-input v-model="scope.row.value" size="small" placeholder="Header-Value" class="mono-input" />
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="" width="50">
+                            <template #default="scope">
+                                <el-button link type="danger" :icon="Delete" @click="handleRemoveHeader(scope.$index)" />
+                            </template>
+                        </el-table-column>
+                    </el-table>
+                    <div v-else class="empty-text" style="margin-top:0">无自定义请求头</div>
+                </template>
             </div>
             
             <!-- 参数配置 -->
@@ -725,9 +799,30 @@ onMounted(() => {
                         <div class="label">权限级别</div>
                         <div class="value">{{ previewData.toolPrivileges === 'public' ? '公开' : '受保护' }}</div>
                     </div>
-                    <div class="info-item full">
-                        <div class="label">{{ previewData.toolProtocol === 'http' ? 'URL Path' : '引用目标' }}</div>
-                        <div class="value mono">{{ previewData.toolProtocol === 'http' ? previewData.urlPath : previewData.referenceTarget }}</div>
+                    <template v-if="previewData.toolProtocol === 'http'">
+                        <div class="info-item">
+                            <div class="label">HTTP Method</div>
+                            <div class="value mono">{{ previewData.toolMethod || 'POST' }}</div>
+                        </div>
+                        <div class="info-item full">
+                            <div class="label">URL Path</div>
+                            <div class="value mono">{{ previewData.urlPath }}</div>
+                        </div>
+                        <div class="info-item full" v-if="previewData.toolHeaders && Object.keys(previewData.toolHeaders).length">
+                            <div class="label">自定义请求头</div>
+                            <div class="value">
+                                <span
+                                    v-for="(val, key) in previewData.toolHeaders"
+                                    :key="key"
+                                    class="header-badge">
+                                    {{ key }}: {{ val }}
+                                </span>
+                            </div>
+                        </div>
+                    </template>
+                    <div class="info-item full" v-else>
+                        <div class="label">引用目标</div>
+                        <div class="value mono">{{ previewData.referenceTarget }}</div>
                     </div>
                 </div>
 
@@ -1366,5 +1461,26 @@ onMounted(() => {
 
 .w-full {
     width: 100%;
+}
+
+/* --- 请求头标记 --- */
+.header-badge {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    background: #f3f4f6;
+    border: 1px solid #d1d5db;
+    padding: 2px 8px;
+    margin-right: 6px;
+    margin-bottom: 4px;
+    border-radius: 2px;
+    color: #374151;
+}
+
+.hint-text {
+    font-size: 11px;
+    font-weight: 400;
+    color: #9ca3af;
+    margin-left: 4px;
 }
 </style>

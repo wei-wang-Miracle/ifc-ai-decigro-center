@@ -21,6 +21,7 @@ import java.lang.reflect.Parameter;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.*;
+import java.util.LinkedHashMap;
 import org.springframework.web.util.pattern.PathPattern;
 
 /**
@@ -93,6 +94,18 @@ public class ToolCardAutoRegistrar implements ApplicationListener<ApplicationRea
             }
         }
 
+        // 从注解读取 HTTP 方法，默认 POST
+        String toolMethod = annotation.http_method().toUpperCase();
+
+        // 从注解解析自定义 Headers: ["Key:Value", ...] -> Map
+        Map<String, String> toolHeaders = new LinkedHashMap<>();
+        for (String header : annotation.headers()) {
+            int idx = header.indexOf(':');
+            if (idx > 0) {
+                toolHeaders.put(header.substring(0, idx).trim(), header.substring(idx + 1).trim());
+            }
+        }
+
         // 解析入参 (ToolInput)
         List<Map<String, Object>> inputSchema = parseInputSchema(method);
 
@@ -108,6 +121,8 @@ public class ToolCardAutoRegistrar implements ApplicationListener<ApplicationRea
 
             existTool.setToolProtocol(toolProtocol);
             existTool.setUrlPath(urlPath);
+            existTool.setToolMethod(toolMethod);
+            existTool.setToolHeaders(toolHeaders.isEmpty() ? null : toolHeaders);
             existTool.setToolParameters(inputSchema);
             existTool.setOutputSchema(outputSchema);
             // 同步别名（如果注解中有定义）
@@ -128,6 +143,8 @@ public class ToolCardAutoRegistrar implements ApplicationListener<ApplicationRea
             // 硬契约
             newTool.setToolProtocol(toolProtocol);
             newTool.setUrlPath(urlPath);
+            newTool.setToolMethod(toolMethod);
+            newTool.setToolHeaders(toolHeaders.isEmpty() ? null : toolHeaders);
             newTool.setToolParameters(inputSchema);
             newTool.setOutputSchema(outputSchema);
 

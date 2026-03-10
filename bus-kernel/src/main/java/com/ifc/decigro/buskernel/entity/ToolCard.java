@@ -75,9 +75,24 @@ public class ToolCard implements Serializable {
     /**
      * HTTP URL 路径
      * 当 toolProtocol = 'http' 时必填
-     * 可以是相对路径（如 '/api/v1/weather'）或完整 URL
+     * 可以是相对路径（如 '/api/v1/weather'）或完整 URL（如 'https://api.example.com/v1/data'）
      */
     private String urlPath;
+
+    /**
+     * HTTP 请求方法
+     * 当 toolProtocol = 'http' 时有效
+     * 枚举值：GET、POST（默认）、PUT、DELETE
+     */
+    private String toolMethod;
+
+    /**
+     * 自定义请求头（JSONB）
+     * 格式: {"Key": "Value", ...}
+     * X-Auth-Token 由系统自动注入，无需在此配置
+     */
+    @Column(typeHandler = Fastjson2TypeHandler.class)
+    private Map<String, String> toolHeaders;
 
     /**
      * 引用目标

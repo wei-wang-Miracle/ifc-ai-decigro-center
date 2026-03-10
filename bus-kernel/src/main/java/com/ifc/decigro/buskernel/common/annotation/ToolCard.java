@@ -87,6 +87,20 @@ public @interface ToolCard {
     String manager() default "system";
 
     /**
+     * HTTP 请求方法 (http_method)
+     * 仅当 toolProtocol = "http" 时生效
+     * 枚举值：GET、POST（默认）、PUT、DELETE
+     */
+    String http_method() default "POST";
+
+    /**
+     * 自定义请求头 (headers)
+     * 格式为 "Key:Value" 数组，例如 {"Content-Type:application/json", "X-Custom:value"}
+     * 这些 Header 会附加在请求中（X-Auth-Token 由系统自动注入，无需在此配置）
+     */
+    String[] headers() default {};
+
+    /**
      * 是否启用审计记录
      *
      * @return 是否审计

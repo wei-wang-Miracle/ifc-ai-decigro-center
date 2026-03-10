@@ -105,9 +105,12 @@ CREATE TABLE tool_cards (
     -- 2. Protocol (调用协议)
     tool_protocol VARCHAR(32) NOT NULL,
     -- 协议枚举：http、reference
-    url_path VARCHAR(128),
-    -- 当 protocol='http' 时必填，例如 '/api/v1/weather'
-    -- 基础 Host 通常在 MAS 环境变量中配置，此处仅存 Path，也可存完整 URL
+    url_path VARCHAR(512),
+    -- 当 protocol='http' 时必填，支持相对路径（如 '/api/v1/weather'）或完整 URL（如 'https://api.example.com/v1/data'）
+    tool_method VARCHAR(16) DEFAULT 'POST',
+    -- HTTP 请求方法，枚举：GET、POST（默认）、PUT、DELETE。仅 protocol='http' 时有效
+    tool_headers JSONB DEFAULT NULL,
+    -- 自定义请求头，格式：{"Key": "Value"}。X-Auth-Token 由系统自动注入，无需配置
     reference_target VARCHAR(128),
     -- 当 protocol='reference' 时必填，例如 'tool_cards'
     -- 3. Parameters (参数定义)
@@ -137,6 +140,8 @@ CREATE TABLE tool_cards (
 -- ----------------------------
 COMMENT ON TABLE tool_cards IS 'MAS 工具注册表，存储 Tool Card 定义';
 COMMENT ON COLUMN tool_cards.tool_parameters IS '参数列表数组，每个元素包含 name, type, description, required, example';
+COMMENT ON COLUMN tool_cards.tool_method IS 'HTTP 请求方法：GET/POST/PUT/DELETE，默认 POST，仅 protocol=http 时有效';
+COMMENT ON COLUMN tool_cards.tool_headers IS '自定义请求头，JSONB 格式 {"Key":"Value"}，X-Auth-Token 由系统自动注入';
 COMMENT ON COLUMN tool_cards.input_examples IS 'Few-Shot Input: 用于告诉 Agent 用户可能会怎么问';
 COMMENT ON COLUMN tool_cards.output_examples IS 'Few-Shot Output: 用于告诉 Agent 工具会怎么回';
 -- 启用必要的扩展（如果需要更复杂的文本搜索，可选）
