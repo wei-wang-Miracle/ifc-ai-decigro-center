@@ -506,23 +506,25 @@ const handleSend = async () => {
                                 // 将 agentLog 同步回消息对象，使点击联动时能恢复面板数据
                                 aiMessage.agentLog = [...agentWorkEntries]
 
-                                // 异步持久化用户消息和 AI 回复到数据库（统一在流结束时存，避免重复）
-                                chatStore.saveMessageToServer({
-                                    sessionId: chatStore.currentSessionId!,
-                                    taskId: event.task_id,
-                                    traceId: aiMessage.traceId,
-                                    role: 'user',
-                                    content: userQuery
-                                })
-                                chatStore.saveMessageToServer({
-                                    sessionId: chatStore.currentSessionId!,
-                                    taskId: event.task_id,
-                                    traceId: aiMessage.traceId,
-                                    role: 'assistant',
-                                    content: event.message,
-                                    thoughts: aiMessage.thoughts,
-                                    agentLog: [...agentWorkEntries]
-                                })
+                                // 顺序持久化：先存用户消息，再存 AI 回复，保证 create_time 顺序正确
+                                ;(async () => {
+                                    await chatStore.saveMessageToServer({
+                                        sessionId: chatStore.currentSessionId!,
+                                        taskId: event.task_id,
+                                        traceId: aiMessage.traceId,
+                                        role: 'user',
+                                        content: userQuery
+                                    })
+                                    await chatStore.saveMessageToServer({
+                                        sessionId: chatStore.currentSessionId!,
+                                        taskId: event.task_id,
+                                        traceId: aiMessage.traceId,
+                                        role: 'assistant',
+                                        content: event.message,
+                                        thoughts: aiMessage.thoughts,
+                                        agentLog: [...agentWorkEntries]
+                                    })
+                                })()
 
                                 if (event.status === 'completed') {
                                     chatStore.clearTaskId()
@@ -597,9 +599,9 @@ const getThoughtTree = (thoughts?: any[]) => {
 </script>
 
 <template>
-    <div class="chat-page flex h-full">
+    <div class="flex h-full chat-page">
         <!-- 左侧会话列表 -->
-        <div class="session-sidebar w-38 bg-slate-50 border-r border-gray-200 flex flex-col">
+        <div class="flex flex-col border-r border-gray-200 session-sidebar w-38 bg-slate-50">
             <!-- 新建会话按钮 -->
             <div class="p-3 border-b border-gray-200">
                 <el-button type="primary" class="w-full" size="default" @click="handleNewSession">
@@ -610,7 +612,7 @@ const getThoughtTree = (thoughts?: any[]) => {
             
             <!-- 会话列表 -->
             <div class="flex-1 overflow-y-auto p-2 space-y-0.5">
-                <div v-if="chatStore.sessions.length === 0" class="text-center text-gray-400 text-xs py-8">
+                <div v-if="chatStore.sessions.length === 0" class="py-8 text-xs text-center text-gray-400">
                     暂无会话
                 </div>
                 <div
@@ -624,16 +626,16 @@ const getThoughtTree = (thoughts?: any[]) => {
                     ]"
                     @click="handleSwitchSession(session.sessionId)"
                 >
-                    <div class="flex items-center space-x-2 flex-1 min-w-0">
+                    <div class="flex items-center flex-1 min-w-0 space-x-2">
                         <el-icon :size="14" class="flex-shrink-0"><ChatDotSquare /></el-icon>
-                        <span class="truncate text-xs">{{ session.sessionTitle }}</span>
+                        <span class="text-xs truncate">{{ session.sessionTitle }}</span>
                     </div>
                     <el-button
                         type="danger"
                         size="small"
                         link
                         :icon="Delete"
-                        class="opacity-0 group-hover:opacity-100 transition-opacity p-0 h-auto"
+                        class="h-auto p-0 transition-opacity opacity-0 group-hover:opacity-100"
                         @click.stop="handleDeleteSession(session.sessionId)"
                     />
                 </div>
@@ -645,9 +647,9 @@ const getThoughtTree = (thoughts?: any[]) => {
              agentPanelVisible ? 'chat-area-shrink' : 'flex-1']"
         >
             <!-- 头部 -->
-            <div class="px-6 py-4 border-b bg-slate-50 flex items-center justify-between">
+            <div class="flex items-center justify-between px-6 py-4 border-b bg-slate-50">
                 <div class="flex items-center space-x-3">
-                    <div class="w-10 h-10 rounded-xl bg-brand-600 flex items-center justify-center text-white shadow-lg">
+                    <div class="flex items-center justify-center w-10 h-10 text-white shadow-lg rounded-xl bg-brand-600">
                         <el-icon size="20"><Promotion /></el-icon>
                     </div>
                     <div>
@@ -667,13 +669,13 @@ const getThoughtTree = (thoughts?: any[]) => {
             </div>
 
             <!-- 消息区域 -->
-            <div ref="scrollContainer" class="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/30">
-                <div v-if="messages.length === 0" class="flex flex-col items-center justify-center h-full text-center space-y-4">
-                    <div class="w-16 h-16 bg-brand-50 rounded-2xl flex items-center justify-center mb-2">
-                        <el-icon class="text-brand-600 text-2xl"><ChatLineRound /></el-icon>
+            <div ref="scrollContainer" class="flex-1 p-6 space-y-6 overflow-y-auto bg-slate-50/30">
+                <div v-if="messages.length === 0" class="flex flex-col items-center justify-center h-full space-y-4 text-center">
+                    <div class="flex items-center justify-center w-16 h-16 mb-2 bg-brand-50 rounded-2xl">
+                        <el-icon class="text-2xl text-brand-600"><ChatLineRound /></el-icon>
                     </div>
                     <h3 class="text-lg font-bold text-gray-700">您好, {{ userStore.userInfo.username }}</h3>
-                    <p class="text-sm text-gray-400 max-w-sm">我可以为您处理复杂的业务流程，例如标签挖掘、自动化管理和数据分析。您可以尝试输入指令开始聊天。</p>
+                    <p class="max-w-sm text-sm text-gray-400">我可以为您处理复杂的业务流程，例如标签挖掘、自动化管理和数据分析。您可以尝试输入指令开始聊天。</p>
                     <div class="flex gap-2 mt-4">
                         <button @click="inputMessage = '帮我查询所有客户标签'; handleSend()" class="btn-suggest">查询标签</button>
                         <button @click="inputMessage = '目前有哪些可用的智能体？'; handleSend()" class="btn-suggest">可用 Agent</button>
@@ -700,7 +702,7 @@ const getThoughtTree = (thoughts?: any[]) => {
                                     : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none']"
                             >
                                 <!-- 思考过程展示：扁平三层树状结构 -->
-                                <div v-if="msg.thoughts && msg.thoughts.length > 0" class="mb-3 border-b border-dashed border-gray-200 pb-2">
+                                <div v-if="msg.thoughts && msg.thoughts.length > 0" class="pb-2 mb-3 border-b border-gray-200 border-dashed">
                                     <!-- 折叠控制头 -->
                                     <div
                                         class="flex items-center text-xs text-gray-400 cursor-pointer hover:text-brand-500 select-none mb-1.5"
@@ -717,7 +719,7 @@ const getThoughtTree = (thoughts?: any[]) => {
                                         <div v-for="node in getThoughtTree(msg.thoughts)" :key="node.id" class="thought-node-row">
                                             <!-- Node 标题行 -->
                                             <div class="thought-row-title">
-                                                <div class="node-dot flex-shrink-0" :class="node.status"></div>
+                                                <div class="flex-shrink-0 node-dot" :class="node.status"></div>
                                                 <span class="thought-node-label">{{ node.title }}</span>
                                                 <span v-if="node.status === 'running'" class="thought-status-running">运行中</span>
                                                 <!-- 展开/收起思考内容 -->
@@ -739,9 +741,9 @@ const getThoughtTree = (thoughts?: any[]) => {
                                                 <div v-for="agent in node.children" :key="agent.id">
                                                     <div v-if="agent.type === 'agent_start'">
                                                         <div class="thought-row-title">
-                                                            <div class="agent-dot flex-shrink-0" :class="agent.status"></div>
+                                                            <div class="flex-shrink-0 agent-dot" :class="agent.status"></div>
                                                             <span
-                                                                class="thought-agent-label cursor-pointer hover:underline"
+                                                                class="cursor-pointer thought-agent-label hover:underline"
                                                                 @click="handleAgentClick(agent.title, msg)"
                                                             >{{ agent.title }}</span>
                                                             <span v-if="agent.children && agent.children.length > 0" class="thought-tool-count">{{ agent.children.length }} 个工具</span>
@@ -749,14 +751,14 @@ const getThoughtTree = (thoughts?: any[]) => {
                                                         <!-- 第三层：Tool -->
                                                         <div v-if="agent.children && agent.children.length > 0" class="thought-indent">
                                                             <div v-for="tool in agent.children" :key="tool.id" class="thought-row-title thought-tool-row">
-                                                                <div class="tool-dot flex-shrink-0" :class="tool.status"></div>
+                                                                <div class="flex-shrink-0 tool-dot" :class="tool.status"></div>
                                                                 <span class="thought-tool-label">{{ tool.title }}</span>
                                                             </div>
                                                         </div>
                                                     </div>
                                                     <!-- Node 直属 Tool -->
                                                     <div v-else class="thought-row-title thought-tool-row">
-                                                        <div class="tool-dot flex-shrink-0" :class="agent.status"></div>
+                                                        <div class="flex-shrink-0 tool-dot" :class="agent.status"></div>
                                                         <span class="thought-tool-label">{{ agent.title }}</span>
                                                     </div>
                                                 </div>
@@ -773,7 +775,7 @@ const getThoughtTree = (thoughts?: any[]) => {
                                 <div v-else class="leading-relaxed min-h-[1.5em] text-slate-400">{{ msg.status === 'running' ? '...' : '' }}</div>
                                 
                                 <!-- 需要人工确认提示（对话式，无按钮） -->
-                                <div v-if="msg.requireReview" class="mt-3 pt-3 border-t border-dashed border-amber-200">
+                                <div v-if="msg.requireReview" class="pt-3 mt-3 border-t border-dashed border-amber-200">
                                     <p class="text-[11px] text-amber-600 flex items-center">
                                         <el-icon class="mr-1"><Warning /></el-icon>
                                         请在下方输入框直接回复您的决定
@@ -788,8 +790,8 @@ const getThoughtTree = (thoughts?: any[]) => {
                 </div>
 
                 <!-- 加载 -->
-                <div v-if="isLoading" class="flex justify-start items-center space-x-2">
-                    <div class="bg-white border border-slate-100 rounded-2xl rounded-tl-none px-4 py-3 shadow-sm">
+                <div v-if="isLoading" class="flex items-center justify-start space-x-2">
+                    <div class="px-4 py-3 bg-white border rounded-tl-none shadow-sm border-slate-100 rounded-2xl">
                         <div class="flex space-x-1.5">
                             <div class="w-1.5 h-1.5 bg-brand-300 rounded-full animate-bounce"></div>
                             <div class="w-1.5 h-1.5 bg-brand-400 rounded-full animate-bounce delay-150"></div>
@@ -801,7 +803,7 @@ const getThoughtTree = (thoughts?: any[]) => {
 
             <!-- 输入区域 -->
             <div class="p-6 bg-white border-t border-gray-100">
-                <div class="relative flex items-end space-x-3 bg-slate-50 rounded-2xl p-2 pr-3 border border-gray-200 focus-within:border-brand-500 focus-within:ring-4 focus-within:ring-brand-50 transition-all">
+                <div class="relative flex items-end p-2 pr-3 space-x-3 transition-all border border-gray-200 bg-slate-50 rounded-2xl focus-within:border-brand-500 focus-within:ring-4 focus-within:ring-brand-50">
                     <el-input
                         v-model="inputMessage"
                         type="textarea"
@@ -828,7 +830,7 @@ const getThoughtTree = (thoughts?: any[]) => {
 
         <!-- ====== 右侧 Agent 工作面板 ====== -->
         <transition name="agent-panel">
-            <div v-if="agentPanelVisible" class="agent-panel flex flex-col overflow-hidden">
+            <div v-if="agentPanelVisible" class="flex flex-col overflow-hidden agent-panel">
                 <!-- 面板头部：回滚至深受喜欢的工牌条风格 -->
                 <div class="ap-header">
                     <div class="ap-header-left">
@@ -911,7 +913,7 @@ const getThoughtTree = (thoughts?: any[]) => {
 
                             <!-- 思考内容：弱化显示 & 完成后自动折叠 -->
                             <div v-if="entry.thinking" class="ap-section-flat has-thought">
-                                <div class="ap-section-head flex justify-between items-center group">
+                                <div class="flex items-center justify-between ap-section-head group">
                                     <span>逻辑 / THINKING</span>
                                     <button 
                                         v-if="entry.status !== 'running'"
