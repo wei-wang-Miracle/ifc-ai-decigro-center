@@ -228,6 +228,7 @@ class ChatRequest(BaseModel):
     user_id: str = Field(..., description="用户标识")
     session_id: str = Field(..., description="会话标识")
     task_id: Optional[str] = Field(default=None, description="任务标识（可选，若上一任务未完成则复用）")
+    trace_id: Optional[str] = Field(default=None, description="链路追踪 ID（由前端在用户发起提问时生成）")
 
 
 # ========================================
@@ -374,7 +375,8 @@ async def start_workflow_stream(
     功能: 发起新的工作流任务 (流式响应)
     若 task_id 对应一个待 review 的工作流，则作为 review 响应处理（对话式人机回环）。
     """
-    trace_id = f"trace_{uuid.uuid4().hex[:16]}"
+    # 优先使用前端传入的 trace_id，否则后端生成兜底
+    trace_id = request.trace_id or f"trace_{uuid.uuid4().hex[:16]}"
 
     # 从 app.state 获取预初始化的持久化 workflow
     _app_workflow = getattr(req.app.state, "workflow", None)

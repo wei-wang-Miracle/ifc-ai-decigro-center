@@ -209,17 +209,24 @@ const handleSend = async () => {
 
     const userQuery = inputMessage.value
     inputMessage.value = ''
-    
+
     // 每次新消息清理上一轮的 Agent 面板数据
     agentPanelVisible.value = false
     agentWorkEntries.splice(0)
     expandedThinking.value = {}
     activeStepId.value = null
-    
+
+    // 前端生成 trace_id（每次用户发起提问时生成）
+    const traceId = `trace_${crypto.randomUUID().replace(/-/g, '').substring(0, 16)}`
+
+    // 前端生成 task_id：review 场景复用已有 task_id，新任务发起时生成新的
+    const isReview = Boolean(chatStore.currentTaskId)
+    const taskId = isReview ? chatStore.currentTaskId! : `task_${crypto.randomUUID().replace(/-/g, '').substring(0, 12)}`
+
     // 添加用户消息
     const userMessage = reactive<ChatMessage>({
         sessionId: chatStore.currentSessionId!,
-        taskId: chatStore.currentTaskId || undefined,
+        taskId: taskId,
         role: 'user',
         content: userQuery,
         createTime: new Date()
@@ -230,15 +237,15 @@ const handleSend = async () => {
     if (chatStore.messages.length === 1 && chatStore.currentSession?.sessionTitle === '新会话') {
         chatStore.updateSessionTitle(chatStore.currentSessionId!, userQuery)
     }
-    
+
     isLoading.value = true
     scrollToBottom()
 
     // 添加 AI 消息占位
     const aiMessage = reactive<ChatMessage>({
         sessionId: chatStore.currentSessionId!,
-        taskId: undefined,
-        traceId: undefined,
+        taskId: taskId,
+        traceId: traceId,
         role: 'assistant',
         content: '',
         createTime: new Date(),
@@ -247,7 +254,7 @@ const handleSend = async () => {
         thoughts: []
     })
     chatStore.addMessage(aiMessage)
-    
+
     isLoading.value = true
     scrollToBottom()
 
@@ -263,7 +270,8 @@ const handleSend = async () => {
                 query: userQuery,
                 user_id: userStore.userInfo.userId || userStore.userInfo.username || 'guest',
                 session_id: chatStore.currentSessionId,
-                task_id: chatStore.currentTaskId
+                task_id: taskId,
+                trace_id: traceId
             })
         })
 
@@ -297,9 +305,8 @@ const handleSend = async () => {
                             
                             // 处理不同类型的事件
                             if (event.type === 'meta') {
-                                aiMessage.taskId = event.task_id
-                                aiMessage.traceId = event.trace_id
-                                chatStore.setTaskId(event.task_id)
+                                // task_id 和 trace_id 由前端生成，meta 事件仅作日志确认
+                                chatStore.setTaskId(taskId)
 
                             } else if (event.type === 'thinking') {
                                 // 简单显示"正在思考"
@@ -510,15 +517,15 @@ const handleSend = async () => {
                                 ;(async () => {
                                     await chatStore.saveMessageToServer({
                                         sessionId: chatStore.currentSessionId!,
-                                        taskId: event.task_id,
-                                        traceId: aiMessage.traceId,
+                                        taskId: taskId,
+                                        traceId: traceId,
                                         role: 'user',
                                         content: userQuery
                                     })
                                     await chatStore.saveMessageToServer({
                                         sessionId: chatStore.currentSessionId!,
-                                        taskId: event.task_id,
-                                        traceId: aiMessage.traceId,
+                                        taskId: taskId,
+                                        traceId: traceId,
                                         role: 'assistant',
                                         content: event.message,
                                         thoughts: aiMessage.thoughts,
