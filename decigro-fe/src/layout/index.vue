@@ -3,7 +3,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '../stores/user'
 import { useAppStore } from '../stores/app'
-import { ArrowRight, User, Lock, SwitchButton, Calendar, Stamp, List, OfficeBuilding, Monitor, ArrowDown, PriceTag, Box, Cpu, DataAnalysis, Fold, Expand, Promotion } from '@element-plus/icons-vue'
+import { ArrowRight, User, Lock, SwitchButton, Calendar, Stamp, List, OfficeBuilding, ArrowDown, Box, Cpu, DataAnalysis, Fold, Expand, Promotion } from '@element-plus/icons-vue'
 
 
 const router = useRouter()
@@ -102,15 +102,7 @@ const breadcrumbs = computed(() => {
                     <el-icon><OfficeBuilding /></el-icon>
                     <template #title>租户管理</template>
                 </el-menu-item>
-                <el-menu-item index="/system/online">
-                    <el-icon><Monitor /></el-icon>
-                    <template #title>在线用户</template>
-                </el-menu-item>
             </el-sub-menu>
-            <el-menu-item index="/tag/list">
-                <el-icon><PriceTag /></el-icon>
-                <template #title>标签管理</template>
-            </el-menu-item>
             <el-menu-item index="/tool/list">
                 <el-icon><Box /></el-icon>
                 <template #title>工具管理</template>

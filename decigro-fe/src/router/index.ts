@@ -40,12 +40,6 @@ const router = createRouter({
           meta: { title: "租户管理" },
         },
         {
-          path: "/system/online",
-          name: "OnlineUser",
-          component: () => import("../views/system/online/index.vue"),
-          meta: { title: "在线用户" },
-        },
-        {
           path: "/system/profile",
           name: "UserProfile",
           component: () => import("../views/system/profile/index.vue"),
@@ -56,12 +50,6 @@ const router = createRouter({
           name: "UserPassword",
           component: () => import("../views/system/profile/password.vue"),
           meta: { title: "修改密码" },
-        },
-        {
-          path: "/tag/list",
-          name: "TagManagement",
-          component: () => import("../views/tag/index.vue"),
-          meta: { title: "标签管理" },
         },
         {
           path: "/tool/list",
