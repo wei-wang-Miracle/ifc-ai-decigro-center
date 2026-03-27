@@ -6,6 +6,7 @@ import com.ifc.decigro.buskernel.entity.AgentCard;
 import com.ifc.decigro.buskernel.entity.ToolCard;
 import com.ifc.decigro.buskernel.entity.dto.AgentCardDetailRequest;
 import com.ifc.decigro.buskernel.entity.vo.AgentCardSummaryVO;
+import com.ifc.decigro.buskernel.entity.vo.ToolCardSummaryVO;
 import com.ifc.decigro.buskernel.service.AgentCardService;
 import com.mybatisflex.core.paginate.Page;
 import io.swagger.v3.oas.annotations.Operation;
@@ -83,7 +84,7 @@ public class AgentCardController {
 
     @GetMapping("/available-tools")
     @Operation(summary = "获取可绑定工具列表")
-    public Result<List<String>> getAvailableTools() {
+    public Result<List<ToolCardSummaryVO>> getAvailableTools() {
         return Result.success(agentCardService.getAvailableTools());
     }
 

@@ -79,7 +79,7 @@ const formRules = reactive<FormRules>({
 })
 
 // --- 可用工具列表 ---
-const availableTools = ref<string[]>([])
+const availableTools = ref<{ toolName: string; toolAlias: string | null }[]>([])
 const availableExecutors = ref<string[]>([])
 const newTag = ref('')
 
@@ -558,7 +558,7 @@ onMounted(() => fetchList())
                             collapse-tags-tooltip
                             placeholder="请选择绑定的工具（支持 protected 权限工具）"
                             class="w-full mt-2">
-                            <el-option v-for="t in availableTools" :key="t" :label="t" :value="t" />
+                            <el-option v-for="t in availableTools" :key="t.toolName" :label="t.toolAlias ? `${t.toolAlias} (${t.toolName})` : t.toolName" :value="t.toolName" />
                         </el-select>
                         <div v-if="form.boundTools && form.boundTools.length > 0" class="selected-tools-preview">
                             <span v-for="t in form.boundTools" :key="t" class="selected-tool-tag">{{ t }}</span>

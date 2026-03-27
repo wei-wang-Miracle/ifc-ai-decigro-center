@@ -127,11 +127,22 @@ def create_http_executor(
         if extra_headers:
             headers.update(extra_headers)
         # Bus Kernel 请求自动注入 Token
-        if token and is_bus_kernel:
+        if token:
             headers["X-Auth-Token"] = token
 
+        # 打印完整请求信息
+        print(f"[HTTP Request] ======")
+        print(f"[HTTP Request] URL: {full_url}")
+        print(f"[HTTP Request] Method: {method.upper()}")
+        print(f"[HTTP Request] Headers: {headers}")
+        if method.upper() == "GET":
+            print(f"[HTTP Request] Query Params: {kwargs}")
+        else:
+            print(f"[HTTP Request] Body: {kwargs}")
+        print(f"[HTTP Request] ======")
+
         try:
-            with httpx.Client(timeout=30.0) as client:
+            with httpx.Client(timeout=360.0) as client:
                 if method.upper() == "GET":
                     response = client.get(full_url, params=kwargs, headers=headers)
                 elif method.upper() == "POST":

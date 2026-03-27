@@ -5,6 +5,7 @@ import com.ifc.decigro.buskernel.entity.SysRole;
 import com.ifc.decigro.buskernel.entity.SysUser;
 import com.ifc.decigro.buskernel.entity.ToolCard;
 import com.ifc.decigro.buskernel.entity.vo.AgentCardSummaryVO;
+import com.ifc.decigro.buskernel.entity.vo.ToolCardSummaryVO;
 import com.ifc.decigro.buskernel.mapper.AgentCardMapper;
 import com.ifc.decigro.buskernel.mapper.ToolCardMapper;
 import com.ifc.decigro.buskernel.service.AgentCardService;
@@ -104,13 +105,15 @@ public class AgentCardServiceImpl implements AgentCardService {
     }
 
     @Override
-    public List<String> getAvailableTools() {
+    public List<ToolCardSummaryVO> getAvailableTools() {
         QueryWrapper queryWrapper = QueryWrapper.create()
                 .where(TOOL_CARD.IS_ONLINE.eq(true))
                 .orderBy(TOOL_CARD.TOOL_NAME.asc());
 
         List<ToolCard> tools = toolCardMapper.selectListByQuery(queryWrapper);
-        return tools.stream().map(ToolCard::getToolName).collect(Collectors.toList());
+        return tools.stream()
+                .map(t -> new ToolCardSummaryVO(t.getToolName(), t.getToolAlias(), null, null, null))
+                .collect(Collectors.toList());
     }
 
     @Override

@@ -38,24 +38,32 @@ _DEFAULT_PLANNER_SYSTEM_PROMPT = """你是一个任务规划专家。
 你的核心价值在于"谋定而后动"，通过逻辑推演确保方案的专业性和可行性。"""
 
 # 规划任务指令模板（作为 HumanMessage）
-_PLANNER_TASK_PROMPT = """## 可用 Executor Agent 及其绑定工具
-{tool_descriptions}
-
-## 用户需求
-{user_query}
-
+_PLANNER_TASK_PROMPT = """
+## 当前阶段的动态信息
+- 当前上下文 
 {context}
+- 可用 Executor Agent 及其绑定工具：
+{tool_descriptions}
+- 当前用户需求：{user_query}
 
-## 注意事项
-1. 步骤应该足够具体，可以直接执行
-2. 步骤之间的依赖关系要明确
-3. 每个步骤尽量只做一件事
-4. 考虑失败情况的处理
-5. **人机协同审核**：requires_review 表示该步骤执行完毕后，需要用户审核执行结论再决定是否继续，而不是执行前的授权确认。对于执行结论具有重要影响、用户需要知晓并确认的步骤（如：生成最终方案、产出关键分析报告、执行写操作或资金操作等），请将 requires_review 设为 true。纯粹的数据查询、信息收集等中间步骤通常不需要审核。
-6. **能力边界评估（重要）**：在生成步骤前，你必须严格判断每一个子任务是否都有对应的 Executor 及 Tool Card 可以执行。
-   - 如果用户需求中存在任何子任务，在上述可用 Executor/工具列表中找不到能完成它的能力，必须将 feasible 设为 false，并在 infeasible_reason 中详细说明缺少哪些能力。
-   - 禁止在 feasible=false 时生成任何执行步骤（steps 应为空列表）。
-   - 只有当所有子任务都有对应能力支撑时，才将 feasible 设为 true 并生成完整步骤。
+## 核心工作流与评估法则 (The Planning Protocol)
+
+### 阶段 1：能力边界校验 (Feasibility Assessment)
+你必须首先充当“安全网”。仔细比对【用户需求】与【可用 Executor】的能力：
+1. **严格阻断**：如果用户要求执行超出当前下属 Agent 能力范围的任务（例如：直接代客下单买卖基金、预测明天的大盘点位、查询未授权的外部新闻等），必须将 `feasible` 设为 `false`。
+2. **说明原因**：在 `infeasible_reason` 中清晰、专业地向用户解释缺少什么特定的 Agent 或工具能力导致无法执行。
+3. **终止规划**：当 `feasible=false` 时，绝对不允许生成任何后续步骤（`steps` 必须为空列表）。
+
+### 阶段 2：任务拆解与依赖编排 (Task Decomposition & Sequencing)
+当需求可行（`feasible=true`）时，将宏观目标拆解为原子化的微观步骤。
+1. **单一职责**：每个步骤（Step）只能由一个特定的 `assigned_agent` 执行，且只专注于完成一个核心动作。
+2. **信息流转与依赖 (`dependencies`)**：必须精准定义步骤间的先后顺序。例如：必须先由“基金画像生成专家”产出基金特征（Step 1），“客户匹配专家”才能基于该特征进行客群筛选（Step 2 依赖 Step 1），最后“智能客群生成专家”才能在系统中落库创建（Step 3 依赖 Step 2）。
+3. **工具指派 (`expected_tools`)**：准确预测该步骤中 Executor 需要调用的工具名称（必须严格从 `{tool_descriptions}` 中提取，不可捏造）。
+
+### 阶段 3：人机协同与风控审核 (Human-in-the-loop)
+你必须基于业务风险为每个步骤设定 `requires_review` 标志：
+- **设为 `false`（自动流转）**：对于纯粹的数据查询、信息收集、内部计算和匹配逻辑的中间步骤。
+- **设为 `true`（强制阻断等待审核）**：当该步骤的执行结论对最终业务有重大影响，或者即将触发**系统写操作**时（例如：正式在系统中 `create_client_group` 创建客群前，或者对外输出最终版的匹配归因报告时）。
 
 ## 执行计划 (JSON 输出要求)
 每个步骤必须包含:

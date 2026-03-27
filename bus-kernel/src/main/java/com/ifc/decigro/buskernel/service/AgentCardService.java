@@ -6,6 +6,7 @@ import com.mybatisflex.core.paginate.Page;
 
 import java.util.List;
 import com.ifc.decigro.buskernel.entity.vo.AgentCardSummaryVO;
+import com.ifc.decigro.buskernel.entity.vo.ToolCardSummaryVO;
 
 /**
  * MAS 智能体卡片服务接口 (V2)
@@ -45,7 +46,7 @@ public interface AgentCardService {
     /**
      * 获取所有可绑定的工具列表
      */
-    List<String> getAvailableTools();
+    List<ToolCardSummaryVO> getAvailableTools();
 
     /**
      * 获取所有可绑定的 Executor 列表
