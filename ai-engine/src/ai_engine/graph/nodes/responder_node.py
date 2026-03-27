@@ -47,33 +47,33 @@ async def responder_node(state: AgentState, config: RunnableConfig) -> Command:
             streaming=True
         )
 
-        results_context = "\n".join([
-            f"### 步骤 {r.step_id} 结果:\n{r.output if r.success else '失败: ' + r.error}"
+        results_context = "\n\n".join([
+            f"### 步骤 {r.step_id}"
+            + f"\n**状态**: {'✅ 成功' if r.success else '❌ 失败'}"
+            + (f"\n**调用工具**: {', '.join(r.tools_called)}" if r.tools_called else "")
+            + (f"\n**核心结论**: {r.conclusion}" if r.conclusion else "")
+            + (f"\n**详细输出**:\n{r.output}" if r.output else "")
+            + (f"\n**失败原因**: {r.error}" if not r.success else "")
+            + (f"\n**⚠️ 需要人工审核**" if r.require_review else "")
             for r in step_results
         ])
 
         system_prompt = """你是一个专业的 AI 助理。你需要根据任务执行的结果，为用户生成一个结构清晰、逻辑完整的最终回答。
 
-输出结构要求（按以下五个维度组织，使用 Markdown 标题）:
+输出结构要求（使用以下 Markdown 标题，按顺序输出）:
 
-## 做了什么
-简述本次任务执行了哪些步骤、调用了哪些工具或操作。
+## 步骤执行过程
+逐步骤说明：该步骤调用了哪些工具、为什么这么做、得出了什么结论。每个步骤单独列出，逻辑连贯。如有数据或表格，使用 Markdown 格式展示。
 
-## 为什么这么做
-说明每个关键步骤背后的原因和逻辑依据，帮助用户理解决策过程。
+## 最终结论
+直接回答用户的原始问题，基于上述步骤的结论汇总，简洁明了。
 
-## 当时的结论是什么
-列出每个步骤执行后的中间结论或关键发现。如有数据或表格，使用 Markdown 格式展示。
-
-## 最终产出是什么
-清晰呈现本次任务的最终结果，直接对应用户的原始问题。
-
-## 汇总建议
-基于以上执行过程和结果，给出针对性的后续建议或注意事项。
+## 建议
+基于执行结果给出后续建议或注意事项。如果有失败步骤，说明其影响及规避方式。
 
 注意事项:
-1. 如果任务部分失败，在对应维度中礼貌说明原因，不要隐藏。
-2. 各维度内容要实质性，避免空泛描述。
+1. 步骤说明要有实质内容，体现工具调用的意义和结论，避免空泛描述。
+2. 如果任务部分失败，在对应步骤中说明原因，不要隐藏。
 3. 直接输出内容，不要以 "好的"、"根据结果" 等废话开头。
 """
 
@@ -82,7 +82,7 @@ async def responder_node(state: AgentState, config: RunnableConfig) -> Command:
 执行过程结果:
 {results_context}
 
-请严格按照五个维度（做了什么 / 为什么这么做 / 当时的结论是什么 / 最终产出是什么 / 汇总建议）组织回答。"""
+请按照「步骤执行过程 / 最终结论 / 建议」三个部分组织回答。"""
 
         try:
             messages = [
