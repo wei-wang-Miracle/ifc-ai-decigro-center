@@ -1,94 +1,140 @@
-"""
-规划节点
-根据注册信息获取可用 Planner Agent，并以其身份执行规划，产出 PlanOutput
+"""规划节点。
+
+根据注册信息获取可用 Planner Agent，并以其身份执行规划，产出 PlanOutput。
+主流程分为四个阶段：前置校验 → 构建提示词 → 执行规划 → 结果验证。
 """
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
-from langchain_openai import ChatOpenAI
 from langgraph.types import Command
-from pydantic import BaseModel, Field
 
-from ..state import AgentState, PlanStep
-from ...audit import start_node_trace, finish_node_trace, build_agent_snapshot
-from ...config import get_settings
-from ...registry import get_tool_registry, get_agent_registry
+from ...llm_factory import create_creative_llm
+from ...registry import get_agent_registry
+from ..state import AgentState, PlanOutput, PlanStep
 
+# ═══════════════════════════════════════════════════════════
+#  Prompt 模板
+# ═══════════════════════════════════════════════════════════
 
-class PlanOutput(BaseModel):
-    """
-    功能: 规划输出容器
-    """
-    reasoning: str = Field(description="规划思路：简要分析用户需求，解释为什么采用这种任务组合和顺序")
-    feasible: bool = Field(
-        default=True,
-        description="当前可用的 Executor 及其绑定的 Tool Cards 是否足以完成用户需求。"
-                    "如果存在某个关键子任务无法被任何 Executor/Tool 覆盖，设为 false。"
-    )
-    infeasible_reason: str = Field(
-        default="",
-        description="当 feasible=false 时，说明哪些需求超出了当前 Executor/Tool 的能力范围，以及具体缺少什么能力。"
-    )
-    steps: list[PlanStep] = Field(default_factory=list, description="有序的任务执行步骤列表")
-
-
-# 通用规划系统提示（当 Planner Agent 未配置 system_prompt 时作为后备）
-_DEFAULT_PLANNER_SYSTEM_PROMPT = """你是一个任务规划专家。
-你需要运用 Chain-of-Thought (思维链) 方法，将用户的需求拆解为清晰、有序的执行步骤。
-你的核心价值在于"谋定而后动"，通过逻辑推演确保方案的专业性和可行性。"""
-
-# 规划任务指令模板（作为 HumanMessage）
+# 规划任务指令模板（单条 HumanMessage，动态注入 system_prompt）
 _PLANNER_TASK_PROMPT = """
-## 当前阶段的动态信息
-- 当前上下文 
-{context}
-- 可用 Executor Agent 及其绑定工具：
-{tool_descriptions}
-- 当前用户需求：{user_query}
+## 你的角色与职责
+{system_prompt}
 
-## 核心工作流与评估法则 (The Planning Protocol)
+## 推理框架: Goal Decomposition（目标分解法）
+
+你必须按照以下思维路径进行规划：
+1. **明确最终目标**：用户到底想要达成什么？
+2. **拆解子目标**：最终目标可以分解为哪些独立的子目标？
+3. **映射 Executor**：每个子目标由哪个 Executor 承接？（以 Executor 为最小规划单位）
+4. **编排依赖**：子目标之间的信息流转和先后顺序是什么？
+
+## 当前阶段的动态信息
+
+- 意图摘要：{intent_summary}
+- 当前上下文：
+{context}
+- 可用 Executor 及其能力：
+{executor_descriptions}
+- 用户需求：{user_query}
+
+## 核心规划协议 (The Planning Protocol)
 
 ### 阶段 1：能力边界校验 (Feasibility Assessment)
-你必须首先充当“安全网”。仔细比对【用户需求】与【可用 Executor】的能力：
-1. **严格阻断**：如果用户要求执行超出当前下属 Agent 能力范围的任务（例如：直接代客下单买卖基金、预测明天的大盘点位、查询未授权的外部新闻等），必须将 `feasible` 设为 `false`。
-2. **说明原因**：在 `infeasible_reason` 中清晰、专业地向用户解释缺少什么特定的 Agent 或工具能力导致无法执行。
+你必须首先充当"安全网"。仔细比对【用户需求】与【可用 Executor】的能力：
+1. **严格阻断**：如果用户要求执行超出当前 Executor 能力范围的任务（例如：直接代客下单买卖基金、预测明天的大盘点位、查询未授权的外部新闻等），必须将 `feasible` 设为 `false`。
+2. **说明原因**：在 `infeasible_reason` 中清晰、专业地向用户解释缺少什么特定的 Executor 能力导致无法执行。
 3. **终止规划**：当 `feasible=false` 时，绝对不允许生成任何后续步骤（`steps` 必须为空列表）。
 
-### 阶段 2：任务拆解与依赖编排 (Task Decomposition & Sequencing)
-当需求可行（`feasible=true`）时，将宏观目标拆解为原子化的微观步骤。
-1. **单一职责**：每个步骤（Step）只能由一个特定的 `assigned_agent` 执行，且只专注于完成一个核心动作。
-2. **信息流转与依赖 (`dependencies`)**：必须精准定义步骤间的先后顺序。例如：必须先由“基金画像生成专家”产出基金特征（Step 1），“客户匹配专家”才能基于该特征进行客群筛选（Step 2 依赖 Step 1），最后“智能客群生成专家”才能在系统中落库创建（Step 3 依赖 Step 2）。
-3. **工具指派 (`expected_tools`)**：准确预测该步骤中 Executor 需要调用的工具名称（必须严格从 `{tool_descriptions}` 中提取，不可捏造）。
+### 阶段 2：目标拆解与 Executor 分配 (Goal Decomposition & Assignment)
+当需求可行（`feasible=true`）时，将最终目标拆解为子目标并分配 Executor。
+1. **以 Executor 为最小规划单位（最重要）**：每个步骤（Step）对应**一个 Executor 的完整职责范围**。同一个 Executor 内部拥有自己的工作流和工具，这些内部子流程**必须合并为一个步骤**，由该 Executor 在执行时自主编排。绝对禁止将同一个 Executor 的内部工作流拆分成多个步骤。
+   - 正确示例：Step 1 = "基金画像生成专家"获取基金画像 → Step 2 = "客户匹配专家"匹配客群标签 → Step 3 = "智能客群生成专家"预览并创建客群（一个步骤包含该 Executor 的全部工作）
+   - 错误示例：Step 3 = "智能客群生成专家"预览客群 → Step 4 = "智能客群生成专家"创建客群（同一个 Executor 被拆成两步）
+2. **信息流转与依赖 (`dependencies`)**：必须精准定义跨 Executor 步骤间的先后顺序。前一个 Executor 的输出会自动传递给后续步骤作为上下文，你只需确保依赖关系正确。
+3. **步骤描述 (`description`)**：清晰描述该 Executor 需要完成的子目标是什么，而非指定它应该调用哪些工具。Executor 会根据子目标自主选择合适的工具。
 
 ### 阶段 3：人机协同与风控审核 (Human-in-the-loop)
 你必须基于业务风险为每个步骤设定 `requires_review` 标志：
-- **设为 `false`（自动流转）**：对于纯粹的数据查询、信息收集、内部计算和匹配逻辑的中间步骤。
-- **设为 `true`（强制阻断等待审核）**：当该步骤的执行结论对最终业务有重大影响，或者即将触发**系统写操作**时（例如：正式在系统中 `create_client_group` 创建客群前，或者对外输出最终版的匹配归因报告时）。
+- **设为 `false`（自动流转）**：当该 Executor 的工作仅涉及数据查询、信息收集、内部计算和匹配逻辑，不产生写操作。
+- **设为 `true`（强制阻断等待审核）**：当该 Executor 的工作流中**包含系统写操作**（如创建客群、创建策略等），或产出对业务有重大影响的最终结论时。审核时机是在该 Executor 完成全部工作之后。
 
-## 执行计划 (JSON 输出要求)
-每个步骤必须包含:
+## 输出要求 (JSON)
+
+### plan_summary
+用一句话概括整个计划，供用户和下游节点快速理解。
+
+### 每个步骤必须包含:
 - step_id: 必须是字符串 (如 "1", "2")
-- description: 步骤描述
-- assigned_agent: 指定执行的 Executor Agent 名称（必须是上方列表中存在的 Agent）
-- expected_tools: 预计需要的工具列表（必须是该 Executor 绑定的工具）
+- description: 该步骤的子目标描述（描述要完成什么，而非怎么做）
+- assigned_agent: 指定执行的 Executor 名称（必须是上方列表中存在的 Executor）
 - dependencies: 依赖的步骤 ID 列表 (如 ["1"])
-- requires_review: 步骤执行完毕后是否需要用户审核结论再继续 (布尔值，默认 false，仅对产出关键结果或执行写操作的最终步骤设为 true)
+- requires_review: 步骤执行完毕后是否需要用户审核结论再继续 (布尔值)
 """
 
 
-def _build_context(state: AgentState) -> str:
+# ═══════════════════════════════════════════════════════════
+#  阶段 1：前置校验
+# ═══════════════════════════════════════════════════════════
+
+
+def _preflight_check(
+    state: AgentState,
+) -> tuple[str | None, object | None, dict[str, str] | None]:
+    """前置校验：加载 Planner 配置并验证 Executor 可用性。
+
+    Returns:
+        (error, planner_config, executor_descriptions) 三元组。
+        error 非空时表示校验失败，调用方应直接返回错误。
     """
-    功能: 构建上下文信息
-    参数: state - 当前状态
-    返回: 上下文字符串
+    agent_registry = get_agent_registry()
+    current_planner = state.current_planner
+    token = state.token
+
+    # 加载 Planner Agent 配置
+    planner_config = agent_registry.get_agent(current_planner, token) if current_planner else None
+    if planner_config is None:
+        print(f"[Planner] 无法找到 Planner Agent: {current_planner}")
+        return "当前没有可用的 Planner Agent，无法对您的需求进行任务规划。", None, None
+
+    # 检查绑定的 Executor
+    agents = agent_registry.get_bound_executor_descriptions(token, current_planner)
+    if not agents:
+        print(
+            f"[Planner] Planner '{current_planner}' 的 bound_agents="
+            f"{planner_config.bound_agents}，均不在可用 Executor 列表中"
+        )
+        return (
+            (
+                f"Planner「{current_planner}」当前没有绑定任何可用的 Executor Agent，"
+                "无法执行您的需求，请联系管理员配置相应的 Executor。"
+            ),
+            None,
+            None,
+        )
+
+    print(f"[Planner] 使用 Planner Agent: {current_planner}")
+    return None, planner_config, agents
+
+
+# ═══════════════════════════════════════════════════════════
+#  阶段 2：构建提示词
+# ═══════════════════════════════════════════════════════════
+
+
+def _build_replan_context(state: AgentState) -> str:
+    """构建重规划上下文（仅在反馈重规划场景下有内容）。
+
+    首次规划时 step_results 和 review_feedback 均为空，返回空字符串。
+    反馈重规划时注入之前的执行结果和用户审核反馈，供 Planner 参考调整方案。
     """
     context_parts = []
 
     if state.step_results:
-        results_text = "\n".join([
+        results_text = "\n".join(
             f"- 步骤 {r.step_id}: {'成功' if r.success else '失败'} - {r.output or r.error}"
             for r in state.step_results
-        ])
+        )
         context_parts.append(f"## 之前的执行结果\n{results_text}")
 
     if state.review_feedback:
@@ -97,212 +143,137 @@ def _build_context(state: AgentState) -> str:
     return "\n\n".join(context_parts) if context_parts else ""
 
 
-async def planner_node(state: AgentState, config: RunnableConfig) -> Command:
-    """
-    功能: 规划节点 - LangGraph 节点函数
-
-    职责:
-    1. 从注册中心加载选定的 Planner Agent 配置（system_prompt、bound_agents）
-    2. 以该 Planner Agent 的身份构建规划上下文（可用工具 + 可用 Executor）
-    3. 调用 LLM 生成结构化执行计划（PlanOutput）
-    4. 若能力不足则直接告知用户，否则将计划写入 state 并路由回 dispatcher
-    """
-    query = state.query
-    token = state.token
-    current_planner = state.current_planner
-
-    # 审计埋点
-    nt = start_node_trace("planner")
+def _build_prompt(state: AgentState, planner_config) -> str:
+    """组装完整的规划 Prompt（角色定义 + 推理框架 + 动态信息）。"""
+    system_prompt = planner_config.system_prompt or ""
+    if planner_config.negative_prompt:
+        system_prompt += f"\n\n## 禁止事项\n{planner_config.negative_prompt}"
 
     agent_registry = get_agent_registry()
-    tool_registry = get_tool_registry()
-
-    # 1. 加载选定 Planner Agent 的完整配置
-    planner_config = agent_registry.get_agent(current_planner, token) if current_planner else None
-
-    # 1a. 没有找到任何可用 Planner，直接告知用户
-    if planner_config is None:
-        reason = "当前没有可用的 Planner Agent，无法对您的需求进行任务规划。"
-        print(f"[Planner] 无法找到 Planner Agent: {current_planner}")
-        finish_node_trace(nt, "FAILED", node_result=reason)
-        return Command(
-            update={
-                "error": reason,
-                "node_traces": state.node_traces + [nt],
-            },
-            goto="responder",
-        )
-
-    # 2. 确定系统提示：优先使用 Planner Agent 自身的 system_prompt
-    if planner_config.system_prompt:
-        system_prompt = planner_config.system_prompt
-        if planner_config.negative_prompt:
-            system_prompt += f"\n\n## 禁止事项\n{planner_config.negative_prompt}"
-    else:
-        system_prompt = _DEFAULT_PLANNER_SYSTEM_PROMPT
-
-    planner_name = current_planner
-    print(f"[Planner] 使用 Planner Agent: {planner_name}")
-
-    # 3. 构建可用 Executor 描述（严格限定为该 Planner 绑定的 Executor）
-    bound_agents = planner_config.bound_agents
-    all_executors = agent_registry.get_agent_descriptions(token, agent_type="EXECUTOR")
-    agents = {name: desc for name, desc in all_executors.items() if name in bound_agents}
-
-    # 1b. Planner 没有绑定任何可用 Executor，直接告知用户
-    if not agents:
-        reason = (
-            f"Planner「{planner_name}」当前没有绑定任何可用的 Executor Agent，"
-            "无法执行您的需求，请联系管理员配置相应的 Executor。"
-        )
-        print(f"[Planner] Planner '{planner_name}' 的 bound_agents={bound_agents}，均不在可用 Executor 列表中")
-        finish_node_trace(nt, "FAILED", node_result=reason)
-        return Command(
-            update={
-                "error": reason,
-                "node_traces": state.node_traces + [nt],
-            },
-            goto="responder",
-        )
-
-    # 4. 构建工具描述：按 Executor 展示各自绑定的工具（让 Planner 了解能力边界）
-    all_tool_summaries = {s["tool_name"]: s for s in tool_registry.get_all_tool_summaries(token)}
-    tool_lines = []
-    executor_tool_map: dict[str, list[str]] = {}  # {executor_name: [tool_name, ...]}
-    for executor_name, executor_desc in agents.items():
-        executor_config = agent_registry.get_agent(executor_name, token)
-        if executor_config:
-            executor_tools = executor_config.raw_bound_tools or []
-            executor_tool_map[executor_name] = executor_tools
-            tool_lines.append(f"\n### Executor: {executor_name}\n描述: {executor_desc}")
-            if executor_tools:
-                for tool_name in executor_tools:
-                    summary = all_tool_summaries.get(tool_name)
-                    if summary:
-                        tool_lines.append(f"  - **{tool_name}**: {summary['tool_description']}")
-            else:
-                tool_lines.append("  （该 Executor 未绑定任何工具，仅具备纯对话能力）")
-        else:
-            executor_tool_map[executor_name] = []
-
-    tool_descriptions = "\n".join(tool_lines) if tool_lines else "暂无可用 Executor/工具"
-
-    # 5. 构建 HumanMessage（规划任务指令）
-    human_content = _PLANNER_TASK_PROMPT.format(
-        tool_descriptions=tool_descriptions,
-        user_query=query,
-        context=_build_context(state),
+    executor_descriptions = agent_registry.build_planner_tool_descriptions(
+        state.token, state.current_planner
     )
 
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=human_content),
-    ]
+    return _PLANNER_TASK_PROMPT.format(
+        system_prompt=system_prompt,
+        executor_descriptions=executor_descriptions,
+        user_query=state.query,
+        context=_build_replan_context(state),
+        intent_summary=state.intent_summary or "",
+    )
 
+
+# ═══════════════════════════════════════════════════════════
+#  阶段 3：执行规划（调用 LLM）
+# ═══════════════════════════════════════════════════════════
+
+
+async def _invoke_planner(prompt: str, config: RunnableConfig) -> PlanOutput:
+    """调用 LLM 生成结构化执行计划。"""
+    llm = create_creative_llm()
+    structured_llm = llm.with_structured_output(PlanOutput)
+    return await structured_llm.ainvoke([HumanMessage(content=prompt)], config=config)
+
+
+# ═══════════════════════════════════════════════════════════
+#  阶段 4：结果验证
+# ═══════════════════════════════════════════════════════════
+
+
+def _validate_plan(plan: list[PlanStep], allowed_agents: set[str]) -> str | None:
+    """校验规划结果，返回错误信息或 None。
+
+    校验规则：
+    - 每个步骤的 assigned_agent 必须在 Planner 绑定的 Executor 列表中
+    - 不满足条件的步骤收集为 unsupported，整体不可执行时返回错误原因
+    """
+    unsupported_steps: list[str] = []
+
+    for step in plan:
+        if step.assigned_agent and step.assigned_agent not in allowed_agents:
+            print(
+                f"[Planner] 警告: 步骤 [{step.step_id}] 指定了未绑定的 Agent "
+                f"'{step.assigned_agent}'，已清除"
+            )
+            step.assigned_agent = None
+
+        if not step.assigned_agent:
+            unsupported_steps.append(f"步骤[{step.step_id}]: {step.description}")
+
+    if unsupported_steps:
+        return (
+            "以下任务步骤超出了当前可用 Executor 的能力范围，无法完成您的完整需求：\n"
+            + "\n".join(f"  - {s}" for s in unsupported_steps)
+            + "\n\n请联系管理员为相关业务配置对应的 Executor Agent。"
+        )
+
+    return None
+
+
+# ═══════════════════════════════════════════════════════════
+#  主流程：LangGraph 节点函数
+# ═══════════════════════════════════════════════════════════
+
+
+def _fail(reason: str) -> Command:
+    """构建失败路由 Command，统一出口。"""
+    return Command(update={"error": reason}, goto="responder")
+
+
+async def planner_node(state: AgentState, config: RunnableConfig) -> Command:
+    """规划节点 — 主流程编排。
+
+    四个阶段：
+    1. 前置校验：加载 Planner 配置，验证 Executor 可用性
+    2. 构建提示词：组装角色定义 + 推理框架 + 动态信息
+    3. 执行规划：调用 LLM 生成 PlanOutput
+    4. 结果验证：校验 assigned_agent 合法性
+    """
+    planner_name = state.current_planner
+
+    # ── 阶段 1：前置校验 ──────────────────────────────────
+    error, planner_config, agents = _preflight_check(state)
+    if error:
+        return _fail(error)
+
+    # ── 阶段 2：构建提示词 ────────────────────────────────
+    prompt = _build_prompt(state, planner_config)
+
+    # ── 阶段 3：执行规划 ──────────────────────────────────
     try:
-        settings = get_settings()
-        llm = ChatOpenAI(
-            model=settings.llm_model,
-            api_key=settings.openai_api_key,
-            base_url=settings.openai_api_base,
-            temperature=settings.llm_temperature,
-            streaming=True,
-        )
-
-        structured_llm = llm.with_structured_output(PlanOutput)
-        response: PlanOutput = await structured_llm.ainvoke(messages, config=config)
-
-        # 6. LLM 自评不可行，直接告知用户
-        if not response.feasible:
-            reason = response.infeasible_reason or "当前可用的 Executor 及工具无法满足您的需求。"
-            print(f"[Planner] LLM 评估能力不足: {reason}")
-            finish_node_trace(nt, "FAILED", node_result=reason)
-            return Command(
-                update={
-                    "error": reason,
-                    "node_traces": state.node_traces + [nt],
-                },
-                goto="responder",
-            )
-
-        plan = response.steps
-
-        # 7. 校验并修正每个步骤，同时收集真正无法被满足的步骤
-        allowed_agents = set(agents.keys())
-        unsupported_steps: list[str] = []
-
-        for step in plan:
-            # 7a. assigned_agent 必须在 bound_agents 中
-            if step.assigned_agent and step.assigned_agent not in allowed_agents:
-                print(f"[Planner] 警告: 步骤 [{step.step_id}] 指定了未绑定的 Agent '{step.assigned_agent}'，已清除")
-                step.assigned_agent = None
-
-            # 7b. expected_tools 必须属于对应 executor 绑定的工具
-            if step.assigned_agent and step.expected_tools:
-                allowed_tools = set(executor_tool_map.get(step.assigned_agent, []))
-                if allowed_tools:
-                    filtered = [t for t in step.expected_tools if t in allowed_tools]
-                    if len(filtered) != len(step.expected_tools):
-                        removed = set(step.expected_tools) - set(filtered)
-                        print(f"[Planner] 警告: 步骤 [{step.step_id}] 包含超出 Executor 权限的工具 {removed}，已过滤")
-                    step.expected_tools = filtered
-
-            # 7c. 经过修正后，步骤既没有 assigned_agent 也没有任何可用工具覆盖
-            if not step.assigned_agent:
-                unsupported_steps.append(f"步骤[{step.step_id}]: {step.description}")
-
-        # 8. 存在无法被任何 Executor 承接的步骤，告知用户
-        if unsupported_steps:
-            reason = (
-                "以下任务步骤超出了当前可用 Executor/Tool 的能力范围，无法完成您的完整需求：\n"
-                + "\n".join(f"  - {s}" for s in unsupported_steps)
-                + "\n\n请联系管理员为相关业务配置对应的 Executor Agent 或 Tool Card。"
-            )
-            print(f"[Planner] 存在无法执行的步骤: {unsupported_steps}")
-            finish_node_trace(nt, "FAILED", node_result=reason)
-            return Command(
-                update={
-                    "error": reason,
-                    "node_traces": state.node_traces + [nt],
-                },
-                goto="responder",
-            )
-
-        print(f"[Planner] LLM 响应内容: {response}")
-        print(f"[Planner] 成功生成计划: {len(plan)} 个步骤")
-
-        for step in plan:
-            print(f"  - [{step.step_id}] {step.description} (Agent: {step.assigned_agent}, Tools: {step.expected_tools}, Deps: {step.dependencies})")
-
-        # 审计埋点
-        plan_result = f"生成 {len(plan)} 步计划: " + "; ".join([f"[{s.step_id}] {s.description}" for s in plan])
-        agent_snap = build_agent_snapshot(
-            agent_name=planner_name,
-            model_config={"provider": "openai", "model_name": settings.llm_model},
-            system_prompt=system_prompt,
-            agent_result=plan_result,
-        )
-        finish_node_trace(nt, "SUCCESS", agent_snapshot=agent_snap, node_result=plan_result)
-
-        return Command(
-            update={
-                "plan": plan,
-                "plan_reasoning": response.reasoning,
-                "current_step_index": 0,
-                "messages": [AIMessage(content=f"[Planner:{planner_name}] 已生成 {len(plan)} 步计划")],
-                "node_traces": state.node_traces + [nt],
-            },
-            goto="dispatcher"
-        )
-
+        response = await _invoke_planner(prompt, config)
     except Exception as e:
         print(f"[Planner] 规划失败: {e}")
-        finish_node_trace(nt, "FAILED")
-        return Command(
-            update={
-                "plan": [],
-                "error": f"任务规划失败: {str(e)}",
-                "node_traces": state.node_traces + [nt],
-            },
-            goto="responder"
+        return _fail(f"任务规划失败: {e!s}")
+
+    # LLM 自评不可行
+    if not response.feasible:
+        reason = response.infeasible_reason or "当前可用的 Executor 无法满足您的需求。"
+        print(f"[Planner] LLM 评估能力不足: {reason}")
+        return _fail(reason)
+
+    # ── 阶段 4：结果验证 ──────────────────────────────────
+    plan = response.steps
+    validation_error = _validate_plan(plan, set(agents.keys()))
+    if validation_error:
+        print(f"[Planner] 计划验证失败: {validation_error}")
+        return _fail(validation_error)
+
+    # ── 成功：写入 state，路由到 dispatcher ───────────────
+    print(f"[Planner] 成功生成计划: {len(plan)} 个步骤")
+    for step in plan:
+        print(
+            f"  - [{step.step_id}] {step.description} "
+            f"(Agent: {step.assigned_agent}, Deps: {step.dependencies})"
         )
+
+    return Command(
+        update={
+            "plan": plan,
+            "plan_reasoning": response.reasoning,
+            "plan_summary": response.plan_summary,
+            "current_step_index": 0,
+            "messages": [AIMessage(content=f"[Planner:{planner_name}] 已生成 {len(plan)} 步计划")],
+        },
+        goto="dispatcher",
+    )

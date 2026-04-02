@@ -28,7 +28,7 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
-    "ruff>=0.7.0",
+    "ruff>=0.15.0",
 ]
 
 [build-system]
@@ -39,12 +39,52 @@ build-backend = "hatchling.build"
 packages = ["src/ai_engine"]
 
 [tool.ruff]
+# 基础配置
 line-length = 100
 target-version = "py312"
 
+# 排除不需要检查的目录（默认已经包含了 .git 等，可以按需增加）
+exclude = [
+    ".venv",
+    "__pycache__",
+    "migrations",
+]
+
 [tool.ruff.lint]
-select = ["E", "F", "I", "W"]
+# 推荐开启的规则集
+select = [
+    "E",   # pycodestyle errors (基础代码风格错误)
+    "W",   # pycodestyle warnings (基础代码风格警告)
+    "F",   # pyflakes (代码逻辑错误，如变量未使用)
+    "I",   # isort (import 排序，自动整理你的 from typing import xxx)
+    "B",   # flake8-bugbear (发现潜在的常见 bug 和设计问题，强烈推荐)
+    "UP",  # pyupgrade (自动将旧语法升级为 Python 3.12 的新语法，非常有用！)
+    "SIM", # flake8-simplify (帮你把臃肿的代码简化，比如合并 if 语句)
+    "RUF", # Ruff 专属的特定规则
+]
+
+# 遇到这些规则时忽略报错（按需配置，这里举个例子）
+ignore = [
+    "E501", # 忽略行长超限（有时候注释太长，强制换行很难看，交给 formatter 去尽力处理即可）
+]
+
+[tool.ruff.lint.isort]
+# isort 的进阶配置
+known-first-party = ["ai_engine"] # 告诉 Ruff，哪些是你项目自己写的包，方便它正确分类
+force-single-line = false         # 允许多个 import 写在一行 (比如 from typing import List, Dict)
+
+# 💡 Ruff 也是一个极速的代码格式化工具（完全可以替代 Black）
+[tool.ruff.format]
+quote-style = "double"            # 强制使用双引号 (符合现代 Python 习惯)
+indent-style = "space"            # 使用空格缩进
+skip-magic-trailing-comma = false # 尊重你手动加的尾逗号
+line-ending = "auto"              # 自动处理换行符 (CRLF/LF)
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.0",
+]

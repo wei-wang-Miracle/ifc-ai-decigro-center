@@ -8,17 +8,16 @@ from langchain_openai import ChatOpenAI
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
-from ..state import AgentState, ReviewStatus
 from ...config import get_settings
+from ..state import AgentState, ReviewStatus
 
 
 class FeedbackClassification(BaseModel):
     """反馈分类结果"""
+
     needs_replan: bool = Field(description="是否需要全量重新规划（含主体变更、需重新规划等场景）")
     reasoning: str = Field(default="", description="判断理由")
 
-
-import re
 
 _REPLAN_KEYWORDS = ["重新规划", "换个方案", "重做", "from scratch", "start over"]
 _FEEDBACK_CLASSIFY_PROMPT = """判断用户对 AI 输出的反馈是否需要"全量重新规划"。
@@ -85,8 +84,12 @@ async def _classify_feedback(feedback: str, current_query: str = "") -> bool:
             current_query=current_query or "（未知）",
             feedback=feedback,
         )
-        result: FeedbackClassification = await structured_llm.ainvoke([HumanMessage(content=prompt)])
-        print(f"[FeedbackHandler] LLM 分类: needs_replan={result.needs_replan}, 理由={result.reasoning}")
+        result: FeedbackClassification = await structured_llm.ainvoke(
+            [HumanMessage(content=prompt)]
+        )
+        print(
+            f"[FeedbackHandler] LLM 分类: needs_replan={result.needs_replan}, 理由={result.reasoning}"
+        )
         return result.needs_replan
     except Exception as e:
         # LLM 不可用时（限流、超时等），保守策略：触发全量重新规划
@@ -116,7 +119,7 @@ async def feedback_handler_node(state: AgentState) -> Command:
             update={
                 "messages": [AIMessage(content="[FeedbackHandler] 非驳回状态，无需处理")],
             },
-            goto="dispatcher"
+            goto="dispatcher",
         )
 
     print(f"[FeedbackHandler] 处理反馈: {review_feedback}")
@@ -133,18 +136,22 @@ async def feedback_handler_node(state: AgentState) -> Command:
                 "step_results": [],
                 "review_status": None,
                 "review_feedback": review_feedback,  # 保留反馈给 Planner 参考
-                "messages": [AIMessage(content=f"[FeedbackHandler] 根据反馈全量重新规划: {review_feedback}")],
+                "messages": [
+                    AIMessage(content=f"[FeedbackHandler] 根据反馈全量重新规划: {review_feedback}")
+                ],
             },
-            goto="dispatcher"
+            goto="dispatcher",
         )
     else:
         # 仅调整当前步骤：保留计划和已有步骤结果，反馈注入 Executor 重试
-        print(f"[FeedbackHandler] 调整当前步骤执行方式，反馈已保留供 Executor 使用")
+        print("[FeedbackHandler] 调整当前步骤执行方式，反馈已保留供 Executor 使用")
         return Command(
             update={
                 "review_status": None,
                 "review_feedback": review_feedback,  # 保留反馈供 Executor 使用
-                "messages": [AIMessage(content=f"[FeedbackHandler] 根据反馈调整: {review_feedback}")],
+                "messages": [
+                    AIMessage(content=f"[FeedbackHandler] 根据反馈调整: {review_feedback}")
+                ],
             },
-            goto="dispatcher"
+            goto="dispatcher",
         )

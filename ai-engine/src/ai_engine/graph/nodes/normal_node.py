@@ -4,17 +4,16 @@
 使用 ReAct 模式让 LLM 按需调用工具
 """
 
-from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 from langgraph.types import Command
 
-from ..state import AgentState, IntentType
-from ...audit import start_node_trace, finish_node_trace, build_agent_snapshot
+from ...audit import build_agent_snapshot, finish_node_trace, start_node_trace
 from ...config import get_settings
-from ...registry import get_tool_registry, get_agent_registry
-
+from ...registry import AgentType, get_agent_registry, get_tool_registry
+from ..state import AgentState
 
 _NORMAL_SYSTEM_PROMPT_TEMPLATE = """你是一个专业、友好的 AI 助理。
 你擅长回答用户的日常问题、进行轻松的对话，并在需要时调用可用工具来获取准确信息。
@@ -53,10 +52,7 @@ def _build_system_prompt(token: str, long_term_context: str = "") -> str:
 
     # 获取 public 工具摘要
     all_tool_summaries = tool_registry.get_all_tool_summaries(token)
-    public_tool_summaries = [
-        s for s in all_tool_summaries
-        if s.get("tool_privileges") == "public"
-    ]
+    public_tool_summaries = [s for s in all_tool_summaries if s.get("tool_privileges") == "public"]
 
     if public_tool_summaries:
         tool_lines = []
@@ -69,7 +65,9 @@ def _build_system_prompt(token: str, long_term_context: str = "") -> str:
         public_tools_section = "当前无可直接使用的工具。"
 
     # 获取 PLANNER 类型的 Agent 摘要
-    planner_descriptions = agent_registry.get_agent_descriptions(token, agent_type="PLANNER")
+    planner_descriptions = agent_registry.get_agent_descriptions(
+        token, agent_type=AgentType.PLANNER
+    )
 
     if planner_descriptions:
         agent_lines = []
@@ -117,10 +115,14 @@ async def normal_node(state: AgentState, config: RunnableConfig) -> Command:
 
     # 动态构建系统提示词（包含 PLANNER agent、工具信息和长期记忆）
     long_term_ctx = state.long_term_context or ""
-    system_prompt = _build_system_prompt(token, long_term_ctx) if token else _NORMAL_SYSTEM_PROMPT_TEMPLATE.format(
-        user_memory_section="",
-        public_tools_section="当前无可直接使用的工具。",
-        planner_agents_section="当前无可调用的复杂任务智能体。",
+    system_prompt = (
+        _build_system_prompt(token, long_term_ctx)
+        if token
+        else _NORMAL_SYSTEM_PROMPT_TEMPLATE.format(
+            user_memory_section="",
+            public_tools_section="当前无可直接使用的工具。",
+            planner_agents_section="当前无可调用的复杂任务智能体。",
+        )
     )
 
     intent_label = intent.intent_type.value if intent else "unknown"
@@ -178,7 +180,7 @@ async def normal_node(state: AgentState, config: RunnableConfig) -> Command:
         finish_node_trace(nt, "FAILED")
         return Command(
             update={
-                "error": f"普通对话处理失败: {str(e)}",
+                "error": f"普通对话处理失败: {e!s}",
                 "node_traces": state.node_traces + [nt],
             },
             goto="responder",

@@ -1,11 +1,12 @@
-from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
+from langchain_openai import ChatOpenAI
 from langgraph.types import Command
-from ..state import AgentState
-from ...audit import submit_trace, start_node_trace, finish_node_trace
+
+from ...audit import finish_node_trace, start_node_trace, submit_trace
 from ...config import get_settings
 from ...context import get_context_manager, get_long_term_memory_manager
-from langchain_openai import ChatOpenAI
-from langchain_core.runnables import RunnableConfig
+from ..state import AgentState
 
 
 async def responder_node(state: AgentState, config: RunnableConfig) -> Command:
@@ -44,19 +45,21 @@ async def responder_node(state: AgentState, config: RunnableConfig) -> Command:
             api_key=settings.openai_api_key,
             base_url=settings.openai_api_base,
             temperature=settings.llm_temperature,
-            streaming=True
+            streaming=True,
         )
 
-        results_context = "\n\n".join([
-            f"### 步骤 {r.step_id}"
-            + f"\n**状态**: {'✅ 成功' if r.success else '❌ 失败'}"
-            + (f"\n**调用工具**: {', '.join(r.tools_called)}" if r.tools_called else "")
-            + (f"\n**核心结论**: {r.conclusion}" if r.conclusion else "")
-            + (f"\n**详细输出**:\n{r.output}" if r.output else "")
-            + (f"\n**失败原因**: {r.error}" if not r.success else "")
-            + (f"\n**⚠️ 需要人工审核**" if r.require_review else "")
-            for r in step_results
-        ])
+        results_context = "\n\n".join(
+            [
+                f"### 步骤 {r.step_id}"
+                + f"\n**状态**: {'✅ 成功' if r.success else '❌ 失败'}"
+                + (f"\n**调用工具**: {', '.join(r.tools_called)}" if r.tools_called else "")
+                + (f"\n**核心结论**: {r.conclusion}" if r.conclusion else "")
+                + (f"\n**详细输出**:\n{r.output}" if r.output else "")
+                + (f"\n**失败原因**: {r.error}" if not r.success else "")
+                + ("\n**⚠️ 需要人工审核**" if r.require_review else "")
+                for r in step_results
+            ]
+        )
 
         system_prompt = """你是一个专业的 AI 助理。你需要根据任务执行的结果，为用户生成一个结构清晰、逻辑完整的最终回答。
 
@@ -79,22 +82,23 @@ async def responder_node(state: AgentState, config: RunnableConfig) -> Command:
 
         human_prompt = f"""用户原始问题: {query}
 
+任务计划概述: {state.plan_summary or "无"}
+
 执行过程结果:
 {results_context}
 
 请按照「步骤执行过程 / 最终结论 / 建议」三个部分组织回答。"""
 
         try:
-            messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=human_prompt)
-            ]
+            messages = [SystemMessage(content=system_prompt), HumanMessage(content=human_prompt)]
             response = await llm.ainvoke(messages, config=config)
             summary = response.content
         except Exception as e:
             print(f"[Responder] 调用 LLM 失败: {e}")
             last_result = step_results[-1]
-            summary = last_result.output if last_result.success else f"执行失败: {last_result.error}"
+            summary = (
+                last_result.output if last_result.success else f"执行失败: {last_result.error}"
+            )
 
     # 完成 responder 节点追踪
     finish_node_trace(nt, "SUCCESS", node_result=summary)
@@ -106,11 +110,10 @@ async def responder_node(state: AgentState, config: RunnableConfig) -> Command:
     if state.session_id:
         ctx_mgr = get_context_manager()
         intent_type = state.intent.intent_type.value if state.intent else "chat"
-        original_query = (state.intent.entities.get("original_query", "") or query) if state.intent else query
-        entities = state.intent.entities if state.intent else {}
+        original_query = (state.intent.original_query or query) if state.intent else query
 
         # 更新 session 级实体追踪缓存（轻量，不写 DB）
-        ctx_mgr.update_entities(state.session_id, entities)
+        ctx_mgr.update_entities(state.session_id, {})
 
         # 触发后台异步 Reflection，更新长期记忆（不阻塞）
         ltm = get_long_term_memory_manager()
@@ -133,5 +136,5 @@ async def responder_node(state: AgentState, config: RunnableConfig) -> Command:
             "messages": [AIMessage(content=summary)],
             "node_traces": all_node_traces,
         },
-        goto="__end__"
+        goto="__end__",
     )

@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from langgraph.types import Command as LGCommand
 import json
 
-from ..graph import create_workflow_graph, create_initial_state
+from ..graph import create_initial_state
 from ..context import get_context_manager, get_long_term_memory_manager
 from ..registry import get_tool_registry
 from ..config import get_settings
@@ -381,7 +381,7 @@ async def start_workflow_stream(
     # 从 app.state 获取预初始化的持久化 workflow
     _app_workflow = getattr(req.app.state, "workflow", None)
     if _app_workflow is None:
-        _app_workflow = create_workflow_graph()
+        raise RuntimeError("Workflow 未初始化，请确认 lifespan 已正确启动")
 
     # ── 判断是否为 review 响应 ────────────────────────────────────────
     is_review_response = bool(
