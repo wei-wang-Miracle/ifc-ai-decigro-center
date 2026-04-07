@@ -80,6 +80,24 @@ async def human_review_node(state: AgentState) -> Command:
 
     if action == "approve":
         current_index = state.current_step_index or 0
+
+        # 子图分阶段执行：approve 后需要重新进入 executor 完成后续阶段，
+        # 不递增 step_index，保留 subgraph_resume_meta 供 executor 读取
+        if state.subgraph_resume_meta:
+            print(
+                f"[HumanReview] 用户已批准子图步骤 {current_index}，"
+                "重新进入 executor 完成后续阶段"
+            )
+            return Command(
+                update={
+                    "require_review": False,
+                    "review_status": ReviewStatus.APPROVED,
+                    "review_feedback": None,
+                    "messages": [AIMessage(content="[HumanReview] 用户批准，继续执行子图后续阶段")],
+                },
+                goto="dispatcher",
+            )
+
         print(f"[HumanReview] 用户已批准，推进步骤索引 {current_index} → {current_index + 1}")
         return Command(
             update={

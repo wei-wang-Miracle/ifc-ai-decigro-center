@@ -157,14 +157,24 @@ def create_http_executor(
                 response.raise_for_status()
                 return response.text
         except httpx.HTTPStatusError as e:
+            status_code = e.response.status_code
+            # 区分业务错误(5xx)和系统/协议错误(4xx)
+            if status_code >= 500:
+                error_type = "business"
+            elif status_code in (401, 403):
+                error_type = "auth"
+            else:
+                error_type = "system"
             return json.dumps({
-                "error": f"HTTP 请求失败",
-                "status_code": e.response.status_code,
+                "error": "HTTP 请求失败",
+                "tool_error_type": error_type,
+                "status_code": status_code,
                 "detail": e.response.text
             })
         except httpx.RequestError as e:
             return json.dumps({
-                "error": f"请求异常: {str(e)}"
+                "error": f"请求异常: {str(e)}",
+                "tool_error_type": "network"
             })
 
     return executor

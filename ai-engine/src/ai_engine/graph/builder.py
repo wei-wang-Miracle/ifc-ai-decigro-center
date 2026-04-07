@@ -33,6 +33,8 @@ from .nodes import (
     responder_node,
 )
 from .state import AgentState
+from .subgraphs.client_group.graph import build_client_group_subgraph
+from .subgraphs.registry import register_subgraph
 
 
 def _build_graph(checkpointer) -> object:
@@ -52,6 +54,10 @@ def _build_graph(checkpointer) -> object:
     Returns:
         CompiledGraph: 编译后的状态图，可直接调用 ``ainvoke`` / ``astream`` 执行。
     """
+    # --- 编译并注册子图 ---
+    client_group_sg = build_client_group_subgraph()
+    register_subgraph("ai_client_group_creater", client_group_sg.compile())
+
     workflow = StateGraph(AgentState)
 
     # --- 注册业务节点 ---

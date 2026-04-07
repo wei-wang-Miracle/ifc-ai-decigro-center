@@ -231,8 +231,9 @@ class AgentConfig:
     ) -> str:
         """构建 Executor 执行阶段的完整系统消息。
 
-        组合 system_prompt + negative_prompt + 可用工具描述。
-        用于 plan_task_execute_node 中 Executor 的 SystemMessage。
+        组合 system_prompt + negative_prompt。
+        工具描述由 llm.bind_tools() 在 API 层面提供，此处不再重复注入，
+        避免与 bind_tools 的结构化工具定义冗余。
 
         Args:
             token: 用户身份 Token。
@@ -241,16 +242,11 @@ class AgentConfig:
         Returns:
             完整的系统消息文本。若 Agent 无 system_prompt，返回默认提示。
         """
-        tools = self.get_filtered_tools(token, allowed_tools)
-
         parts = []
         if self.system_prompt:
             parts.append(self.system_prompt)
         if self.negative_prompt:
             parts.append(f"\n## 禁止事项\n{self.negative_prompt}")
-        if tools:
-            tool_desc = "\n".join(f"- **{t.name}**: {t.description}" for t in tools)
-            parts.append(f"\n## 可用工具\n{tool_desc}")
 
         return "\n\n".join(parts) if parts else "你是一个任务执行助手，请完成分配给你的任务。"
 

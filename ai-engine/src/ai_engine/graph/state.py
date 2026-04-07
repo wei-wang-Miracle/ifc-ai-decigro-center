@@ -287,6 +287,14 @@ class AgentState(BaseModel):
         default="", description="从长期记忆检索到的用户事实与经验摘要（跨会话）"
     )
 
+    # 子图分阶段执行的恢复元数据（仅子图 Executor 写入）
+    subgraph_resume_meta: dict | None = Field(
+        default=None,
+        description="子图分阶段执行时的恢复元数据，包含子图名称和中间状态快照。"
+        "非 None 时表示当前步骤的子图尚未完成，approve 后应重新进入 Executor 而非推进步骤索引。"
+        "子图完成后由 Executor 清除为 None。",
+    )
+
     # 审计追踪：各图节点的执行记录（由各节点自行追加）
     node_traces: list[dict] = Field(
         default_factory=list,

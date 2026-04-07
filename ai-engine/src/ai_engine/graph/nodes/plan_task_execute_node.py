@@ -6,6 +6,7 @@
 主流程五阶段：前置校验 → 步骤执行 → 观察评估 → 审核判定 → 构建返回。
 """
 
+import json
 import time
 from typing import Any
 
@@ -17,7 +18,8 @@ from pydantic import BaseModel, Field
 
 from ...llm_factory import create_creative_llm, create_deterministic_llm, create_extraction_llm
 from ...registry import get_agent_registry, get_tool_registry
-from ..state import AgentState, EvalVerdict, PlanStep, StepResult, StepStatus
+from ..state import AgentState, EvalVerdict, PlanStep, ReviewStatus, StepResult, StepStatus
+from ..subgraphs.registry import get_subgraph, is_subgraph_executor
 
 # ═══════════════════════════════════════════════════════════
 #  结论提取（审核场景）
@@ -207,6 +209,74 @@ async def _evaluate_result(
 # ═══════════════════════════════════════════════════════════
 
 
+def _parse_tool_error_type(result_str: str) -> str | None:
+    """从工具返回值中解析错误类型标记。
+
+    HTTP 工具在 factory 层将错误封装为 JSON，包含 tool_error_type 字段:
+    - "business": 业务错误(500)，参数有误或数据不存在，LLM 可修正参数重试
+    - "auth": 权限错误(401/403)，不可通过修改参数解决
+    - "system": 系统/协议错误(404/405 等)，不可重试
+    - "network": 网络异常(超时/DNS 等)，不可重试
+
+    Returns:
+        错误类型字符串，正常返回时为 None。
+    """
+    try:
+        data = json.loads(result_str)
+        if isinstance(data, dict) and "tool_error_type" in data:
+            return data["tool_error_type"]
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return None
+
+
+def _build_failure_guidance(
+    business_failures: list[str],
+    system_failures: list[str],
+    exception_failures: list[str],
+) -> str | None:
+    """根据分类后的错误列表构建差异化引导提示。
+
+    三层策略:
+    - 业务错误: 引导修正参数重试
+    - 系统错误: 告知不可重试，引导跳过或换工具
+    - 异常错误: 告知工具内部故障，引导换工具
+
+    Returns:
+        引导提示文本，无错误时返回 None。
+    """
+    if not business_failures and not system_failures and not exception_failures:
+        return None
+
+    parts = ["注意: 本轮工具调用出现以下问题，请按类型分别处理。\n"]
+
+    if business_failures:
+        parts.append(
+            f"【业务错误 - 可修正】\n"
+            f"{chr(10).join(business_failures)}\n"
+            "该错误通常是参数有误或数据不存在。请分析错误详情中的提示信息，"
+            "修正参数后重新调用。\n"
+        )
+
+    if system_failures:
+        parts.append(
+            f"【系统错误 - 不可重试】\n"
+            f"{chr(10).join(system_failures)}\n"
+            "该错误属于权限不足或协议级问题，修改参数无法解决。"
+            "请放弃该工具，尝试换用其他工具达成目标，或基于已有数据给出结论。\n"
+        )
+
+    if exception_failures:
+        parts.append(
+            f"【工具异常 - 不可重试】\n"
+            f"{chr(10).join(exception_failures)}\n"
+            "该工具内部发生异常。请勿重试同一工具，"
+            "尝试换用其他可用工具，或基于已有数据给出结论。\n"
+        )
+
+    return "\n".join(parts)
+
+
 async def _execute_with_tool_loop(
     llm_with_tools: Any,
     messages: list[Any],
@@ -219,6 +289,10 @@ async def _execute_with_tool_loop(
 
     每轮 LLM 可请求多个工具调用，全部执行后进入下一轮，
     直到 LLM 不再请求工具（产出最终回答）或达到最大轮次。
+
+    引导机制：
+    - 失败引导：工具调用出现失败时，注入纠偏提示引导 LLM 修正参数或换用其他工具
+    - 综合引导：达到最大轮次前的最后一轮，注入综合提示引导 LLM 整合所有结果
 
     Returns:
         (final_output, tools_called) — 最终文本输出和实际调用的工具名称列表。
@@ -246,7 +320,11 @@ async def _execute_with_tool_loop(
             f"{[tc.get('name') for tc in response.tool_calls]}"
         )
 
-        # 逐个执行工具调用，将结果以 ToolMessage 追加到消息列表
+        # 逐个执行工具调用，按错误类型分类记录
+        business_failures = []   # 业务错误(500): 参数有误、数据不存在等，可修正
+        system_failures = []     # 系统错误(401/403/404/405): 权限、协议级问题，不可重试
+        exception_failures = []  # Python 异常: 工具内部崩溃
+
         for tool_call in response.tool_calls:
             tool_name = tool_call.get("name", "")
             tools_called.append(tool_name)
@@ -261,27 +339,78 @@ async def _execute_with_tool_loop(
                     latency_ms = int((time.time() - tool_start_ts) * 1000)
                     result_str = str(tool_result) if tool_result is not None else "执行成功"
                     print(
-                        f"[Executor] 工具 '{tool_name}' 执行成功，"
-                        f"耗时 {latency_ms}ms，返回: {result_str[:200]}"
+                        f"[Executor] 工具 '{tool_name}' 返回，"
+                        f"耗时 {latency_ms}ms，内容: {result_str[:200]}"
                     )
                     messages.append(ToolMessage(tool_call_id=tool_call["id"], content=result_str))
+
+                    # 检测 HTTP 工具返回的结构化错误(非异常，但业务/系统级失败)
+                    error_type = _parse_tool_error_type(result_str)
+                    if error_type == "business":
+                        business_failures.append(
+                            f"工具 '{tool_name}' 返回业务错误: {result_str[:200]}"
+                        )
+                    elif error_type in ("auth", "system", "network"):
+                        system_failures.append(
+                            f"工具 '{tool_name}' 返回系统错误({error_type}): {result_str[:200]}"
+                        )
+
                 except Exception as e:
                     latency_ms = int((time.time() - tool_start_ts) * 1000)
-                    print(f"[Executor] 工具 '{tool_name}' 执行失败，耗时 {latency_ms}ms，错误: {e}")
+                    error_msg = f"错误: {e!s}"
+                    print(f"[Executor] 工具 '{tool_name}' 执行异常，耗时 {latency_ms}ms，错误: {e}")
                     messages.append(
-                        ToolMessage(tool_call_id=tool_call["id"], content=f"错误: {e!s}")
+                        ToolMessage(tool_call_id=tool_call["id"], content=error_msg)
                     )
+                    exception_failures.append(f"工具 '{tool_name}' 调用异常: {e!s}")
             else:
+                error_msg = f"错误: 找不到工具 {tool_name}"
                 print(f"[Executor] 工具 '{tool_name}' 未在注册中心找到")
                 messages.append(
-                    ToolMessage(
-                        tool_call_id=tool_call["id"],
-                        content=f"错误: 找不到工具 {tool_name}",
+                    ToolMessage(tool_call_id=tool_call["id"], content=error_msg)
+                )
+                system_failures.append(f"工具 '{tool_name}' 不存在，请检查工具名称是否正确")
+
+        # ── 失败引导：根据错误类型注入不同纠偏策略 ──
+        guidance = _build_failure_guidance(business_failures, system_failures, exception_failures)
+        if guidance:
+            messages.append(HumanMessage(content=guidance))
+            print(
+                f"[Executor] 已注入分层失败引导 "
+                f"(业务={len(business_failures)}, 系统={len(system_failures)}, "
+                f"异常={len(exception_failures)})"
+            )
+
+        # ── 综合引导：倒数第二轮结束后，引导 LLM 综合结果 ──
+        if iteration == max_iterations - 2:
+            messages.append(
+                HumanMessage(
+                    content=(
+                        "你即将用尽工具调用轮次。"
+                        "请综合以上所有工具调用结果，给出完整的执行结论。"
+                        "如仍需调用工具，请仅调用最关键的一个。"
                     )
                 )
+            )
+            print("[Executor] 已注入综合引导（倒数第二轮）")
+
     else:
-        # 达到最大轮次仍未结束，取最后一条消息内容
-        final_output = messages[-1].content if messages else "执行超时"
+        # 达到最大轮次仍未结束，注入最终综合指令并做一次收尾调用
+        messages.append(
+            HumanMessage(
+                content=(
+                    "工具调用轮次已用尽。请不要再调用任何工具，"
+                    "直接基于已获取的所有工具调用结果，给出完整的执行结论。"
+                )
+            )
+        )
+        print("[Executor] 轮次耗尽，注入最终综合指令进行收尾调用")
+        try:
+            final_response = await llm_with_tools.ainvoke(messages, config=config)
+            final_output = final_response.content or "执行超时"
+        except Exception as e:
+            print(f"[Executor] 收尾调用失败: {e}")
+            final_output = messages[-2].content if len(messages) >= 2 else "执行超时"
 
     return final_output, tools_called
 
@@ -517,6 +646,110 @@ def _build_command(
 
 
 # ═══════════════════════════════════════════════════════════
+#  子图执行路径
+# ═══════════════════════════════════════════════════════════
+
+
+async def _execute_step_with_subgraph(
+    step: PlanStep,
+    state: AgentState,
+    config: RunnableConfig,
+) -> tuple[StepResult, dict | None]:
+    """使用子图执行步骤（替代 ReAct 工具循环）。
+
+    子图分两阶段执行：
+    1. 首次执行: query_labels → build_group → 返回 phase=pending_confirm
+    2. 用户确认后: 主图再次进入 executor，传入 phase=resume_after_confirm → create_and_verify
+
+    通过 subgraph_resume_meta 在两次 invoke 之间传递子图中间状态。
+
+    Returns:
+        (result, resume_meta) — resume_meta 非 None 时表示子图需要用户确认后恢复。
+    """
+    subgraph = get_subgraph(state.current_executor)
+    if subgraph is None:
+        return StepResult(
+            step_id=step.step_id,
+            success=False,
+            error=f"子图 '{state.current_executor}' 未注册",
+        ), None
+
+    # 构建前序步骤产出(共享黑板)
+    prior_outputs = "\n".join(
+        f"步骤 {r.step_id}: {r.output}" for r in state.step_results if r.success
+    )
+
+    # 判断是首次执行还是恢复执行
+    resume_meta = state.subgraph_resume_meta
+    is_resume = (
+        resume_meta is not None
+        and resume_meta.get("executor") == state.current_executor
+        and state.review_status == ReviewStatus.APPROVED
+    )
+
+    if is_resume:
+        # 用户已确认，恢复执行创建阶段
+        print(f"[Executor] 子图恢复执行: {state.current_executor}, phase=resume_after_confirm")
+        sub_input = {
+            "query": state.query,
+            "token": state.token,
+            "prior_step_outputs": prior_outputs,
+            "phase": "resume_after_confirm",
+            "review_feedback": "",
+            # 恢复中间状态：传递通用的 create_payload 和 preview_result
+            "create_payload": resume_meta.get("create_payload", ""),
+            "preview_result": resume_meta.get("preview_result", ""),
+        }
+    else:
+        # 首次执行
+        print(f"[Executor] 子图首次执行: {state.current_executor}")
+        sub_input = {
+            "query": state.query,
+            "token": state.token,
+            "prior_step_outputs": prior_outputs,
+            "phase": "",
+            "review_feedback": state.review_feedback or "",
+        }
+
+    try:
+        sub_result = await subgraph.ainvoke(sub_input)
+    except Exception as e:
+        print(f"[Executor] 子图执行异常: {e}")
+        return StepResult(step_id=step.step_id, success=False, error=f"子图执行失败: {e!s}"), None
+
+    phase = sub_result.get("phase", "")
+    success = sub_result.get("success", True)
+    output = sub_result.get("output", "")
+    error = sub_result.get("error", "")
+
+    if error and not success:
+        return StepResult(step_id=step.step_id, success=False, error=error, output=output), None
+
+    # 子图需要用户确认(pending_confirm) — 返回 resume_meta 供主图保存
+    if phase == "pending_confirm":
+        new_resume_meta = {
+            "executor": state.current_executor,
+            "create_payload": sub_result.get("create_payload", ""),
+            "preview_result": sub_result.get("preview_result", ""),
+        }
+        result = StepResult(
+            step_id=step.step_id,
+            success=True,
+            output=output,
+            conclusion=output,
+        )
+        return result, new_resume_meta
+
+    # 子图完全完成
+    result = StepResult(
+        step_id=step.step_id,
+        success=success,
+        output=output,
+    )
+    return result, None
+
+
+# ═══════════════════════════════════════════════════════════
 #  主流程: LangGraph 节点函数
 # ═══════════════════════════════════════════════════════════
 
@@ -526,7 +759,7 @@ async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> C
 
     五个阶段:
     1. 前置校验: 检查待执行步骤和可用 Agent
-    2. 步骤执行: 加载 Agent 配置，构建 Prompt，进入 ReAct 工具循环
+    2. 步骤执行: 子图分发或 ReAct 工具循环
     3. 观察评估: 规则校验 + 语义校验，三路分流(PASS/RETRY/ESCALATE)
     4. 审核判定: 收集 StepResult，判定是否触发人工审核
     5. 构建返回: 审核 → dispatcher(review)，正常 → dispatcher(下一步)
@@ -540,16 +773,68 @@ async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> C
 
     plan, step, token, agent_alias, agent_config = step_ctx
 
-    # 判断 Agent 是否配置了工具(用于观察层规则校验)
-    agent_has_tools = bool(agent_config and agent_config.raw_bound_tools)
-
-    # ── 阶段 2 + 3: 步骤执行 + 观察评估(含内部重试循环) ────
+    # ── 阶段 2: 步骤执行 ─────────────────────────────────
     await adispatch_custom_event(
         "agent_start",
         {"agent": state.current_executor, "alias": agent_alias, "step_id": step.step_id},
         config=config,
     )
     step.status = StepStatus.IN_PROGRESS
+
+    # === 子图分发判断 ===
+    if is_subgraph_executor(state.current_executor):
+        # 子图执行路径：确定性 DAG，不走 ReAct 循环和观察评估
+        result, sub_resume_meta = await _execute_step_with_subgraph(step, state, config)
+
+        await adispatch_custom_event(
+            "agent_end",
+            {"agent": state.current_executor, "step_id": step.step_id, "success": result.success},
+            config=config,
+        )
+
+        # 子图 pending_confirm：需要用户确认，走 review 链路
+        if sub_resume_meta is not None:
+            step.status = StepStatus.NEEDS_REVIEW
+            step_results = [*list(state.step_results), result]
+
+            return Command(
+                update={
+                    "step_results": step_results,
+                    "require_review": True,
+                    "plan": plan,
+                    "subgraph_resume_meta": sub_resume_meta,
+                    "messages": [
+                        AIMessage(
+                            content=f"[Executor] 子图 {state.current_executor} 预览完成，等待用户确认"
+                        )
+                    ],
+                },
+                goto="dispatcher",
+            )
+
+        # 子图完全完成（含恢复执行完成的情况）
+        step.status = StepStatus.COMPLETED if result.success else StepStatus.FAILED
+        step_results = [*list(state.step_results), result]
+
+        return Command(
+            update={
+                "step_results": step_results,
+                "current_step_index": state.current_step_index + 1,
+                "plan": plan,
+                "subgraph_resume_meta": None,
+                "review_status": None,
+                "review_feedback": None,
+                "messages": [
+                    AIMessage(content=result.output or f"[Executor] 步骤 {step.step_id} 执行完成")
+                ],
+            },
+            goto="dispatcher",
+        )
+
+    # === 原有 ReAct 循环路径（不变）===
+
+    # 判断 Agent 是否配置了工具(用于观察层规则校验)
+    agent_has_tools = bool(agent_config and agent_config.raw_bound_tools)
 
     eval_feedback = None
     force_escalate = False
