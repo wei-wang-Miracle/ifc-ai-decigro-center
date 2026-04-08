@@ -321,8 +321,8 @@ async def _execute_with_tool_loop(
         )
 
         # 逐个执行工具调用，按错误类型分类记录
-        business_failures = []   # 业务错误(500): 参数有误、数据不存在等，可修正
-        system_failures = []     # 系统错误(401/403/404/405): 权限、协议级问题，不可重试
+        business_failures = []  # 业务错误(500): 参数有误、数据不存在等，可修正
+        system_failures = []  # 系统错误(401/403/404/405): 权限、协议级问题，不可重试
         exception_failures = []  # Python 异常: 工具内部崩溃
 
         for tool_call in response.tool_calls:
@@ -359,16 +359,12 @@ async def _execute_with_tool_loop(
                     latency_ms = int((time.time() - tool_start_ts) * 1000)
                     error_msg = f"错误: {e!s}"
                     print(f"[Executor] 工具 '{tool_name}' 执行异常，耗时 {latency_ms}ms，错误: {e}")
-                    messages.append(
-                        ToolMessage(tool_call_id=tool_call["id"], content=error_msg)
-                    )
+                    messages.append(ToolMessage(tool_call_id=tool_call["id"], content=error_msg))
                     exception_failures.append(f"工具 '{tool_name}' 调用异常: {e!s}")
             else:
                 error_msg = f"错误: 找不到工具 {tool_name}"
                 print(f"[Executor] 工具 '{tool_name}' 未在注册中心找到")
-                messages.append(
-                    ToolMessage(tool_call_id=tool_call["id"], content=error_msg)
-                )
+                messages.append(ToolMessage(tool_call_id=tool_call["id"], content=error_msg))
                 system_failures.append(f"工具 '{tool_name}' 不存在，请检查工具名称是否正确")
 
         # ── 失败引导：根据错误类型注入不同纠偏策略 ──
@@ -495,7 +491,9 @@ async def _execute_step_with_agent(
             "请根据上述反馈修正执行方式，确保使用工具获取真实数据。"
         )
 
-    prompt_parts.append("\n请执行上述任务，必要时调用可用工具。完成后返回执行结果。")
+    prompt_parts.append(
+        "\n请执行上述任务，当存在可用工具时，请调用工具，严禁凭空生成或编造数据。在调用工具并获得结果之前，不要直接给出最终回答，完成后返回执行结果。"
+    )
 
     try:
         messages = [HumanMessage(content="\n".join(prompt_parts))]
@@ -658,10 +656,12 @@ async def _execute_step_with_subgraph(
     """使用子图执行步骤（替代 ReAct 工具循环）。
 
     子图分两阶段执行：
-    1. 首次执行: query_labels → build_group → 返回 phase=pending_confirm
-    2. 用户确认后: 主图再次进入 executor，传入 phase=resume_after_confirm → create_and_verify
+    1. 首次执行: 子图前半段节点 → 返回 phase=pending_confirm(等待用户确认)
+    2. 用户确认后: 主图再次进入 executor，传入 phase=resume_after_confirm → 子图后半段节点
 
     通过 subgraph_resume_meta 在两次 invoke 之间传递子图中间状态。
+    中间状态的保存/恢复采用通用化方式：子图结果中除 output/success/error/phase
+    以外的所有字段都会被保存，恢复时全部传回子图。
 
     Returns:
         (result, resume_meta) — resume_meta 非 None 时表示子图需要用户确认后恢复。
@@ -687,8 +687,11 @@ async def _execute_step_with_subgraph(
         and state.review_status == ReviewStatus.APPROVED
     )
 
+    # 通用公共字段(所有子图共用)
+    _COMMON_KEYS = {"output", "success", "error", "phase"}
+
     if is_resume:
-        # 用户已确认，恢复执行创建阶段
+        # 用户已确认，恢复执行(传入 phase=resume_after_confirm + 全部中间状态)
         print(f"[Executor] 子图恢复执行: {state.current_executor}, phase=resume_after_confirm")
         sub_input = {
             "query": state.query,
@@ -696,10 +699,11 @@ async def _execute_step_with_subgraph(
             "prior_step_outputs": prior_outputs,
             "phase": "resume_after_confirm",
             "review_feedback": "",
-            # 恢复中间状态：传递通用的 create_payload 和 preview_result
-            "create_payload": resume_meta.get("create_payload", ""),
-            "preview_result": resume_meta.get("preview_result", ""),
         }
+        # 将 resume_meta 中保存的子图中间状态全部传回(除 executor 标识外)
+        for key, value in resume_meta.items():
+            if key != "executor":
+                sub_input[key] = value
     else:
         # 首次执行
         print(f"[Executor] 子图首次执行: {state.current_executor}")
@@ -725,13 +729,14 @@ async def _execute_step_with_subgraph(
     if error and not success:
         return StepResult(step_id=step.step_id, success=False, error=error, output=output), None
 
-    # 子图需要用户确认(pending_confirm) — 返回 resume_meta 供主图保存
+    # 子图需要用户确认(pending_confirm) — 通用化保存所有中间状态到 resume_meta
     if phase == "pending_confirm":
-        new_resume_meta = {
-            "executor": state.current_executor,
-            "create_payload": sub_result.get("create_payload", ""),
-            "preview_result": sub_result.get("preview_result", ""),
-        }
+        new_resume_meta = {"executor": state.current_executor}
+        # 将子图结果中除通用字段外的所有字段保存到 resume_meta
+        for key, value in sub_result.items():
+            if key not in _COMMON_KEYS:
+                new_resume_meta[key] = value
+
         result = StepResult(
             step_id=step.step_id,
             success=True,

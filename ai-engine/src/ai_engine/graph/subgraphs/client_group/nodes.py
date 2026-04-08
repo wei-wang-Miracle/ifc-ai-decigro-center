@@ -188,7 +188,10 @@ _BUILD_GROUP_PROMPT = """
 
 {prior_context}
 
-提示：请利用提供的工具进行自主推演。如有需要，你可以调用示例工具获取结构参考，并调用预览工具进行参数正确性测试。
+## 执行要求（必须遵守）
+1. 你**必须**先调用工具获取标准结构参考，了解参数格式。
+2. 构建好条件后，你**必须**调用工具验证参数正确性并获取客群人数预览。
+3. 严禁跳过工具调用直接给出最终结论。在调用工具并获得结果之前，不要输出最终回答。
 """
 
 
@@ -325,8 +328,10 @@ def create_and_verify_node(state: ClientGroupState) -> dict:
     """确定性创建客群并验证，无 LLM 参与。
 
     两步确定性工具调用：
-    1. create_client_group — 参数来自 build_group_node 产出的 create_payload
-    2. xing — 二次确认客群已出现在列表中
+    1. create_client_group — 参数来自 build_group_node 产出的 create_payload，
+       返回 {"code":200,"info":clientGroupId}
+    2. get_client_group_detail — 使用返回的 clientGroupId 二次确认客群已创建成功，
+       验证不通过则整体失败
     """
     print("[ClientGroupSubgraph] 节点: create_and_verify")
 
@@ -359,25 +364,43 @@ def create_and_verify_node(state: ClientGroupState) -> dict:
         print(f"[ClientGroupSubgraph] create_client_group 失败: {error_info}")
         return {"error": f"创建客群失败: {error_info}", "success": False}
 
-    print("[ClientGroupSubgraph] create_client_group 成功")
+    # 从返回结构中提取 clientGroupId
+    client_group_id = create_data.get("info")
+    if not client_group_id:
+        print("[ClientGroupSubgraph] create_client_group 返回 code=200 但 info 为空")
+        return {"error": "创建客群失败: 返回的 clientGroupId 为空", "success": False}
 
-    # ── 步骤 2: 验证客群已创建 ──
-    print("[ClientGroupSubgraph] 调用 get_client_group_detail 验证")
-    verify_result = _invoke_tool("get_client_group_detail", state.token)
+    print(f"[ClientGroupSubgraph] create_client_group 成功，clientGroupId={client_group_id}")
+
+    # ── 步骤 2: 使用 clientGroupId 验证客群已创建 ──
+    print(
+        f"[ClientGroupSubgraph] 调用 get_client_group_detail 验证，clientGroupId={client_group_id}"
+    )
+    verify_result = _invoke_tool(
+        "get_client_group_detail", state.token, clientGroupId=client_group_id
+    )
 
     try:
         verify_data = json.loads(verify_result) if isinstance(verify_result, str) else verify_result
     except (json.JSONDecodeError, TypeError):
-        # 验证接口解析失败不阻塞，创建已成功
-        print("[ClientGroupSubgraph] get_client_group_detail 返回值解析失败，跳过验证")
-        return {"output": "客群创建成功（验证接口异常，请手动确认）", "success": True}
+        print("[ClientGroupSubgraph] get_client_group_detail 返回值解析失败")
+        return {
+            "error": f"客群验证失败: 验证接口返回值无法解析，clientGroupId={client_group_id}",
+            "success": False,
+        }
 
     if verify_data.get("code") != 200:
-        print("[ClientGroupSubgraph] get_client_group_detail 调用失败，跳过验证")
-        return {"output": "客群创建成功（验证接口异常，请手动确认）", "success": True}
+        error_info = verify_data.get("info", verify_data.get("error", "未知错误"))
+        print(f"[ClientGroupSubgraph] get_client_group_detail 验证失败: {error_info}")
+        return {
+            "error": f"客群验证失败: {error_info}，clientGroupId={client_group_id}",
+            "success": False,
+        }
 
-    print("[ClientGroupSubgraph] create_and_verify 完成: 创建并验证成功")
-    return {"output": "客群创建成功，已确认", "success": True}
+    print(
+        f"[ClientGroupSubgraph] create_and_verify 完成: 创建并验证成功，clientGroupId={client_group_id}"
+    )
+    return {"output": f"客群创建成功，已确认。clientGroupId={client_group_id}", "success": True}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -396,7 +419,7 @@ def route_entry(state: ClientGroupState) -> str:
     if state.phase == "resume_after_confirm":
         print("[ClientGroupSubgraph] 恢复执行: 用户已确认，直接进入创建阶段")
         return "create_and_verify"
-    
+
     if state.review_feedback and state.labels_cache:
         print("[ClientGroupSubgraph] 重构建: 收到用户修改意见且已有缓存，直接进入构建阶段")
         return "build_group"

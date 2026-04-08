@@ -33,6 +33,7 @@ from .nodes import (
     responder_node,
 )
 from .state import AgentState
+from .subgraphs.ai_strategy_creater.graph import build_strategy_creation_subgraph
 from .subgraphs.client_group.graph import build_client_group_subgraph
 from .subgraphs.registry import register_subgraph
 
@@ -57,6 +58,9 @@ def _build_graph(checkpointer) -> object:
     # --- 编译并注册子图 ---
     client_group_sg = build_client_group_subgraph()
     register_subgraph("ai_client_group_creater", client_group_sg.compile())
+
+    strategy_creation_sg = build_strategy_creation_subgraph()
+    register_subgraph("ai_strategy_creater", strategy_creation_sg.compile())
 
     workflow = StateGraph(AgentState)
 
