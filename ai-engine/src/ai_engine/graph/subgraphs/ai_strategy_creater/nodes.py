@@ -186,7 +186,9 @@ def _extract_json_from_output(text: str) -> dict | None:
 
     # 策略1：尝试直接解析整段文本
     try:
-        return json.loads(text)
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
     except (json.JSONDecodeError, TypeError):
         pass
 
@@ -196,7 +198,9 @@ def _extract_json_from_output(text: str) -> dict | None:
     match = json_block_pattern.search(text)
     if match:
         try:
-            return json.loads(match.group(1).strip())
+            parsed = json.loads(match.group(1).strip())
+            if isinstance(parsed, dict):
+                return parsed
         except (json.JSONDecodeError, TypeError):
             pass
 

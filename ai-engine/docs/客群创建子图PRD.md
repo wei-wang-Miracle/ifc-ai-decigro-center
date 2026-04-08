@@ -1,449 +1,341 @@
-# 客群创建子图 PRD - 基于 LangGraph Ralph 反馈循环
+# 智能客群创建子图 PRD（基于代码实现反向维护）
+
+> **文档性质**：本文档由代码实现反向生成，忠实反映 `ai-engine/src/ai_engine/graph/subgraphs/client_group/` 的实际行为。
+>
+> **最后同步版本**：commit `d449692`（subgraph-0403 分支）
+
+---
 
 ## 1. 概述
 
-### 1.1 文档目的
+### 1.1 子图定位
 
-本文档定义了基于 LangGraph Subgraph 架构的**客群创建子图**的产品需求与设计规范。该子图通过 Ralph 反馈循环（Predict-Act-Feedback-Adjust）实现 AI Agent 与用户的协同交互，确保客群创建过程的可控性与准确性。
+**智能客群创建子图**（注册名 `ai_client_group_creater`）是主图 Executor 节点的一个可插拔子流程，
+负责将用户自然语言需求转化为系统可识别的客群条件，并在人工确认后落地创建客群实体。
 
-### 1.2 设计背景
+核心价值：
+- **流程强制**：查标签 → 学结构 → 构建条件 → 预览人数 → 用户确认 → 创建 → 验证，步步不可跳过
+- **人机回环**：通过 `phase` 标记暂停，由主图 `human_review_node` 统一处理确认/驳回
+- **条件一致性**：创建时复用预览阶段的参数快照，确保"所见即所得"
 
-当前 AI-Native 客群接口已通过 ToolCard 注解暴露了 5 个核心工具，AI Agent 可以独立调用完成客群创建。然而，缺少统一的流程编排与状态管理，导致：
-- AI 可能跳过关键验证步骤直接创建
-- 用户无法有效介入确认环节
-- 条件构建错误时缺乏有效的回退机制
+### 1.2 职能边界
 
-通过 LangGraph Subgraph 将这些工具编排为有状态的反馈循环，可实现：
-- 流程强制执行（每步必达）
-- 人机回环（Human-in-the-loop）
-- 状态持久化与条件一致性保证
+| 维度 | 子图职责（IN） | 子图不管（OUT） |
+|------|---------------|----------------|
+| **需求解析** | 将自然语言映射为 groupConditions 结构 | 不负责意图识别（由 Planner 判定是否需要创建客群） |
+| **标签字典** | 调用 `query_all_labels` 获取并缓存 | 不维护标签元数据，不做标签 CRUD |
+| **条件构建** | LLM ReAct 循环：学习示例 → 构建 → 预览验证 → 自修复 | 不硬编码任何字段名/枚举值，完全依赖标签字典 |
+| **预览验证** | 调用 `preview_client_group_count` 获取匹配人数 | 不判断人数是否"合理"（由 LLM 自主决策） |
+| **人工确认** | 产出 `phase=pending_confirm` 信号 + 预览摘要 | 不实现 interrupt()，不直接与前端交互 |
+| **驳回重构** | 接收 `review_feedback`，在已有标签缓存上重新构建 | 不处理"需要整体重新规划"的场景（由主图 feedback 节点分流） |
+| **创建执行** | 确定性调用 `create_client_group` | 不生成客群名称/备注（来自上游参数或 LLM 产出） |
+| **创建验证** | 调用 `get_client_group_detail` 二次确认 | 不做创建失败后的自动重试 |
+| **状态持久化** | 通过 `subgraph_resume_meta` 在两次调用间传递中间状态 | 不自带 checkpointer，由主图 PostgreSQL checkpoint 统一管理 |
+| **工具管理** | 通过 `ToolRegistry` 动态获取工具实例 | 不定义工具 schema，工具定义来自 bus-kernel ToolCard |
 
-### 1.3 核心工具清单
-核心输入 和 核心输出 均来自tool_registry的注册信息
+### 1.3 触发条件
 
-| 工具名称 | 功能 | HTTP方法 | 核心输入 | 核心输出 |
-|---------|------|---------|---------|---------|
-| `query_all_labels` | 获取所有可用标签 | GET | 无 | 标签列表（field、valueType、supportedOperators、enumOptions） |
-| `get_example_client_group` | 获取示例客群配置 | GET | 无 | 示例客群详情（含 groupConditions 结构） |
-| `preview_client_group_count` | 预览客群人数 | POST | groupConditions | 人数描述字符串 |
-| `create_client_group` | 创建客群 | POST | name、remark、groupConditions | clientGroupId |
-| `list_my_client_groups` | 查询用户客群列表 | GET | limit | 客群列表 |
+Planner 在生成 PlanStep 时，将 `assigned_agent` 设为 `"ai_client_group_creater"` 即触发子图。
+Planner 需预先知晓子图描述信息：
 
-
-### 1.4 子图触发条件：当规划者根据用户需求判定需要进行创建客群操作时，将该子图插入到PlanStep中，并进行触发
-planner必须要先知道子图的信息 **ai_client_group_creater（智能客群生成专家）** 子图
-描述信息： 智能客群生成专家专用于将业务需求转化为系统规则，并实际落地创建目标客群。其特点是严格遵循“查询标签字典 -> 预览客群规模 -> 正式创建客群”的强制工作流，确保规则100%合法。具备强大的“2次报错熔断”自愈机制，遇挫会自动调取标准示例对比重构。当用户需要根据标签、条件圈选并最终生成、落地一个真实客群实体时，必须调用此专家。
-
----
-
-## 2. Ralph 反馈循环设计
-
-### 2.1 Ralph 循环原理
-
-Ralph 反馈循环是一种人机协同的决策框架，通过四个阶段的循环迭代实现最优决策：
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                                                             │
-│    ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐ │
-│    │ PREDICT │───▶│   ACT   │───▶│ FEEDBACK│───▶│ ADJUST  │ │
-│    └─────────┘    └─────────┘    └─────────┘    └─────────┘ │
-│         ▲                                           │       │
-│         │              Ralph Feedback Loop         │       │
-│         └───────────────────────────────────────────┘       │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-```
-
-| 阶段 | 含义 | 在客群场景的映射 |
-|------|------|-----------------|
-| **Predict** | AI 基于输入预测输出 | AI 根据用户画像推断客群条件 |
-| **Act** | 执行动作验证预测 | 调用 preview_client_group_count 预览人数 |
-| **Feedback** | 获取反馈结果 | 获取人数是否符合预期 |
-| **Adjust** | 根据反馈调整策略 | 若不符合，修改条件重新预测 |
-
-### 2.2 客群创建中的 Ralph 循环
-
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                                                                      │
-│  ┌────────────────┐                                                   │
-│  │   1. 预测阶段   │  AI 基于用户画像 + 标签知识，构建 groupConditions  │
-│  │   PREDICT      │                                                   │
-│  └───────┬────────┘                                                   │
-│          │                                                            │
-│          ▼                                                            │
-│  ┌────────────────┐                                                   │
-│  │   2. 行动阶段   │  调用 preview_client_group_count                   │
-│  │   ACT          │  预览客群人数                                      │
-│  └───────┬────────┘                                                   │
-│          │                                                            │
-│          ▼                                                            │
-│  ┌────────────────┐                                                   │
-│  │  3. 反馈阶段    │  获取人数反馈：是否合理、是否为空、是否过多        │
-│  │   FEEDBACK     │                                                   │
-│  └───────┬────────┘                                                   │
-│          │                                                            │
-│          ▼                                                            │
-│  ┌────────────────┐                                                   │
-│  │  4. 调整阶段    │  人机回环：展示条件给用户，征求修改意见            │
-│  │   ADJUST       │  用户确认后重新进入 PREDICT                       │
-│  └───────┬────────┘                                                   │
-│          │                                                            │
-│          │      ┌─────────────────────────────────────────┐          │
-│          │      │           Human-in-the-Loop              │          │
-│          │      │      用户确认 → 创建客群                 │          │
-│          │      └─────────────────────────────────────────┘          │
-│          │                                                            │
-│          │ YES  (用户确认)                                            │
-│          └──────────────────────────────────────────────────────────┐│
-│                                                                       │
-│  ┌────────────────┐                                                   │
-│  │  5. 执行阶段    │  调用 create_client_group                        │
-│  │   EXECUTE      │  保持与预览时完全一致的条件                        │
-│  └───────┬────────┘                                                   │
-│          │                                                            │
-│          ▼                                                            │
-│  ┌────────────────┐                                                   │
-│  │  6. 验证阶段    │  调用 list_my_client_groups                       │
-│  │   VERIFY       │  确认客群已创建                                   │
-│  └───────┬────────┘                                                   │
-│          │                                                            │
-└──────────┼───────────────────────────────────────────────────────────┘
-           │
-           ▼
-     [子图结束]
-```
+> **智能客群生成专家**专用于将业务需求转化为系统规则，并实际落地创建目标客群。
+> 严格遵循"查询标签字典 → 预览客群规模 → 正式创建客群"的强制工作流，确保规则 100% 合法。
+> 当用户需要根据标签、条件圈选并最终生成一个真实客群实体时，必须调用此专家。
 
 ---
 
-## 3. LangGraph 架构设计
+## 2. 工具清单
 
-### 3.1 子图整体架构参考
+子图依赖 5 个 ToolCard 工具，全部通过 `ToolRegistry` 动态获取，按调用方式分两类：
 
-```mermaid
-graph TB
-    subgraph ClientGroupSubgraph["客群创建子图 (ClientGroupSubgraph)"]
-        direction TB
-        
-        START([开始: user_input])
-        END([结束: result])
-        
-        START --> N1
-        N1["query_labels\n获取标签列表"] --> N2
-        N2{"标签已缓存?"} -->|否| N3["fetch_examples\n获取示例客群"]
-        N2 -->|是| N4
-        N3 --> N4["learn_structure\n学习客群结构"]
-        N4{"用户是否提供\n客群条件?"} -->|否| N5["build_conditions\n构建初始条件"]
-        N4 -->|是| N6
-        N5 --> N6["preview_count\n预览客群人数"]
-        N6 --> N7{"人数符合预期?"}
-        N7 -->|否| N8["human_feedback\n人机回环"]
-        N8 --> N9{"用户调整?"}
-        N9 -->|是| N5
-        N9 -->|否| END
-        N7 -->|是| N10["request_confirmation\n请求用户确认"]
-        N10 --> N11{"用户确认?"}
-        N11 -->|是| N12["create_group\n创建客群"]
-        N11 -->|否| N8
-        N12 --> N13["verify_group\n验证客群"]
-        N13 --> N14{"验证通过?"}
-        N14 -->|是| N15["success\n返回结果"]
-        N14 -->|否| N16["report_error\n报告错误"]
-        N15 --> END
-        N16 --> END
-    end
-```
+### 2.1 确定性调用（无 LLM 参与）
+
+| 工具名称 | 调用节点 | 调用方式 | 输入 | 输出 |
+|---------|---------|---------|------|------|
+| `query_all_labels` | `query_labels_node` | `_invoke_tool()` 同步 | 无参数 | `{code:200, info: [标签列表]}` |
+| `create_client_group` | `create_and_verify_node` | `_invoke_tool()` 同步 | `create_payload`（来自预览快照） | `{code:200, info: clientGroupId}` |
+| `get_client_group_detail` | `create_and_verify_node` | `_invoke_tool()` 同步 | `clientGroupId` | `{code:200, info: 客群详情}` |
+
+### 2.2 LLM 绑定调用（ReAct 工具循环）
+
+| 工具名称 | 调用节点 | 调用方式 | 用途 |
+|---------|---------|---------|------|
+| `get_example_client_group` | `build_group_node` | `llm.bind_tools()` → LLM 自主决策 | LLM 学习标准客群结构 |
+| `preview_client_group_count` | `build_group_node` | `llm.bind_tools()` → LLM 自主决策 | 预览匹配人数、验证条件合法性 |
 
 ---
 
-## 4. 完整流程图 (Mermaid)
+## 3. 子图拓扑
 
-### 4.1 Ralph 反馈循环流程图参考
+### 3.1 节点与边
 
-```mermaid
-flowchart TD
-    subgraph RalphLoop["Ralph 反馈循环"]
-        direction TB
-        
-        A["🎯 PREDICT\nAI 预测"] --> B["⚡ ACT\n执行预览"]
-        B --> C["📊 FEEDBACK\n获取反馈"]
-        C --> D{"反馈判断"}
-        
-        D -->|"人数 = 0"| E["🔄 ADJUST\n调整条件"]
-        D -->|"人数过多"| E
-        D -->|"人数合理"| F["✅ CONFIRM\n请求确认"]
-        
-        E --> A
-        F --> G{"用户确认?"}
-        G -->|"是"| H["🚀 EXECUTE\n创建客群"]
-        G -->|"否"| E
-        H --> I["🔍 VERIFY\n验证结果"]
-        I --> J{"验证通过?"}
-        J -->|"是"| K["🎉 SUCCESS\n完成"]
-        J -->|"否"| L["❌ ERROR\n报告错误"]
-    end
+```
+[entry_router]
+    │
+    ├─ 首次执行（phase="" & 无 feedback）──→ query_labels → build_group → [END]
+    │                                                         ↑ phase=pending_confirm
+    │
+    ├─ 驳回重构（有 feedback & 有 labels_cache）──→ build_group → [END]
+    │                                                  ↑ phase=pending_confirm
+    │
+    └─ 确认恢复（phase="resume_after_confirm"）──→ create_and_verify → [END]
 ```
 
-### 4.2 LangGraph 状态机流程图
+### 3.2 入口路由逻辑（`route_entry`）
 
-```mermaid
-stateDiagram-v2
-    [*] --> QueryLabels: 开始
-    
-    state QueryLabels {
-        [*] --> FetchLabels
-        FetchLabels --> FetchExamples
-        FetchExamples --> LearnStructure
-        LearnStructure --> [*]
-    }
-    
-    QueryLabels --> BuildConditions: 标签已加载
-    QueryLabels --> [*]: 标签已缓存
-    
-    state RalphCycle {
-        direction LR
-        BuildConditions: "🔵 build_conditions\n(PREDICT)"
-        PreviewCount: "⚡ preview_count\n(ACT)"
-        HumanFeedback: "📊 human_feedback\n(FEEDBACK/ADJUST)"
-        
-        BuildConditions --> PreviewCount
-        PreviewCount --> HumanFeedback
-        HumanFeedback --> BuildConditions: "需调整"
-        HumanFeedback --> RequestConfirm: "符合预期"
-    }
-    
-    RalphCycle --> RequestConfirmation: 条件确认
-    
-    state RequestConfirmation {
-        [*] --> ShowPreview
-        ShowPreview --> UserDecision
-        UserDecision --> [*]: "确认"
-        UserDecision --> HumanFeedback: "拒绝"
-    }
-    
-    RequestConfirmation --> CreateGroup: 用户确认
-    
-    CreateGroup --> VerifyGroup: 创建成功
-    
-    state VerifyGroup {
-        [*] --> QueryMyGroups
-        QueryMyGroups --> CheckResult
-        CheckResult --> [*]: "找到"
-        CheckResult --> ReportError: "未找到"
-    }
-    
-    VerifyGroup --> [*]: 成功
-    ReportError --> [*]: 失败
+```python
+if phase == "resume_after_confirm":
+    return "create_and_verify"          # 用户已确认，直接创建
+elif review_feedback and labels_cache:
+    return "build_group"                # 驳回重构，跳过标签查询
+else:
+    return "query_labels"               # 首次执行，从头开始
 ```
 
-### 4.3 数据流图参考
+### 3.3 节点职责
 
-```mermaid
-flowchart LR
-    subgraph Input["📥 输入"]
-        U[用户画像输入]
-    end
-    
-    subgraph Tools["🔧 ToolCard 工具"]
-        QL["query_all_labels\n获取标签"]
-        GE["get_example_client_group\n获取示例"]
-        PC["preview_client_group_count\n预览人数"]
-        CG["create_client_group\n创建客群"]
-        LG["list_my_client_groups\n查询客群"]
-    end
-    
-    subgraph State["📊 LangGraph State"]
-        Labels["labels_cache"]
-        Examples["examples_cache"]
-        Conditions["group_conditions"]
-        PreviewRes["preview_result"]
-        PreviewCond["preview_conditions"]
-        CreatedID["created_group_id"]
-    end
-    
-    subgraph Output["📤 输出"]
-        Success["创建成功结果"]
-        Error["错误报告"]
-    end
-    
-    U --> QL
-    QL --> Labels
-    Labels --> GE
-    GE --> Examples
-    Examples --> Conditions
-    Conditions --> PC
-    PC --> PreviewRes
-    PreviewRes --> PreviewCond
-    PreviewCond --> CG
-    CG --> CreatedID
-    CreatedID --> LG
-    LG --> Success
-    LG --> Error
+| 节点 | 类型 | 职责 | 输出到 State |
+|------|------|------|-------------|
+| `query_labels_node` | 确定性 | 调用 `query_all_labels`，缓存标签列表 JSON | `labels_cache` |
+| `build_group_node` | ReAct（异步） | LLM 学习示例 → 构建条件 → 预览验证 → 自修复循环 | `create_payload`, `preview_result`, `phase`, `output` |
+| `create_and_verify_node` | 确定性 | 调用 `create_client_group` → `get_client_group_detail` 二步验证 | `output`, `success` |
+
+---
+
+## 4. 核心流程详解
+
+### 4.1 首次执行（Happy Path）
+
+```
+用户："帮我创建一个30岁以上、资产50万以上的高净值客群"
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────┐
+│  query_labels_node                                  │
+│  · _invoke_tool("query_all_labels", token)          │
+│  · 解析返回 JSON，写入 labels_cache                  │
+└──────────────────────┬──────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────┐
+│  build_group_node（ReAct 循环，最多 4 轮）            │
+│                                                     │
+│  Prompt 注入：                                       │
+│  · {labels} ← labels_cache（截断 8000 字符）         │
+│  · {query} ← 用户原始需求                            │
+│  · {prior_context} ← 上游步骤产出（可选）             │
+│  · {feedback_context} ← 用户修改意见（首次为空）      │
+│                                                     │
+│  LLM 决策循环：                                      │
+│  ┌──────────────────────────────────────────┐       │
+│  │ 第1轮: LLM → 调用 get_example_client_group │      │
+│  │ 第2轮: LLM → 构建条件 → 调用 preview       │      │
+│  │ 第3轮: (如 preview 报错) LLM → 修正 → 再 preview │ │
+│  │ 第N轮: LLM 不再调用工具 → 输出结论          │      │
+│  └──────────────────────────────────────────┘       │
+│                                                     │
+│  后处理：                                            │
+│  · 从 messages 反向提取最后一次成功 preview 的参数    │
+│  · 作为 create_payload 存入 State                    │
+│  · 设置 phase = "pending_confirm"                    │
+└──────────────────────┬──────────────────────────────┘
+                       ▼
+                   [子图 END]
+                       │
+          主图接管：phase=pending_confirm
+                       │
+                       ▼
+              human_review_node
+              (interrupt 暂停等待用户)
+```
+
+### 4.2 用户确认后恢复
+
+```
+用户确认："没问题，创建吧"
+                    │
+          主图恢复：phase="resume_after_confirm"
+          subgraph_resume_meta 注入 create_payload + labels_cache
+                    │
+                    ▼
+          route_entry → "create_and_verify"
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────┐
+│  create_and_verify_node                             │
+│                                                     │
+│  步骤 1: create_client_group                        │
+│  · 解析 create_payload JSON                         │
+│  · _invoke_tool("create_client_group", token, **payload) │
+│  · 校验返回 code=200，提取 clientGroupId             │
+│                                                     │
+│  步骤 2: get_client_group_detail                    │
+│  · _invoke_tool("get_client_group_detail", token,   │
+│                  clientGroupId=clientGroupId)        │
+│  · 校验返回 code=200                                │
+│                                                     │
+│  输出: "客群创建成功，已确认。clientGroupId=xxx"      │
+└─────────────────────────────────────────────────────┘
+```
+
+### 4.3 用户驳回重构
+
+```
+用户："年龄改成25岁以上，另外加一个性别女的条件"
+                    │
+          主图 feedback 节点分流：步骤级调整
+          review_feedback = "年龄改成25岁以上..."
+          labels_cache 从 resume_meta 恢复
+                    │
+                    ▼
+          route_entry → "build_group"（跳过 query_labels）
+                    │
+                    ▼
+          build_group_node 重新执行 ReAct 循环
+          Prompt 额外注入 {feedback_context}
+                    │
+                    ▼
+          再次产出 phase=pending_confirm → 等待确认
 ```
 
 ---
 
-## 5. 详细交互设计参考
+## 5. State 定义
 
-### 5.1 场景示例
-
-**场景**: 用户说"我想创建一个高净值客户群，年龄30岁以上，资产50万以上"
-
-#### LangGraph 执行序列
-
-```mermaid
-sequenceDiagram
-    participant User as 用户
-    participant Graph as LangGraph
-    participant Tools as ToolCard 工具
-    
-    User->>Graph: 用户输入: "高净值客户群，年龄30岁以上"
-    
-    Graph->>Tools: query_all_labels()
-    Tools-->>Graph: 返回标签列表
-    Graph->>Graph: 更新 labels_cache
-    
-    Graph->>Tools: get_example_client_group()
-    Tools-->>Graph: 返回示例客群
-    Graph->>Graph: AI 学习结构
-    
-    Note over Graph: Ralph PREDICT 阶段
-    Graph->>Graph: AI 解析用户输入
-    Graph->>Graph: 构建 conditions:
-    Note over Graph: 
-        conditions: [{
-            labelField: "age",
-            operator: "gte",
-            values: ["30"]
-        }, {
-            labelField: "asset_total",
-            operator: "gte",
-            values: ["500000"]
-        }]
-    end
-    
-    Note over Graph: Ralph ACT 阶段
-    Graph->>Tools: preview_client_group_count(conditions)
-    Tools-->>Graph: "客群匹配客户数量：[320]"
-    
-    Note over Graph: Ralph FEEDBACK 阶段
-    Graph->>User: 展示预览结果 + 条件
-    Graph->>User: "当前条件可匹配320位客户，是否符合预期？"
-    
-    User->>Graph: 用户反馈: "符合预期"
-    
-    Note over Graph: Ralph CONFIRM 阶段
-    Graph->>User: 请求确认: "请确认创建客群"
-    User->>Graph: 用户确认
-    
-    Note over Graph: EXECUTE 阶段
-    Graph->>Tools: create_client_group(conditions)
-    Note over Graph: 使用 preview_conditions，保持一致
-    Tools-->>Graph: 返回 clientGroupId: 10126
-    
-    Note over Graph: VERIFY 阶段
-    Graph->>Tools: list_my_client_groups(limit=10)
-    Tools-->>Graph: 返回客群列表
-    Graph->>Graph: 验证 10126 存在
-    
-    Graph->>User: "客群创建成功！ID: 10126"
+```
+ClientGroupState (Pydantic BaseModel)
+├── 输入层（主图 → 子图，只读）
+│   ├── query: str              # 用户原始需求
+│   ├── token: str              # 用户身份 Token
+│   ├── prior_step_outputs: str # 前序步骤产出（跨步骤上下文）
+│   ├── phase: str              # 执行阶段："" | "resume_after_confirm"
+│   └── review_feedback: str    # 用户驳回修改意见
+│
+├── 工作层（子图内部读写）
+│   ├── labels_cache: str       # query_all_labels 返回的标签 JSON
+│   ├── create_payload: str     # 可直接用于 create 的参数 JSON（预览快照）
+│   ├── preview_result: str     # 最后一次 preview 返回结果
+│   └── error: str              # 执行错误信息
+│
+└── 输出层（子图 → 主图）
+    ├── output: str             # 最终输出文本
+    └── success: bool           # 执行是否成功
 ```
 
-### 5.2 人机回环交互
-
-```mermaid
-flowchart LR
-    subgraph AI["🤖 AI Agent"]
-        A1["构建条件"] --> A2["预览人数"]
-        A2 --> A3{"分析反馈"}
-        A3 -->|"不合理"| A4["展示调整建议"]
-        A3 -->|"合理"| A5["请求确认"]
-        A4 --> A1
-        A5 --> A6{"用户决策"}
-    end
-    
-    subgraph Human["👤 用户"]
-        H1["查看预览结果"]
-        H2["给出反馈意见"]
-        H3["确认/拒绝"]
-    end
-    
-    subgraph Tool["🔧 系统"]
-        T1["展示条件详情"]
-        T2["展示人数"]
-    end
-    
-    A2 --> T2
-    T2 --> H1
-    H1 --> H2
-    H2 --> A4
-    H2 --> A3
-    A4 --> H1
-    A5 --> H3
-    H3 -->|"确认"| A6
-    H3 -->|"拒绝"| A4
-```
-
-### 5.3 条件一致性保证
-
-```mermaid
-flowchart TB
-    subgraph 构建["PREDICT 阶段"]
-        B1["解析用户输入"] --> B2["生成 groupConditions"]
-        B2 --> B3["存入 group_conditions"]
-    end
-    
-    subgraph 预览["ACT 阶段"]
-        B3 --> P1["取出 group_conditions"]
-        P1 --> P2["调用 preview 接口"]
-        P2 --> P3["存入 preview_conditions"]
-    end
-    
-    subgraph 确认["CONFIRM 阶段"]
-        P3 --> C1["展示 preview_conditions"]
-        C1 --> C2{"用户确认?"}
-        C2 -->|"拒绝"| R1["进入 ADJUST"]
-        C2 -->|"确认"| C3["准备创建"]
-    end
-    
-    subgraph 创建["EXECUTE 阶段"]
-        C3 --> E1["从 preview_conditions 取条件"]
-        E1 --> E2["调用 create 接口"]
-    end
-    
-    subgraph 验证["VERIFY 阶段"]
-        E2 --> V1["调用 list 接口"]
-        V1 --> V2{"验证存在?"}
-        V2 -->|"是"| V3["成功"]
-        V2 -->|"否"| V4["失败"]
-    end
-    
-    R1 --> B1
-```
-
-**关键设计**: `preview_conditions` 字段记录预览时的条件，创建时强制使用该字段，确保用户确认的条件与最终创建的条件完全一致。
+**条件一致性保证**：`create_payload` 来自 `_extract_last_preview_args(messages)`，
+即从 ReAct 对话历史中提取最后一次成功的 `preview_client_group_count` 调用参数。
+创建时直接 `**payload` 展开，确保预览与创建使用完全相同的条件。
 
 ---
 
-## 6. 错误处理与边界情况
+## 6. 与主图的集成契约
 
-### 6.1 错误类型与处理
+### 6.1 生命周期
 
-| 错误场景 | 原因 | 处理策略 |
-|---------|------|---------|
-| `query_all_labels` 调用失败 | 注册中心不可用 | 降级使用缓存标签，或返回友好错误 |
-| `preview_client_group_count` 调用失败 | 条件格式错误 | 解析错误信息，提示 AI 修正条件 |
-| 预测循环超过 5 次 | 用户条件无法满足 | 强制进入确认阶段，告知用户限制 |
-| `create_client_group` 调用失败 | 业务校验失败 | 返回具体错误原因，如"客群名称已存在" |
-| `verify_group` 验证失败 | 创建后查询不到 | 记录错误，尝试重新查询 3 次 |
+```
+builder.py _build_graph()
+    │
+    ├─ build_client_group_subgraph()   # 返回未编译 StateGraph
+    ├─ .compile()                       # 无 checkpointer
+    └─ register_subgraph("ai_client_group_creater", compiled)
+                                        # 写入全局 _SUBGRAPH_REGISTRY
+```
+
+### 6.2 调用方式
+
+主图 `plan_task_execute_node` 中：
+- `is_subgraph_executor("ai_client_group_creater")` → True → 走子图路径
+- `get_subgraph(name).ainvoke(sub_input)` → 异步调用，子图作为普通函数在节点内执行
+
+### 6.3 两次调用间的状态桥接
+
+| 时机 | 机制 | 传递内容 |
+|------|------|---------|
+| 第 1 次调用结束 | Executor 将子图非通用字段存入 `AgentState.subgraph_resume_meta` | `create_payload`, `labels_cache`, `preview_result` 等 |
+| 第 2 次调用开始 | Executor 从 `resume_meta` 恢复字段注入 `sub_input` | 同上 + `phase="resume_after_confirm"` |
+
+### 6.4 主图路由协议
+
+| 子图输出 | 主图行为 |
+|---------|---------|
+| `phase="pending_confirm"` | Executor 设置 `require_review=True` → Dispatcher → `human_review_node`（interrupt） |
+| `success=True` | Executor 记录 StepResult → 推进 `current_step_index` |
+| `success=False` / `error` 非空 | Executor 记录失败 StepResult → 由 Dispatcher 决定是否重试或终止 |
 
 ---
 
-### 9.2 参考资料
+## 7. ReAct 工具循环设计
 
-- [LangGraph 文档](https://langchain-ai.github.io/langgraph/)
-- [Ralph 反馈循环论文](https://arxiv.org/abs/2304.13007)
+### 7.1 循环参数
+
+| 参数 | 值 | 说明 |
+|------|---|------|
+| `_MAX_TOOL_ITERATIONS` | 4 | 断路器上限。正常路径：get_example → preview → (修正) → 结束 |
+| LLM | `create_creative_llm()` | 创意型 LLM，用于条件构建 |
+| 绑定工具 | `get_example_client_group`, `preview_client_group_count` | 仅 2 个工具，职责收敛 |
+
+### 7.2 循环终止条件
+
+1. **LLM 主动结束**：返回的 AIMessage 不含 `tool_calls` → 提取 `content` 作为 `final_output`
+2. **轮次耗尽**：注入收尾指令 → 强制 LLM 基于已有结果给出结论（不再允许调用工具）
+
+### 7.3 预览参数提取
+
+`_extract_last_preview_args(messages)` 逻辑：
+1. 正向遍历收集所有 ToolMessage，按 `tool_call_id` 索引
+2. 反向遍历找最后一个 `preview_client_group_count` 调用
+3. 跳过对应 ToolMessage 含"错误"或 `"error"` 的调用
+4. 返回该调用的 `args` dict → 直接作为 `create_payload`
 
 ---
 
+## 8. 错误处理
+
+### 8.1 错误分层
+
+| 层级 | 场景 | 处理方式 | 是否阻断 |
+|------|------|---------|---------|
+| **工具层** | `_invoke_tool` 调用异常 | 捕获异常，返回 JSON 格式错误信息 | 否，由上层判断 |
+| **节点层 - query_labels** | API 返回非 200 / info 为空 | 设置 `error` + `success=False`，后续节点短路 | 是 |
+| **节点层 - build_group** | labels_cache 为空 / 工具不可用 / LLM 未调用 preview / 无法提取参数 | 设置 `error` + `success=False` | 是 |
+| **节点层 - create_and_verify** | payload 解析失败 / create 非 200 / verify 非 200 | 设置 `error` + `success=False`，含具体错误原因 | 是 |
+| **ReAct 循环** | 工具调用失败 | ToolMessage 注入错误内容 → LLM 通过自然语言反馈自修复 | 否 |
+| **ReAct 循环** | 轮次耗尽 | 注入收尾指令，强制 LLM 产出结论 | 否 |
+
+### 8.2 短路机制
+
+`build_group_node` 和 `create_and_verify_node` 入口均检查 `state.error`：
+```python
+if state.error:
+    return {}  # 或返回失败结果
+```
+上游节点产生的错误会阻止下游节点执行。
+
+---
+
+## 9. 与旧版 PRD 的差异说明
+
+| 维度 | 旧版 PRD 描述 | 实际实现 |
+|------|-------------|---------|
+| **验证工具** | `list_my_client_groups`（列表查询） | `get_client_group_detail`（精确查询，传入 clientGroupId） |
+| **人机回环** | 子图内部 interrupt | 子图产出 `phase` 信号 → 主图 `human_review_node` 统一 interrupt |
+| **Ralph 循环** | 子图内含 Predict-Act-Feedback-Adjust 四阶段循环 | ReAct 工具循环在 `build_group_node` 单节点内完成，无独立 Feedback/Adjust 节点 |
+| **条件构建** | 多节点分步（fetch_examples → learn_structure → build_conditions） | 单节点 `build_group_node` 内 LLM 自主决定调用顺序 |
+| **标签缓存** | 作为是否跳过的条件分支 | 作为入口路由判断依据 + 驳回重构时复用 |
+| **数据流** | State 含 `examples_cache`, `group_conditions`, `preview_conditions` 等多字段 | State 精简为 `labels_cache` + `create_payload`，无独立 examples/conditions 字段 |
+| **错误重试** | verify 失败重试 3 次 | 无重试，verify 失败直接返回 `success=False` |
+| **子图架构** | 描述为 Mermaid 流程图中含多个条件分支节点 | 3 节点 DAG + 条件入口路由，拓扑简洁 |
+
+---
+
+## 附录 A: 文件清单
+
+| 文件 | 职责 |
+|------|------|
+| `subgraphs/client_group/__init__.py` | 包声明 |
+| `subgraphs/client_group/state.py` | `ClientGroupState` 定义 |
+| `subgraphs/client_group/graph.py` | `build_client_group_subgraph()` — 构建 StateGraph 拓扑 |
+| `subgraphs/client_group/nodes.py` | 3 个节点函数 + 入口路由 + 工具辅助 + ReAct 循环 + Prompt 模板 |
+| `subgraphs/registry.py` | 全局子图注册表 |
+| `graph/builder.py` | 编译子图并注册 |
+| `graph/nodes/plan_task_execute_node.py` | Executor 子图调用 + resume_meta 桥接 |
+| `graph/nodes/human_review_node.py` | 人工确认 interrupt |
