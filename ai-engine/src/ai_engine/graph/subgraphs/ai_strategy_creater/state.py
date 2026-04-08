@@ -73,7 +73,7 @@ class StrategyCreationState(BaseModel):
     canvas_payload: str = Field(
         default="",
         description=(
-            "生成的、待提交的策略 JSON 结构(包含 strategy 和 canvasNodes)，"
+            "生成的、待提交的策略 JSON 结构(包含 strategy 和 canvasNodes)，不需要再包装，直接用于创建"
             "由构建阶段 LLM 产出并经过 validate_strategy_canvas 校验"
         ),
     )

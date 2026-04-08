@@ -27,6 +27,7 @@ import json
 import time
 
 from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
 
 from ....llm_factory import create_creative_llm
 from ....registry import get_tool_registry
@@ -81,6 +82,7 @@ async def _react_tool_loop(
     token: str,
     max_iterations: int,
     log_prefix: str = "StrategyCreationSubgraph",
+    config: RunnableConfig = None,
 ) -> tuple[str, list[str]]:
     """ReAct 工具调用循环：LLM 思考 → 调用工具 → 观察结果 → 继续或结束。
 
@@ -105,7 +107,7 @@ async def _react_tool_loop(
 
     for iteration in range(max_iterations):
         print(f"[{log_prefix}] ReAct 第 {iteration + 1}/{max_iterations} 轮")
-        response = await llm_with_tools.ainvoke(messages)
+        response = await llm_with_tools.ainvoke(messages, config=config)
         messages.append(response)
 
         # LLM 不再调用工具 → 产出最终回答
@@ -159,7 +161,7 @@ async def _react_tool_loop(
         )
         print(f"[{log_prefix}] 轮次耗尽，注入收尾指令")
         try:
-            final_response = await llm_with_tools.ainvoke(messages)
+            final_response = await llm_with_tools.ainvoke(messages, config=config)
             final_output = final_response.content or "执行超时"
         except Exception as e:
             print(f"[{log_prefix}] 收尾调用失败: {e}")
@@ -358,7 +360,7 @@ canvasNodes JSON 结构。
 # ═══════════════════════════════════════════════════════════
 
 
-async def preparation_node(state: StrategyCreationState) -> dict:
+async def preparation_node(state: StrategyCreationState, config: RunnableConfig) -> dict:
     """准备阶段：通过 ReAct 工具循环确定 purposeId 和 clientGroupId。
 
     功能:
@@ -415,6 +417,7 @@ async def preparation_node(state: StrategyCreationState) -> dict:
             token=state.token,
             max_iterations=_MAX_PREPARATION_ITERATIONS,
             log_prefix="StrategyCreation-Preparation",
+            config=config,
         )
     except Exception as e:
         print(f"[StrategyCreationSubgraph] preparation 异常: {e}")
@@ -464,7 +467,7 @@ async def preparation_node(state: StrategyCreationState) -> dict:
 # ═══════════════════════════════════════════════════════════
 
 
-async def decision_node(state: StrategyCreationState) -> dict:
+async def decision_node(state: StrategyCreationState, config: RunnableConfig) -> dict:
     """决策阶段：LLM 通过 ReAct 工具循环设计策略拓扑方案。
 
     功能:
@@ -526,6 +529,7 @@ async def decision_node(state: StrategyCreationState) -> dict:
             token=state.token,
             max_iterations=_MAX_DECISION_ITERATIONS,
             log_prefix="StrategyCreation-Decision",
+            config=config,
         )
     except Exception as e:
         print(f"[StrategyCreationSubgraph] decision 异常: {e}")
@@ -604,7 +608,7 @@ async def decision_node(state: StrategyCreationState) -> dict:
 # ═══════════════════════════════════════════════════════════
 
 
-async def construction_node(state: StrategyCreationState) -> dict:
+async def construction_node(state: StrategyCreationState, config: RunnableConfig) -> dict:
     """构建阶段：LLM 通过 ReAct 工具循环生成并校验 canvas_payload。
 
     功能:
@@ -665,6 +669,7 @@ async def construction_node(state: StrategyCreationState) -> dict:
             token=state.token,
             max_iterations=_MAX_CONSTRUCTION_ITERATIONS,
             log_prefix="StrategyCreation-Construction",
+            config=config,
         )
     except Exception as e:
         print(f"[StrategyCreationSubgraph] construction 异常: {e}")

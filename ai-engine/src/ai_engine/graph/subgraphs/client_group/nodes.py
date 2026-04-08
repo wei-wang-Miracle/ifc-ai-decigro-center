@@ -20,6 +20,7 @@ import json
 import time
 
 from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
 
 from ....llm_factory import create_creative_llm
 from ....registry import get_tool_registry
@@ -95,6 +96,7 @@ async def _react_tool_loop(
     tool_registry,
     token: str,
     max_iterations: int = _MAX_TOOL_ITERATIONS,
+    config: RunnableConfig = None,
 ) -> tuple[str, list[str]]:
     """ReAct 工具调用循环：LLM 思考 → 调用工具 → 观察结果 → 继续或结束。
 
@@ -106,7 +108,7 @@ async def _react_tool_loop(
 
     for iteration in range(max_iterations):
         print(f"[ClientGroupSubgraph] ReAct 第 {iteration + 1}/{max_iterations} 轮")
-        response = await llm_with_tools.ainvoke(messages)
+        response = await llm_with_tools.ainvoke(messages, config=config)
         messages.append(response)
 
         if not (hasattr(response, "tool_calls") and response.tool_calls):
@@ -158,7 +160,7 @@ async def _react_tool_loop(
         )
         print("[ClientGroupSubgraph] 轮次耗尽，注入收尾指令")
         try:
-            final_response = await llm_with_tools.ainvoke(messages)
+            final_response = await llm_with_tools.ainvoke(messages, config=config)
             final_output = final_response.content or "执行超时"
         except Exception as e:
             print(f"[ClientGroupSubgraph] 收尾调用失败: {e}")
@@ -192,7 +194,8 @@ _BUILD_GROUP_PROMPT = """
 1. 你**必须**先调用工具获取标准结构参考，了解参数格式。
 2. 构建好条件后，你**必须**调用工具验证参数正确性并获取客群人数预览。
 3. 严禁跳过工具调用直接给出最终结论。在调用工具并获得结果之前，不要输出最终回答。
-4. 构建预览参数时， name和remark均为必填字段
+## 严格限制（必须遵守）
+构建预览参数时,name和remark均为必填字段
 """
 
 
@@ -237,7 +240,7 @@ def query_labels_node(state: ClientGroupState) -> dict:
 # ═══════════════════════════════════════════════════════════
 
 
-async def build_group_node(state: ClientGroupState) -> dict:
+async def build_group_node(state: ClientGroupState, config: RunnableConfig) -> dict:
     """LLM 通过 ReAct 工具循环构建客群条件并预览验证。
 
     工具绑定：get_example_client_group + preview_client_group_count
@@ -291,6 +294,7 @@ async def build_group_node(state: ClientGroupState) -> dict:
             messages=messages,
             tool_registry=tool_registry,
             token=state.token,
+            config=config,
         )
     except Exception as e:
         print(f"[ClientGroupSubgraph] build_group 异常: {e}")

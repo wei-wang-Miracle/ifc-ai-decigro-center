@@ -363,7 +363,7 @@ _VISIBLE_NODES = {"intent_recognition", "planner", "executor", "normal", "respon
 _JSON_NODES = {"intent_recognition", "planner", "dispatcher"}
 
 # 产生中间思考过程、应在 Agent 面板展示而非主聊天流的节点
-_THOUGHT_NODES = {"executor", "normal"}
+_THOUGHT_NODES = {"executor", "normal", "preparation", "decision", "construction", "build_group"}
 
 @router.post("/chat/stream")
 async def start_workflow_stream(
