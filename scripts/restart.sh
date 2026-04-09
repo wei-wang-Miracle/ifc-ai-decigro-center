@@ -19,11 +19,16 @@ NC='\033[0m' # No Color
 
 echo -e "${YELLOW}[1/4] Stopping existing services...${NC}"
 
-# Find and kill processes on ports:
-# 8080 (Backend), 8001 (AI Engine), 5173 (Frontend)
-lsof -ti:8080 | xargs kill -9 2>/dev/null
-lsof -ti:8001 | xargs kill -9 2>/dev/null
-lsof -ti:5173 | xargs kill -9 2>/dev/null
+# Find and kill project-specific processes only:
+# Backend (Java/Spring Boot)
+pgrep -f "spring-boot:run" 2>/dev/null | xargs kill -9 2>/dev/null
+pgrep -f "bus-kernel" 2>/dev/null | xargs kill -9 2>/dev/null
+# AI Engine (Python)
+pgrep -f "ai_engine" 2>/dev/null | xargs kill -9 2>/dev/null
+pgrep -f "main.py" 2>/dev/null | xargs kill -9 2>/dev/null
+# Frontend (Node/Vite)
+pgrep -f "vite" 2>/dev/null | xargs kill -9 2>/dev/null
+pgrep -f "decigro-fe" 2>/dev/null | xargs kill -9 2>/dev/null
 
 # Java 17 Setup
 echo -e "${YELLOW}[2/4] Setting up Java environment...${NC}"

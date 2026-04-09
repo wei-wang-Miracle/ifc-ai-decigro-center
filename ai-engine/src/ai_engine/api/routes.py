@@ -14,7 +14,7 @@ import json
 
 from ..graph import create_initial_state
 from ..context import get_context_manager, get_long_term_memory_manager
-from ..registry import get_tool_registry
+from ..registry import get_tool_registry, get_agent_registry
 from ..config import get_settings
 from langchain_openai import ChatOpenAI
 
@@ -33,6 +33,7 @@ SSEEventType = Literal[
     "agent_start",
     "agent_end",
     "token",
+    "review",
     "result",
     "error",
 ]
@@ -172,6 +173,28 @@ class TokenEvent(TypedDict):
     def make(cls, content: str, reasoning: str, node: str | None, is_thought: bool, is_json: bool) -> "TokenEvent":
         return cls(type="token", content=content, reasoning=reasoning, node=node, is_thought=is_thought, is_json=is_json)
 
+class ReviewEvent(TypedDict):
+    #: 事件类型标识
+    type: Literal["review"]
+    #: 当前审核的步骤索引
+    step_index: int
+    #: 步骤描述
+    step_description: str
+    #: 审核正文（Markdown 格式）
+    review_message: str
+    #: 执行该步骤的 Agent 名称
+    agent_name: str
+    #: Agent 别名（前端展示用）
+    agent_alias: str
+
+    @classmethod
+    def make(cls, step_index: int, step_description: str,
+             review_message: str, agent_name: str, agent_alias: str) -> "ReviewEvent":
+        return cls(type="review", step_index=step_index,
+                   step_description=step_description,
+                   review_message=review_message,
+                   agent_name=agent_name, agent_alias=agent_alias)
+
 class ResultEvent(TypedDict):
     #: 事件类型标识
     type: Literal["result"]
@@ -205,7 +228,7 @@ class ErrorEvent(TypedDict):
 
 def _sse(payload: MetaEvent | NodeStartEvent | NodeResultEvent | NodeThinkingEvent
                  | ToolStartEvent | ToolEndEvent | AgentStartEvent | AgentEndEvent
-                 | TokenEvent | ResultEvent | ErrorEvent) -> str:
+                 | TokenEvent | ReviewEvent | ResultEvent | ErrorEvent) -> str:
     """将 TypedDict payload 序列化为 SSE data 行"""
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
@@ -624,6 +647,46 @@ async def start_workflow_stream(
                     state=snapshot.values,
                     trace_id=trace_id,
                 )
+
+                # 从 interrupt 数据中提取结构化审核内容，发送 ReviewEvent
+                try:
+                    for task_val in (snapshot.tasks or ()):
+                        for interrupt_item in (getattr(task_val, 'interrupts', None) or []):
+                            iv = interrupt_item.value
+                            if isinstance(iv, dict) and iv.get("require_review"):
+                                st_vals = snapshot.values or {}
+                                executor_name = st_vals.get("current_executor", "")
+                                agent_alias = executor_name
+                                try:
+                                    agent_reg = get_agent_registry()
+                                    agent_cfg = agent_reg.get_agent(executor_name, x_auth_token)
+                                    if agent_cfg:
+                                        agent_alias = agent_cfg.alias
+                                except Exception:
+                                    pass
+
+                                step_desc = ""
+                                plan_list = st_vals.get("plan", [])
+                                si = iv.get("step_index", 0)
+                                if plan_list and si < len(plan_list):
+                                    step_obj = plan_list[si]
+                                    step_desc = getattr(step_obj, "description", str(step_obj))
+
+                                review_msg = iv.get("review_message", "")
+                                # 用审核正文覆盖 final_message，替代 Dispatcher 的路由日志
+                                if review_msg:
+                                    final_message = review_msg
+
+                                yield _sse(ReviewEvent.make(
+                                    step_index=si,
+                                    step_description=step_desc,
+                                    review_message=review_msg,
+                                    agent_name=executor_name,
+                                    agent_alias=agent_alias,
+                                ))
+                                break
+                except Exception as ex:
+                    print(f"[Stream] 提取 interrupt 审核数据失败: {ex}")
 
             yield _sse(ResultEvent.make(task_id=task_id, status=status, message=final_message, require_review=require_review))
             yield "data: [DONE]\n\n"

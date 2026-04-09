@@ -14,4 +14,5 @@ public class SaveMessageRequest {
     private String content;
     private String thoughtLog; // 思考过程 (JSON字符串)
     private String agentLog; // Agent 工作日志 (JSON字符串)
+    private String reviewDetail; // 审核详情 (JSON字符串)
 }

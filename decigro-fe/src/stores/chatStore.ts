@@ -51,6 +51,13 @@ export interface ChatMessage {
   requireReview?: boolean;
   thoughts?: ThoughtItem[];
   agentLog?: any[];
+  reviewDetail?: {
+    stepIndex: number;
+    stepDescription: string;
+    reviewMessage: string;
+    agentName: string;
+    agentAlias: string;
+  };
 }
 
 export const useChatStore = defineStore("chat", () => {
@@ -156,7 +163,9 @@ export const useChatStore = defineStore("chat", () => {
           content: item.content,
           createTime: new Date(item.create_time),
           thoughts: item.thought_log ? JSON.parse(item.thought_log) : undefined,
-          agentLog: item.agent_log ? JSON.parse(item.agent_log) : undefined
+          agentLog: item.agent_log ? JSON.parse(item.agent_log) : undefined,
+          reviewDetail: item.review_detail ? JSON.parse(item.review_detail) : undefined,
+          requireReview: !!item.review_detail
         }));
       }
     } catch (error) {
@@ -209,6 +218,7 @@ export const useChatStore = defineStore("chat", () => {
     content: string;
     thoughts?: ThoughtItem[];
     agentLog?: any[];
+    reviewDetail?: ChatMessage["reviewDetail"];
   }) {
     try {
       // 显式构造发送对象，避免 ...message 把原始数组类型的 agentLog 带入请求体
@@ -223,6 +233,9 @@ export const useChatStore = defineStore("chat", () => {
           : undefined,
         agentLog: message.agentLog
           ? JSON.stringify(message.agentLog)
+          : undefined,
+        reviewDetail: message.reviewDetail
+          ? JSON.stringify(message.reviewDetail)
           : undefined,
       });
     } catch (error) {

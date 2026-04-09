@@ -10,6 +10,7 @@ import lombok.Data;
 import java.io.Serializable;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 
 /**
  * MAS 智能体卡片实体类 (V2)
@@ -108,6 +109,13 @@ public class AgentCard implements Serializable {
      * false = 自动执行
      */
     private Boolean requireReview;
+
+    /**
+     * 人工审核配置 (JSONB)
+     * 包含 review_dimensions / review_instruction / summary_prompt
+     */
+    @Column(typeHandler = Fastjson2TypeHandler.class)
+    private Map<String, Object> humanReviewConfig;
 
     /**
      * 管理人

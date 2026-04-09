@@ -33,6 +33,9 @@ public class MessageResponse {
     @ToolOutput(param_name = "agentLog", param_description = "Agent执行日志")
     private String agentLog;
 
+    @ToolOutput(param_name = "reviewDetail", param_description = "审核详情")
+    private String reviewDetail;
+
     @ToolOutput(param_name = "createTime", param_description = "创建时间")
     private LocalDateTime createTime;
 }

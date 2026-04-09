@@ -251,7 +251,8 @@ const handleSend = async () => {
         createTime: new Date(),
         status: 'running',
         requireReview: false,
-        thoughts: []
+        thoughts: [],
+        reviewDetail: undefined
     })
     chatStore.addMessage(aiMessage)
 
@@ -503,6 +504,16 @@ const handleSend = async () => {
                                     scrollToBottom()
                                 }
 
+                            } else if (event.type === 'review') {
+                                // 审核详情事件：存储结构化审核内容供审核卡片渲染
+                                aiMessage.reviewDetail = {
+                                    stepIndex: event.step_index,
+                                    stepDescription: event.step_description,
+                                    reviewMessage: event.review_message,
+                                    agentName: event.agent_name,
+                                    agentAlias: event.agent_alias,
+                                }
+
                             } else if (event.type === 'result') {
                                 if (event.message) {
                                     aiMessage.content = event.message
@@ -529,7 +540,8 @@ const handleSend = async () => {
                                         role: 'assistant',
                                         content: event.message,
                                         thoughts: aiMessage.thoughts,
-                                        agentLog: [...agentWorkEntries]
+                                        agentLog: [...agentWorkEntries],
+                                        reviewDetail: aiMessage.reviewDetail || undefined
                                     })
                                 })()
 
@@ -775,15 +787,33 @@ const getThoughtTree = (thoughts?: any[]) => {
                                 </div>
 
                                 <div
-                                    v-if="msg.content"
+                                    v-if="msg.content && !msg.reviewDetail"
                                     class="markdown-body leading-relaxed min-h-[1.5em]"
                                     v-html="renderMarkdown(msg.content)"
                                 ></div>
-                                <div v-else class="leading-relaxed min-h-[1.5em] text-slate-400">{{ msg.status === 'running' ? '...' : '' }}</div>
+                                <div v-else-if="!msg.reviewDetail" class="leading-relaxed min-h-[1.5em] text-slate-400">{{ msg.status === 'running' ? '...' : '' }}</div>
                                 
-                                <!-- 需要人工确认提示（对话式，无按钮） -->
+                                <!-- 审核卡片：结构化展示审核内容 -->
                                 <div v-if="msg.requireReview" class="pt-3 mt-3 border-t border-dashed border-amber-200">
-                                    <p class="text-[11px] text-amber-600 flex items-center">
+                                    <div v-if="msg.reviewDetail" class="review-card">
+                                        <div class="review-card-header">
+                                            <el-icon class="mr-1 text-amber-500"><Warning /></el-icon>
+                                            <span class="review-card-agent">{{ msg.reviewDetail.agentAlias }}</span>
+                                            <span class="review-card-step">步骤 {{ msg.reviewDetail.stepIndex + 1 }}</span>
+                                        </div>
+                                        <div v-if="msg.reviewDetail.stepDescription" class="review-card-desc">
+                                            {{ msg.reviewDetail.stepDescription }}
+                                        </div>
+                                        <div class="review-card-body markdown-body"
+                                             v-html="renderMarkdown(msg.reviewDetail.reviewMessage)">
+                                        </div>
+                                        <p class="review-card-hint">
+                                            <el-icon class="mr-1"><Warning /></el-icon>
+                                            请在下方输入框回复您的决定
+                                        </p>
+                                    </div>
+                                    <!-- 兜底：无 reviewDetail 时显示简单提示 -->
+                                    <p v-else class="text-[11px] text-amber-600 flex items-center">
                                         <el-icon class="mr-1"><Warning /></el-icon>
                                         请在下方输入框直接回复您的决定
                                     </p>
@@ -1300,6 +1330,59 @@ const getThoughtTree = (thoughts?: any[]) => {
 
 .delay-150 { animation-delay: 0.15s; }
 .delay-300 { animation-delay: 0.3s; }
+
+/* ===== 审核卡片样式 ===== */
+.review-card {
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-radius: 8px;
+    padding: 12px 14px;
+}
+.review-card-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    font-size: 12px;
+}
+.review-card-agent {
+    font-weight: 700;
+    color: #92400e;
+}
+.review-card-step {
+    font-size: 10px;
+    color: #b45309;
+    background: #fef3c7;
+    padding: 1px 6px;
+    border-radius: 4px;
+}
+.review-card-desc {
+    font-size: 11px;
+    color: #78716c;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px dashed #fde68a;
+}
+.review-card-body {
+    font-size: 13px;
+    color: #44403c;
+    line-height: 1.65;
+}
+.review-card-body :deep(p) { margin: 0 0 0.4em; }
+.review-card-body :deep(p:last-child) { margin-bottom: 0; }
+.review-card-body :deep(strong) { color: #292524; }
+.review-card-body :deep(ul),
+.review-card-body :deep(ol) { padding-left: 1.2em; margin: 0.3em 0; }
+.review-card-body :deep(li) { margin: 0.15em 0; }
+.review-card-hint {
+    display: flex;
+    align-items: center;
+    font-size: 10px;
+    color: #b45309;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px dashed #fde68a;
+}
 
 /* ===== Markdown 渲染样式 ===== */
 .markdown-body { font-size: 14px; line-height: 1.7; color: inherit; }

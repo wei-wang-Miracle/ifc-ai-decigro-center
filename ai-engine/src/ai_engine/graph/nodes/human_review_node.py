@@ -14,6 +14,7 @@ def _build_review_message(state: AgentState) -> str:
 
     审核内容仅展示步骤描述和核心结论，
     用户对结论负责，不感知工具细节和推理过程。
+    当 Agent 配置了 human_review_config 时，注入审核引导语和维度提示。
     """
     plan_list = state.plan or []
     step_idx = state.current_step_index
@@ -43,6 +44,28 @@ def _build_review_message(state: AgentState) -> str:
     review_parts.append(f"**步骤描述：** {step_desc}")
     if conclusion:
         review_parts.append(f"\n**执行结论：**\n{conclusion}")
+
+    # 尝试加载 Agent 的审核配置，注入审核引导语和维度提示
+    hr_config = None
+    if state.current_executor and state.token:
+        try:
+            from ...registry import get_agent_registry
+            agent_reg = get_agent_registry()
+            agent_cfg = agent_reg.get_agent(state.current_executor, state.token)
+            if agent_cfg:
+                hr_config = agent_cfg.human_review_config
+        except Exception:
+            pass
+
+    if hr_config:
+        instruction = hr_config.get("review_instruction", "")
+        dimensions = hr_config.get("review_dimensions", [])
+        if instruction:
+            review_parts.append(f"\n**审核引导：** {instruction}")
+        if dimensions:
+            dims_text = "\n".join(f"  - {d}" for d in dimensions)
+            review_parts.append(f"\n**请重点关注以下维度：**\n{dims_text}")
+
     review_parts.append(
         "\n\n请回复您的决定：\n"
         "- 回复「通过」或「确认」→ 批准并继续执行\n"

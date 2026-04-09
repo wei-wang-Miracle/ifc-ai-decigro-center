@@ -148,6 +148,19 @@ class AgentConfig:
         return self._detail.get("require_review", False) if self._detail else False
 
     @property
+    def human_review_config(self) -> dict | None:
+        """Agent 级别的人工审核配置，由管理员在 AgentCard 中配置。
+
+        字段含义：
+        - review_dimensions: list[str] — 审核维度，如 ["策略名称", "圈选条件", "预估人数"]
+        - review_instruction: str — 面向用户的审核引导语
+        - summary_prompt: str — 自定义审核摘要 prompt（覆盖默认提取逻辑）
+        """
+        if not self._detail:
+            return None
+        return self._detail.get("human_review_config")
+
+    @property
     def raw_bound_tools(self) -> list[str] | None:
         """Agent 绑定的工具名称列表（原始值）。
 
@@ -427,6 +440,7 @@ class AgentRegistry:
                     "agent_type": detail_data.get("agentType", AgentType.EXECUTOR.value),
                     "reasoning_framework": detail_data.get("reasoningFramework"),
                     "require_review": detail_data.get("requireReview", False),
+                    "human_review_config": detail_data.get("humanReviewConfig"),
                 }
                 agent.set_detail(detail)
             else:

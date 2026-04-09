@@ -31,10 +31,13 @@ async def _extract_conclusion(
     step_description: str,
     tools_called: list[str] | None = None,
     config: RunnableConfig = None,
+    human_review_config: dict | None = None,
 ) -> str:
     """从完整输出中提取结构化结论，供人工审核时展示。
 
-    输出三段式结构: 执行动作 → 核心结论 → 置信度与风险。
+    当 human_review_config 提供了 summary_prompt 时使用自定义 prompt；
+    当提供了 review_dimensions 时，将维度列表注入默认 prompt 引导 LLM 按维度输出。
+    否则使用默认三段式结构: 执行动作 → 核心结论 → 置信度与风险。
     短输出直接返回；长输出通过 LLM 结构化提取，失败时回退截断。
     """
     if not output:
@@ -45,16 +48,41 @@ async def _extract_conclusion(
     tools_desc = f"实际调用的工具: {', '.join(tools_called)}" if tools_called else "未调用任何工具"
     try:
         llm = create_extraction_llm(max_tokens=800)
-        prompt = (
-            f"以下是 AI 完成「{step_description}」后的完整输出。\n\n"
-            f"工具调用情况: {tools_desc}\n\n"
-            f"请按以下三段式结构提取，使用 Markdown 格式，总字数控制在 400 字以内:\n\n"
-            f"**执行动作**: 做了什么(调用了哪些工具、查询了什么数据、执行了什么操作)，一两句话概括。\n\n"
-            f"**核心结论**: 得出了什么结果(保留关键数据和结论性语句)，去除推理分析过程。\n\n"
-            f"**置信度与风险**: 结论的可靠程度如何，数据来源是否充分，有哪些不确定性或潜在风险需要关注。"
-            f"如果数据完全来自工具调用则置信度高；如果部分结论缺乏数据支撑则明确指出。\n\n"
-            f"完整输出:\n{output}"
-        )
+
+        # 优先使用自定义 summary_prompt
+        custom_prompt = (human_review_config or {}).get("summary_prompt", "")
+        if custom_prompt:
+            prompt = (
+                f"{custom_prompt}\n\n"
+                f"步骤描述: {step_description}\n"
+                f"工具调用情况: {tools_desc}\n\n"
+                f"完整输出:\n{output}"
+            )
+        else:
+            # 构建维度引导（如果配置了 review_dimensions）
+            dimensions = (human_review_config or {}).get("review_dimensions", [])
+            if dimensions:
+                dims_text = "\n".join(f"  - {d}" for d in dimensions)
+                dims_section = (
+                    f"请按以下审核维度逐项提取关键信息，使用 Markdown 格式，总字数控制在 500 字以内:\n\n"
+                    f"{dims_text}\n\n"
+                    f"对每个维度，给出结论性数据或状态描述，去除推理分析过程。\n\n"
+                )
+            else:
+                dims_section = (
+                    "请按以下三段式结构提取，使用 Markdown 格式，总字数控制在 400 字以内:\n\n"
+                    "**执行动作**: 做了什么(调用了哪些工具、查询了什么数据、执行了什么操作)，一两句话概括。\n\n"
+                    "**核心结论**: 得出了什么结果(保留关键数据和结论性语句)，去除推理分析过程。\n\n"
+                    "**置信度与风险**: 结论的可靠程度如何，数据来源是否充分，有哪些不确定性或潜在风险需要关注。"
+                    "如果数据完全来自工具调用则置信度高；如果部分结论缺乏数据支撑则明确指出。\n\n"
+                )
+            prompt = (
+                f"以下是 AI 完成「{step_description}」后的完整输出。\n\n"
+                f"工具调用情况: {tools_desc}\n\n"
+                f"{dims_section}"
+                f"完整输出:\n{output}"
+            )
+
         response = await llm.ainvoke([HumanMessage(content=prompt)], config=config)
         conclusion = response.content.strip()
         print(f"[Executor] 结论提取完成，原始长度={len(output)}，结论长度={len(conclusion)}")
@@ -582,8 +610,10 @@ async def _check_review(
         return False, result
 
     step.status = StepStatus.NEEDS_REVIEW
+    human_review_config = agent_config.human_review_config if agent_config else None
     conclusion = await _extract_conclusion(
-        result.output, step.description, result.tools_called, config
+        result.output, step.description, result.tools_called, config,
+        human_review_config=human_review_config,
     )
     updated_result = result.model_copy(update={"conclusion": conclusion})
     print(f"[Executor] 步骤 {step.step_id} 标记为需要人工审核")
@@ -820,6 +850,27 @@ async def plan_task_execute_node(state: AgentState, config: RunnableConfig) -> C
         # 子图完全完成（含恢复执行完成的情况）
         step.status = StepStatus.COMPLETED if result.success else StepStatus.FAILED
         step_results = [*list(state.step_results), result]
+
+        # 审核判定：检查 AgentCard 的 require_review 配置
+        needs_review, result = await _check_review(
+            step, result, agent_config, config, force_review=False
+        )
+        if needs_review:
+            step_results[-1] = result
+            return Command(
+                update={
+                    "step_results": step_results,
+                    "require_review": True,
+                    "plan": plan,
+                    "subgraph_resume_meta": None,
+                    "messages": [
+                        AIMessage(
+                            content=f"[Executor] 步骤 {step.step_id} 执行完毕，等待人工审核确认"
+                        )
+                    ],
+                },
+                goto="dispatcher",
+            )
 
         return Command(
             update={

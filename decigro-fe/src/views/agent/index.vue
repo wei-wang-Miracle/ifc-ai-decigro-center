@@ -9,6 +9,12 @@ import type { FormInstance, FormRules } from 'element-plus'
 // 第一部分：数据定义
 // ============================================
 
+interface HumanReviewConfig {
+    reviewDimensions: string[]
+    reviewInstruction: string
+    summaryPrompt: string
+}
+
 interface AgentCard {
     agentName: string
     agentAlias: string
@@ -23,6 +29,7 @@ interface AgentCard {
     agentVersion: string
     isOnline: boolean
     requireReview: boolean
+    humanReviewConfig: HumanReviewConfig | null
     managerBy: string
     createTime: string
     updateTime: string
@@ -63,6 +70,7 @@ const form = reactive<AgentCard>({
     agentVersion: '1.0.0',
     isOnline: true,
     requireReview: false,
+    humanReviewConfig: null,
     managerBy: '',
     createTime: '',
     updateTime: ''
@@ -85,6 +93,10 @@ const newTag = ref('')
 
 // --- 工具绑定模式: 'none'(不绑定) | 'specific'(白名单) ---
 const boundToolsMode = ref<'none' | 'specific'>('none')
+
+// --- 审核配置编辑状态 ---
+const reviewConfigEnabled = ref(false)
+const newDimension = ref('')
 
 // --- 智能体类型选项 ---
 const agentTypeOptions = [
@@ -195,6 +207,9 @@ const handleEdit = (card: AgentCard) => {
     // 回显工具绑定模式
     boundToolsMode.value = Array.isArray(form.boundTools) && form.boundTools.length > 0 ? 'specific' : 'none'
     if (boundToolsMode.value === 'none') form.boundTools = null
+    // 回显审核配置
+    reviewConfigEnabled.value = form.humanReviewConfig != null
+    if (!form.humanReviewConfig) form.humanReviewConfig = null
     fetchAvailableTools()
     fetchAvailableExecutors()
     dialogVisible.value = true
@@ -218,6 +233,8 @@ const submitForm = async (formEl: FormInstance | undefined) => {
         if (valid) {
             // 不绑定模式时确保提交 null，而非残留的数组
             if (boundToolsMode.value === 'none') form.boundTools = null
+            // 审核配置未开启时清空
+            if (!reviewConfigEnabled.value) form.humanReviewConfig = null
             await request.post('/agent/save', form)
             ElMessage.success('保存成功')
             dialogVisible.value = false
@@ -241,11 +258,13 @@ const resetForm = () => {
         agentVersion: '1.0.0',
         isOnline: true,
         requireReview: false,
+        humanReviewConfig: null,
         managerBy: '',
         createTime: '',
         updateTime: ''
     })
     boundToolsMode.value = 'none'
+    reviewConfigEnabled.value = false
 }
 
 const handleAddTag = () => {
@@ -256,6 +275,23 @@ const handleAddTag = () => {
 }
 const handleRemoveTag = (tag: string) => {
     form.agentTags = form.agentTags.filter(t => t !== tag)
+}
+
+const handleToggleReviewConfig = (enabled: boolean) => {
+    if (enabled && !form.humanReviewConfig) {
+        form.humanReviewConfig = { reviewDimensions: [], reviewInstruction: '', summaryPrompt: '' }
+    }
+}
+const handleAddDimension = () => {
+    if (newDimension.value && form.humanReviewConfig && !form.humanReviewConfig.reviewDimensions.includes(newDimension.value)) {
+        form.humanReviewConfig.reviewDimensions.push(newDimension.value)
+        newDimension.value = ''
+    }
+}
+const handleRemoveDimension = (dim: string) => {
+    if (form.humanReviewConfig) {
+        form.humanReviewConfig.reviewDimensions = form.humanReviewConfig.reviewDimensions.filter(d => d !== dim)
+    }
 }
 
 onMounted(() => fetchList())
@@ -373,6 +409,13 @@ onMounted(() => fetchList())
                                 </template>
                             </div>
                         </div>
+                        <div v-if="card.humanReviewConfig" class="info-section">
+                            <div class="info-label">审核维度</div>
+                            <div class="tool-list">
+                                <span v-for="d in card.humanReviewConfig.reviewDimensions" :key="d" class="tool-badge review-dim">{{ d }}</span>
+                                <span v-if="!card.humanReviewConfig.reviewDimensions?.length" class="tool-badge none">未配置</span>
+                            </div>
+                        </div>
                     </div>
                     <div class="back-actions">
                         <el-button circle :icon="card.isOnline ? Close : Check" :type="card.isOnline ? 'info' : 'success'" @click.stop="handleToggleOnline(card)" />
@@ -468,6 +511,13 @@ onMounted(() => fetchList())
                                         </template>
                                     </div>
                                 </div>
+                                <div v-if="card.humanReviewConfig" class="info-section">
+                                    <div class="info-label">审核维度</div>
+                                    <div class="tool-list">
+                                        <span v-for="d in card.humanReviewConfig.reviewDimensions" :key="d" class="tool-badge review-dim">{{ d }}</span>
+                                        <span v-if="!card.humanReviewConfig.reviewDimensions?.length" class="tool-badge none">未配置</span>
+                                    </div>
+                                </div>
                             </div>
                             <div class="back-actions">
                                 <el-button circle :icon="card.isOnline ? Close : Check" :type="card.isOnline ? 'info' : 'success'" @click.stop="handleToggleOnline(card)" />
@@ -524,6 +574,30 @@ onMounted(() => fetchList())
                     </el-form-item>
                 </el-col>
             </el-row>
+            <!-- 审核配置（独立于 requireReview 开关） -->
+            <el-form-item label="审核配置">
+                <div class="review-config-wrap">
+                    <el-switch v-model="reviewConfigEnabled" active-text="配置审核维度" inactive-text="不配置" @change="handleToggleReviewConfig" />
+                    <template v-if="reviewConfigEnabled && form.humanReviewConfig">
+                        <div class="review-config-section">
+                            <div class="review-config-label">审核维度</div>
+                            <el-input v-model="newDimension" size="small" placeholder="输入维度名称，Enter 添加" @keyup.enter="handleAddDimension" class="mb-2" />
+                            <div class="flex flex-wrap gap-1">
+                                <el-tag v-for="d in form.humanReviewConfig.reviewDimensions" :key="d" closable size="small" type="warning" @close="handleRemoveDimension(d)">{{ d }}</el-tag>
+                            </div>
+                        </div>
+                        <div class="review-config-section">
+                            <div class="review-config-label">审核引导语</div>
+                            <el-input v-model="form.humanReviewConfig.reviewInstruction" type="textarea" :rows="2" placeholder="面向用户的审核引导说明，如：请确认策略的触达方式和目标客群是否符合预期" />
+                        </div>
+                        <div class="review-config-section">
+                            <div class="review-config-label">自定义摘要 Prompt（可选）</div>
+                            <el-input v-model="form.humanReviewConfig.summaryPrompt" type="textarea" :rows="2" placeholder="覆盖默认的结论提取 Prompt，留空则使用系统默认" />
+                        </div>
+                    </template>
+                    <div v-if="!reviewConfigEnabled" class="no-tool-hint">未配置审核维度时，触发审核将使用系统默认的三段式结论提取</div>
+                </div>
+            </el-form-item>
             <el-row :gutter="20">
                 <el-col :span="12">
                     <el-form-item label="标签">
@@ -663,11 +737,15 @@ onMounted(() => fetchList())
 .tool-badge { font-size: 9px; padding: 2px 6px; background: #e0f2fe; color: #0369a1; border-radius: 4px; font-weight: 700; }
 .tool-badge.all { background: #dcfce7; color: #166534; }
 .tool-badge.none { background: #fee2e2; color: #991b1b; }
+.tool-badge.review-dim { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
 .back-actions { padding: 12px; display: flex; justify-content: center; gap: 12px; }
 .tool-bind-wrap { width: 100%; display: flex; flex-direction: column; gap: 8px; }
 .tool-mode-radio { display: flex; gap: 24px; }
 .no-tool-hint { font-size: 12px; color: #999; background: #f9f9f9; border: 1px dashed #ddd; border-radius: 6px; padding: 8px 12px; }
 .selected-tools-preview { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .selected-tool-tag { font-size: 11px; background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; border-radius: 4px; padding: 2px 8px; font-weight: 600; }
+.review-config-wrap { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+.review-config-section { display: flex; flex-direction: column; gap: 4px; }
+.review-config-label { font-size: 12px; font-weight: 600; color: #666; }
 .w-full { width: 100%; }
 </style>
