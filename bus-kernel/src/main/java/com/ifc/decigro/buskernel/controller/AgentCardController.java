@@ -2,12 +2,14 @@ package com.ifc.decigro.buskernel.controller;
 
 import com.ifc.decigro.buskernel.common.api.Result;
 import com.ifc.decigro.buskernel.common.auth.TokenProvider;
+import com.ifc.decigro.buskernel.dto.HumanReviewConfigDTO;
 import com.ifc.decigro.buskernel.entity.AgentCard;
 import com.ifc.decigro.buskernel.entity.ToolCard;
 import com.ifc.decigro.buskernel.entity.dto.AgentCardDetailRequest;
 import com.ifc.decigro.buskernel.entity.vo.AgentCardSummaryVO;
 import com.ifc.decigro.buskernel.entity.vo.ToolCardSummaryVO;
 import com.ifc.decigro.buskernel.service.AgentCardService;
+import com.alibaba.fastjson2.JSON;
 import com.mybatisflex.core.paginate.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -50,6 +52,15 @@ public class AgentCardController {
     @PostMapping("/save")
     @Operation(summary = "新增/更新智能体")
     public Result<Void> save(@RequestBody AgentCard agentCard) {
+        // 校验 humanReviewConfig 结构（如果有值）
+        if (agentCard.getHumanReviewConfig() != null && !agentCard.getHumanReviewConfig().isEmpty()) {
+            try {
+                String configJson = JSON.toJSONString(agentCard.getHumanReviewConfig());
+                JSON.parseObject(configJson, HumanReviewConfigDTO.class);
+            } catch (Exception e) {
+                return Result.fail("humanReviewConfig 结构校验失败: " + e.getMessage());
+            }
+        }
         agentCardService.saveOrUpdate(agentCard);
         return Result.success();
     }

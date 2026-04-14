@@ -3,21 +3,20 @@ FastAPI 路由定义
 提供工作流 API 接口
 """
 
+import json
 import uuid
-from typing import Any, Literal, Optional, TypedDict
+from typing import Any, Literal, TypedDict
 
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
-from langgraph.types import Command as LGCommand
-import json
-
-from ..graph import create_initial_state
-from ..context import get_context_manager, get_long_term_memory_manager
-from ..registry import get_tool_registry, get_agent_registry
-from ..config import get_settings
 from langchain_openai import ChatOpenAI
+from langgraph.types import Command as LGCommand
+from pydantic import BaseModel, Field
 
+from ..config import get_settings
+from ..context import get_context_manager, get_long_term_memory_manager
+from ..graph import create_initial_state
+from ..registry import get_agent_registry, get_tool_registry
 
 # ========================================
 # SSE 事件类型
@@ -43,6 +42,7 @@ SSEEventType = Literal[
 # SSE payload TypedDict 定义
 # ========================================
 
+
 class MetaEvent(TypedDict):
     #: 事件类型标识
     type: Literal["meta"]
@@ -54,6 +54,7 @@ class MetaEvent(TypedDict):
     @classmethod
     def make(cls, task_id: str, trace_id: str) -> "MetaEvent":
         return cls(type="meta", task_id=task_id, trace_id=trace_id)
+
 
 class NodeStartEvent(TypedDict):
     #: 事件类型标识
@@ -67,6 +68,7 @@ class NodeStartEvent(TypedDict):
     def make(cls, node: str, display_name: str) -> "NodeStartEvent":
         return cls(type="node_start", node=node, display_name=display_name)
 
+
 class NodeResultEvent(TypedDict):
     #: 事件类型标识
     type: Literal["node_result"]
@@ -79,6 +81,7 @@ class NodeResultEvent(TypedDict):
     def make(cls, node: str, output: str) -> "NodeResultEvent":
         return cls(type="node_result", node=node, output=output)
 
+
 class NodeThinkingEvent(TypedDict):
     #: 事件类型标识
     type: Literal["node_thinking"]
@@ -90,6 +93,7 @@ class NodeThinkingEvent(TypedDict):
     @classmethod
     def make(cls, node: str, thinking: str) -> "NodeThinkingEvent":
         return cls(type="node_thinking", node=node, thinking=thinking)
+
 
 class ToolStartEvent(TypedDict):
     #: 事件类型标识
@@ -106,8 +110,18 @@ class ToolStartEvent(TypedDict):
     input: dict
 
     @classmethod
-    def make(cls, tool: str, tool_alias: str, node: str | None, step_id: str | None, input: dict) -> "ToolStartEvent":
-        return cls(type="tool_start", tool=tool, tool_alias=tool_alias, node=node, step_id=step_id, input=input)
+    def make(
+        cls, tool: str, tool_alias: str, node: str | None, step_id: str | None, input: dict
+    ) -> "ToolStartEvent":
+        return cls(
+            type="tool_start",
+            tool=tool,
+            tool_alias=tool_alias,
+            node=node,
+            step_id=step_id,
+            input=input,
+        )
+
 
 class ToolEndEvent(TypedDict):
     #: 事件类型标识
@@ -124,8 +138,18 @@ class ToolEndEvent(TypedDict):
     output: str
 
     @classmethod
-    def make(cls, tool: str, tool_alias: str, node: str | None, step_id: str | None, output: str) -> "ToolEndEvent":
-        return cls(type="tool_end", tool=tool, tool_alias=tool_alias, node=node, step_id=step_id, output=output)
+    def make(
+        cls, tool: str, tool_alias: str, node: str | None, step_id: str | None, output: str
+    ) -> "ToolEndEvent":
+        return cls(
+            type="tool_end",
+            tool=tool,
+            tool_alias=tool_alias,
+            node=node,
+            step_id=step_id,
+            output=output,
+        )
+
 
 class AgentStartEvent(TypedDict):
     #: 事件类型标识
@@ -141,6 +165,7 @@ class AgentStartEvent(TypedDict):
     def make(cls, agent: str, agent_alias: str, step_id: str) -> "AgentStartEvent":
         return cls(type="agent_start", agent=agent, agent_alias=agent_alias, step_id=step_id)
 
+
 class AgentEndEvent(TypedDict):
     #: 事件类型标识
     type: Literal["agent_end"]
@@ -154,6 +179,7 @@ class AgentEndEvent(TypedDict):
     @classmethod
     def make(cls, agent: str, step_id: str, success: bool) -> "AgentEndEvent":
         return cls(type="agent_end", agent=agent, step_id=step_id, success=success)
+
 
 class TokenEvent(TypedDict):
     #: 事件类型标识
@@ -170,8 +196,18 @@ class TokenEvent(TypedDict):
     is_json: bool
 
     @classmethod
-    def make(cls, content: str, reasoning: str, node: str | None, is_thought: bool, is_json: bool) -> "TokenEvent":
-        return cls(type="token", content=content, reasoning=reasoning, node=node, is_thought=is_thought, is_json=is_json)
+    def make(
+        cls, content: str, reasoning: str, node: str | None, is_thought: bool, is_json: bool
+    ) -> "TokenEvent":
+        return cls(
+            type="token",
+            content=content,
+            reasoning=reasoning,
+            node=node,
+            is_thought=is_thought,
+            is_json=is_json,
+        )
+
 
 class ReviewEvent(TypedDict):
     #: 事件类型标识
@@ -186,14 +222,29 @@ class ReviewEvent(TypedDict):
     agent_name: str
     #: Agent 别名（前端展示用）
     agent_alias: str
+    #: 结构化审核数据（ProfessionalAuditResponse 序列化后的 dict），前端据此渲染审核面板
+    structured_audit: dict | None
 
     @classmethod
-    def make(cls, step_index: int, step_description: str,
-             review_message: str, agent_name: str, agent_alias: str) -> "ReviewEvent":
-        return cls(type="review", step_index=step_index,
-                   step_description=step_description,
-                   review_message=review_message,
-                   agent_name=agent_name, agent_alias=agent_alias)
+    def make(
+        cls,
+        step_index: int,
+        step_description: str,
+        review_message: str,
+        agent_name: str,
+        agent_alias: str,
+        structured_audit: dict | None = None,
+    ) -> "ReviewEvent":
+        return cls(
+            type="review",
+            step_index=step_index,
+            step_description=step_description,
+            review_message=review_message,
+            agent_name=agent_name,
+            agent_alias=agent_alias,
+            structured_audit=structured_audit,
+        )
+
 
 class ResultEvent(TypedDict):
     #: 事件类型标识
@@ -209,7 +260,14 @@ class ResultEvent(TypedDict):
 
     @classmethod
     def make(cls, task_id: str, status: str, message: str, require_review: bool) -> "ResultEvent":
-        return cls(type="result", task_id=task_id, status=status, message=message, require_review=require_review)
+        return cls(
+            type="result",
+            task_id=task_id,
+            status=status,
+            message=message,
+            require_review=require_review,
+        )
+
 
 class ErrorEvent(TypedDict):
     #: 事件类型标识
@@ -226,9 +284,21 @@ class ErrorEvent(TypedDict):
 # SSE 序列化
 # ========================================
 
-def _sse(payload: MetaEvent | NodeStartEvent | NodeResultEvent | NodeThinkingEvent
-                 | ToolStartEvent | ToolEndEvent | AgentStartEvent | AgentEndEvent
-                 | TokenEvent | ReviewEvent | ResultEvent | ErrorEvent) -> str:
+
+def _sse(
+    payload: MetaEvent
+    | NodeStartEvent
+    | NodeResultEvent
+    | NodeThinkingEvent
+    | ToolStartEvent
+    | ToolEndEvent
+    | AgentStartEvent
+    | AgentEndEvent
+    | TokenEvent
+    | ReviewEvent
+    | ResultEvent
+    | ErrorEvent,
+) -> str:
     """将 TypedDict payload 序列化为 SSE data 行"""
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
@@ -243,20 +313,32 @@ router = APIRouter(prefix="/api/v1/workflow", tags=["Workflow"])
 # 请求/响应模型
 # ========================================
 
+
 class ChatRequest(BaseModel):
     """
     功能: 发起任务请求模型
     """
+
     query: str = Field(..., description="用户输入的任务描述")
     user_id: str = Field(..., description="用户标识")
     session_id: str = Field(..., description="会话标识")
-    task_id: Optional[str] = Field(default=None, description="任务标识（可选，若上一任务未完成则复用）")
-    trace_id: Optional[str] = Field(default=None, description="链路追踪 ID（由前端在用户发起提问时生成）")
+    task_id: str | None = Field(
+        default=None, description="任务标识（可选，若上一任务未完成则复用）"
+    )
+    trace_id: str | None = Field(
+        default=None, description="链路追踪 ID（由前端在用户发起提问时生成）"
+    )
+    review_decision: dict | None = Field(
+        default=None,
+        description="结构化审核决策（HumanDecisionPayload），"
+        "由前端 ReviewPanel 提交时携带，非结构化审核时为 None",
+    )
 
 
 # ========================================
 # 工作流实例存储（简单内存存储，生产环境应使用 Redis）
 # ========================================
+
 
 class WorkflowEntry(TypedDict):
     #: 持久化 workflow 实例
@@ -268,6 +350,7 @@ class WorkflowEntry(TypedDict):
     #: 链路追踪 ID
     trace_id: str
 
+
 _active_workflows: dict[str, WorkflowEntry] = {}
 
 
@@ -276,12 +359,36 @@ _active_workflows: dict[str, WorkflowEntry] = {}
 # ========================================
 
 _APPROVE_KEYWORDS = [
-    "通过", "批准", "确认", "同意", "好的", "可以", "继续", "执行吧",
-    "approve", "yes", "ok", "没问题",
+    "通过",
+    "批准",
+    "确认",
+    "同意",
+    "好的",
+    "可以",
+    "继续",
+    "执行吧",
+    "approve",
+    "yes",
+    "ok",
+    "没问题",
 ]
 _REJECT_KEYWORDS = [
-    "驳回", "拒绝", "不同意", "不可以", "不行", "停止", "取消",
-    "reject", "no", "算了", "不要", "重新规划", "重来", "换个", "调整", "重点关注",
+    "驳回",
+    "拒绝",
+    "不同意",
+    "不可以",
+    "不行",
+    "停止",
+    "取消",
+    "reject",
+    "no",
+    "算了",
+    "不要",
+    "重新规划",
+    "重来",
+    "换个",
+    "调整",
+    "重点关注",
 ]
 
 # 否定前缀：approve 关键词前出现这些字，视为否定，交 LLM 处理
@@ -321,7 +428,7 @@ def _classify_review_by_keywords(query: str) -> str | None:
         idx = q.find(kw_lower)
         if idx == -1:
             continue
-        prefix_window = q[max(0, idx - 2):idx]
+        prefix_window = q[max(0, idx - 2) : idx]
         if any(neg in prefix_window for neg in _NEGATION_PREFIXES):
             continue
         return "approve"
@@ -356,7 +463,7 @@ async def _detect_review_intent(query: str, current_task: str = "") -> tuple[str
     """
     action = _classify_review_by_keywords(query)
     if action is None:
-        print(f"[ReviewDetect] 关键词未命中，调用 LLM 检测...")
+        print("[ReviewDetect] 关键词未命中，调用 LLM 检测...")
         action = await _classify_review_by_llm(query, current_task)
     feedback = query if action == "reject" else ""
     print(f"[ReviewDetect] 意图={action}, feedback={feedback[:40] if feedback else ''}")
@@ -380,7 +487,15 @@ NODE_NAME_MAP = {
 }
 
 # 所有需要在前端展示进度的节点（dispatcher 是内部路由节点，不展示）
-_VISIBLE_NODES = {"intent_recognition", "planner", "executor", "normal", "responder", "review", "feedback"}
+_VISIBLE_NODES = {
+    "intent_recognition",
+    "planner",
+    "executor",
+    "normal",
+    "responder",
+    "review",
+    "feedback",
+}
 
 # 产生结构化 JSON 输出、不应在前端展示为正文的节点
 _JSON_NODES = {"intent_recognition", "planner", "dispatcher"}
@@ -388,11 +503,12 @@ _JSON_NODES = {"intent_recognition", "planner", "dispatcher"}
 # 产生中间思考过程、应在 Agent 面板展示而非主聊天流的节点
 _THOUGHT_NODES = {"executor", "normal", "preparation", "decision", "construction", "build_group"}
 
+
 @router.post("/chat/stream")
 async def start_workflow_stream(
     request: ChatRequest,
     req: Request,
-    x_auth_token: Optional[str] = Header(None, alias="X-Auth-Token"),
+    x_auth_token: str | None = Header(None, alias="X-Auth-Token"),
 ):
     """
     功能: 发起新的工作流任务 (流式响应)
@@ -407,16 +523,14 @@ async def start_workflow_stream(
         raise RuntimeError("Workflow 未初始化，请确认 lifespan 已正确启动")
 
     # ── 判断是否为 review 响应 ────────────────────────────────────────
-    is_review_response = bool(
-        request.task_id and request.task_id in _active_workflows
-    )
+    is_review_response = bool(request.task_id and request.task_id in _active_workflows)
 
     if is_review_response:
         task_id = request.task_id
         wf_data = _active_workflows[task_id]
         workflow = wf_data["workflow"]
         config = wf_data["config"]
-        _initial_state = None   # review 场景不需要
+        _initial_state = None  # review 场景不需要
     else:
         task_id = request.task_id or f"task_{uuid.uuid4().hex[:12]}"
         workflow = _app_workflow
@@ -429,7 +543,9 @@ async def start_workflow_stream(
         session_config = {"configurable": {"thread_id": request.session_id}}
         try:
             snapshot = await workflow.aget_state(session_config)
-            existing_messages = snapshot.values.get("messages", []) if snapshot and snapshot.values else []
+            existing_messages = (
+                snapshot.values.get("messages", []) if snapshot and snapshot.values else []
+            )
         except Exception:
             existing_messages = []
 
@@ -441,7 +557,9 @@ async def start_workflow_stream(
 
         # 检索长期记忆（用户事实与经验），在初始化阶段完成
         ltm = get_long_term_memory_manager()
-        long_term_context = await ltm.retrieve_long_term_context(request.user_id, request.query) or ""
+        long_term_context = (
+            await ltm.retrieve_long_term_context(request.user_id, request.query) or ""
+        )
 
         _initial_state = create_initial_state(
             query=request.query,
@@ -458,7 +576,9 @@ async def start_workflow_stream(
         config = {"configurable": {"thread_id": request.session_id}}
 
     async def event_generator():
-        print(f"[Stream] 开始事件生成: task_id={task_id}, review={is_review_response}, query={request.query[:20]}...")
+        print(
+            f"[Stream] 开始事件生成: task_id={task_id}, review={is_review_response}, query={request.query[:20]}..."
+        )
         # 发送 2KB 空格填充，强制代理刷新缓冲区
         yield ":" + " " * 2048 + "\n\n"
         try:
@@ -471,18 +591,27 @@ async def start_workflow_stream(
 
             # ── 确定状态输入 ──────────────────────────────────────────
             if is_review_response:
-                # 检测用户意图（关键词优先 + LLM 兜底）
-                # 从已保存的 state 中提取当前任务查询，作为"任务主体"上下文传入 LLM
-                current_task = wf_data.get("state", {}).get("query", "")
-                action, feedback = await _detect_review_intent(request.query, current_task)
+                # 结构化审核决策优先：前端 ReviewPanel 提交的 HumanDecisionPayload
+                if request.review_decision:
+                    state_input = LGCommand(
+                        resume={
+                            "action": "structured",
+                            "structured_decision": request.review_decision,
+                        }
+                    )
+                    stage_name = "审核确认"
+                    stage_node = "review"
+                else:
+                    # 纯文本审核：关键词优先 + LLM 兜底检测意图
+                    current_task = wf_data.get("state", {}).get("query", "")
+                    action, feedback = await _detect_review_intent(request.query, current_task)
+                    state_input = LGCommand(resume={"action": action, "feedback": feedback})
+                    stage_name = "审核确认" if action == "approve" else "反馈处理"
+                    stage_node = "review" if action == "approve" else "feedback"
+
                 # 移除 active_workflows 记录（后面若还需 review 会重新加入）
-                if task_id in _active_workflows:
-                    del _active_workflows[task_id]
-                # 用 Command(resume=...) 恢复图执行，将审核结果直接传入 interrupt() 的返回值
-                state_input = LGCommand(resume={"action": action, "feedback": feedback})
+                _active_workflows.pop(task_id, None)
                 # 发送一个轻量提示节点，让前端有视觉反馈
-                stage_name = "审核确认" if action == "approve" else "反馈处理"
-                stage_node = "review" if action == "approve" else "feedback"
                 yield _sse(NodeStartEvent.make(node=stage_node, display_name=stage_name))
             else:
                 state_input = _initial_state
@@ -500,16 +629,32 @@ async def start_workflow_stream(
                     name = event.get("name", "")
                     if name in _VISIBLE_NODES:
                         print(f"[Stream] 节点进场: {name}")
-                        yield _sse(NodeStartEvent.make(node=name, display_name=NODE_NAME_MAP.get(name, name)))
+                        yield _sse(
+                            NodeStartEvent.make(
+                                node=name, display_name=NODE_NAME_MAP.get(name, name)
+                            )
+                        )
 
                 # ── 工具调用开始 ──────────────────────────────────────
                 elif event_type == "on_tool_start":
                     tool_name = event.get("name", "")
-                    tool_summary = tool_reg._user_tool_summaries.get(x_auth_token, {}).get(tool_name, {})
+                    tool_summary = tool_reg._user_tool_summaries.get(x_auth_token, {}).get(
+                        tool_name, {}
+                    )
                     tool_alias = tool_summary.get("tool_alias", tool_name)
                     tool_node = ev_node or current_node
-                    print(f"[Stream] 工具调用开始: {tool_name} | node={tool_node} | step={active_step_id}")
-                    yield _sse(ToolStartEvent.make(tool=tool_name, tool_alias=tool_alias, node=tool_node, step_id=active_step_id, input=event.get("data", {}).get("input", {})))
+                    print(
+                        f"[Stream] 工具调用开始: {tool_name} | node={tool_node} | step={active_step_id}"
+                    )
+                    yield _sse(
+                        ToolStartEvent.make(
+                            tool=tool_name,
+                            tool_alias=tool_alias,
+                            node=tool_node,
+                            step_id=active_step_id,
+                            input=event.get("data", {}).get("input", {}),
+                        )
+                    )
 
                 # ── 工具调用结束 ──────────────────────────────────────
                 elif event_type == "on_tool_end":
@@ -517,10 +662,22 @@ async def start_workflow_stream(
                     tool_name = event["name"]
                     output = event["data"].get("output")
                     output_str = str(output) if output is not None else ""
-                    tool_summary = tool_reg._user_tool_summaries.get(x_auth_token, {}).get(tool_name, {})
+                    tool_summary = tool_reg._user_tool_summaries.get(x_auth_token, {}).get(
+                        tool_name, {}
+                    )
                     tool_alias = tool_summary.get("tool_alias", tool_name)
-                    print(f"[Stream] 工具调用结束: {tool_name} | node={tool_node} | step={active_step_id}")
-                    yield _sse(ToolEndEvent.make(tool=tool_name, tool_alias=tool_alias, node=tool_node, step_id=active_step_id, output=output_str))
+                    print(
+                        f"[Stream] 工具调用结束: {tool_name} | node={tool_node} | step={active_step_id}"
+                    )
+                    yield _sse(
+                        ToolEndEvent.make(
+                            tool=tool_name,
+                            tool_alias=tool_alias,
+                            node=tool_node,
+                            step_id=active_step_id,
+                            output=output_str,
+                        )
+                    )
 
                 # ── Agent 进场 ────────────────────────────────────────
                 elif event_type == "on_custom_event" and event["name"] == "agent_start":
@@ -529,7 +686,11 @@ async def start_workflow_stream(
                     step_id = event["data"].get("step_id", "")
                     active_step_id = step_id
                     print(f"[Stream] Agent 进场: {agent_name} ({agent_alias}) step={step_id}")
-                    yield _sse(AgentStartEvent.make(agent=agent_name, agent_alias=agent_alias, step_id=step_id))
+                    yield _sse(
+                        AgentStartEvent.make(
+                            agent=agent_name, agent_alias=agent_alias, step_id=step_id
+                        )
+                    )
 
                 # ── Agent 结束 ────────────────────────────────────────
                 elif event_type == "on_custom_event" and event["name"] == "agent_end":
@@ -539,7 +700,9 @@ async def start_workflow_stream(
                     if active_step_id == step_id:
                         active_step_id = None
                     print(f"[Stream] Agent 结束: {agent_name} step={step_id} success={success}")
-                    yield _sse(AgentEndEvent.make(agent=agent_name, step_id=step_id, success=success))
+                    yield _sse(
+                        AgentEndEvent.make(agent=agent_name, step_id=step_id, success=success)
+                    )
 
                 # ── 模型流式 token ────────────────────────────────────
                 elif event_type == "on_chat_model_stream":
@@ -575,7 +738,15 @@ async def start_workflow_stream(
                         if content:
                             is_thought = True
 
-                    yield _sse(TokenEvent.make(content=content, reasoning=reasoning, node=node_name, is_thought=is_thought, is_json=is_json))
+                    yield _sse(
+                        TokenEvent.make(
+                            content=content,
+                            reasoning=reasoning,
+                            node=node_name,
+                            is_thought=is_thought,
+                            is_json=is_json,
+                        )
+                    )
 
                 # ── 节点结束 ──────────────────────────────────────────
                 elif event_type == "on_chain_end":
@@ -592,7 +763,9 @@ async def start_workflow_stream(
                                     intent_type = getattr(intent, "intent_type", None)
                                     confidence = getattr(intent, "confidence", None)
                                     entities = getattr(intent, "entities", {})
-                                    parts = [f"意图类型：**{intent_type}**（置信度 {confidence:.0%}）"]
+                                    parts = [
+                                        f"意图类型：**{intent_type}**（置信度 {confidence:.0%}）"
+                                    ]
                                     if entities:
                                         ent_str = "、".join(f"{k}={v}" for k, v in entities.items())
                                         parts.append(f"提取实体：{ent_str}")
@@ -600,7 +773,9 @@ async def start_workflow_stream(
                                     if clarify:
                                         q = getattr(intent, "clarification_question", "")
                                         parts.append(f"需要澄清：{q}")
-                                    yield _sse(NodeThinkingEvent.make(node=name, thinking="\n".join(parts)))
+                                    yield _sse(
+                                        NodeThinkingEvent.make(node=name, thinking="\n".join(parts))
+                                    )
                             except Exception as ex:
                                 print(f"[Stream] 提取 intent_recognition 思考内容失败: {ex}")
 
@@ -614,12 +789,14 @@ async def start_workflow_stream(
                                     parts.append(f"**规划思路**\n{reasoning}")
                                 if plan:
                                     steps_desc = "\n".join(
-                                        f"**步骤 {i+1}**：{getattr(s, 'description', str(s))}（由 {getattr(s, 'assigned_agent', '?')} 执行）"
+                                        f"**步骤 {i + 1}**：{getattr(s, 'description', str(s))}（由 {getattr(s, 'assigned_agent', '?')} 执行）"
                                         for i, s in enumerate(plan)
                                     )
                                     parts.append(f"**执行步骤**\n{steps_desc}")
                                 if parts:
-                                    yield _sse(NodeThinkingEvent.make(node=name, thinking="\n".join(parts)))
+                                    yield _sse(
+                                        NodeThinkingEvent.make(node=name, thinking="\n".join(parts))
+                                    )
                             except Exception as ex:
                                 print(f"[Stream] 提取 planner 思考内容失败: {ex}")
 
@@ -632,7 +809,9 @@ async def start_workflow_stream(
             if snapshot and snapshot.values:
                 msgs = snapshot.values.get("messages", [])
                 if msgs:
-                    final_message = msgs[-1].content if hasattr(msgs[-1], "content") else str(msgs[-1])
+                    final_message = (
+                        msgs[-1].content if hasattr(msgs[-1], "content") else str(msgs[-1])
+                    )
                 if snapshot.next and "review" in snapshot.next:
                     require_review = True
                     status = "pending_review"
@@ -650,8 +829,8 @@ async def start_workflow_stream(
 
                 # 从 interrupt 数据中提取结构化审核内容，发送 ReviewEvent
                 try:
-                    for task_val in (snapshot.tasks or ()):
-                        for interrupt_item in (getattr(task_val, 'interrupts', None) or []):
+                    for task_val in snapshot.tasks or ():
+                        for interrupt_item in getattr(task_val, "interrupts", None) or []:
                             iv = interrupt_item.value
                             if isinstance(iv, dict) and iv.get("require_review"):
                                 st_vals = snapshot.values or {}
@@ -673,22 +852,33 @@ async def start_workflow_stream(
                                     step_desc = getattr(step_obj, "description", str(step_obj))
 
                                 review_msg = iv.get("review_message", "")
+                                structured_audit = iv.get("structured_audit")
                                 # 用审核正文覆盖 final_message，替代 Dispatcher 的路由日志
                                 if review_msg:
                                     final_message = review_msg
 
-                                yield _sse(ReviewEvent.make(
-                                    step_index=si,
-                                    step_description=step_desc,
-                                    review_message=review_msg,
-                                    agent_name=executor_name,
-                                    agent_alias=agent_alias,
-                                ))
+                                yield _sse(
+                                    ReviewEvent.make(
+                                        step_index=si,
+                                        step_description=step_desc,
+                                        review_message=review_msg,
+                                        agent_name=executor_name,
+                                        agent_alias=agent_alias,
+                                        structured_audit=structured_audit,
+                                    )
+                                )
                                 break
                 except Exception as ex:
                     print(f"[Stream] 提取 interrupt 审核数据失败: {ex}")
 
-            yield _sse(ResultEvent.make(task_id=task_id, status=status, message=final_message, require_review=require_review))
+            yield _sse(
+                ResultEvent.make(
+                    task_id=task_id,
+                    status=status,
+                    message=final_message,
+                    require_review=require_review,
+                )
+            )
             yield "data: [DONE]\n\n"
 
         except Exception as e:
@@ -703,13 +893,14 @@ async def start_workflow_stream(
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
             "Content-Type": "text/event-stream",
-        }
+        },
     )
 
 
 # ========================================
 # 健康检查端点
 # ========================================
+
 
 @router.get("/health")
 async def health_check():

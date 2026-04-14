@@ -9,10 +9,23 @@ import type { FormInstance, FormRules } from 'element-plus'
 // 第一部分：数据定义
 // ============================================
 
+interface UISwitches {
+    visualDataEnable: boolean
+    checkListEnable: boolean
+    proposalsEnable: boolean
+}
+
+interface GenerationConstraints {
+    predictiveForesightFocus: string[]
+    executiveSummaryPerspectives: string[]
+    visualDataPerspectives: string[]
+    checkListDimensions: string[]
+    proposalPerspectives: string[]
+}
+
 interface HumanReviewConfig {
-    reviewDimensions: string[]
-    reviewInstruction: string
-    summaryPrompt: string
+    uiSwitches?: UISwitches
+    generationConstraints?: GenerationConstraints
 }
 
 interface AgentCard {
@@ -96,7 +109,14 @@ const boundToolsMode = ref<'none' | 'specific'>('none')
 
 // --- 审核配置编辑状态 ---
 const reviewConfigEnabled = ref(false)
-const newDimension = ref('')
+// 约束维度输入框状态
+const newConstraintItem = reactive<Record<string, string>>({
+    predictiveForesightFocus: '',
+    executiveSummaryPerspectives: '',
+    visualDataPerspectives: '',
+    checkListDimensions: '',
+    proposalPerspectives: ''
+})
 
 // --- 智能体类型选项 ---
 const agentTypeOptions = [
@@ -209,6 +229,21 @@ const handleEdit = (card: AgentCard) => {
     if (boundToolsMode.value === 'none') form.boundTools = null
     // 回显审核配置
     reviewConfigEnabled.value = form.humanReviewConfig != null
+    if (form.humanReviewConfig) {
+        // 确保新版结构字段存在（兼容旧数据）
+        if (!form.humanReviewConfig.uiSwitches) {
+            form.humanReviewConfig.uiSwitches = { visualDataEnable: false, checkListEnable: false, proposalsEnable: false }
+        }
+        if (!form.humanReviewConfig.generationConstraints) {
+            form.humanReviewConfig.generationConstraints = {
+                predictiveForesightFocus: [],
+                executiveSummaryPerspectives: [],
+                visualDataPerspectives: [],
+                checkListDimensions: [],
+                proposalPerspectives: []
+            }
+        }
+    }
     if (!form.humanReviewConfig) form.humanReviewConfig = null
     fetchAvailableTools()
     fetchAvailableExecutors()
@@ -279,19 +314,31 @@ const handleRemoveTag = (tag: string) => {
 
 const handleToggleReviewConfig = (enabled: boolean) => {
     if (enabled && !form.humanReviewConfig) {
-        form.humanReviewConfig = { reviewDimensions: [], reviewInstruction: '', summaryPrompt: '' }
+        form.humanReviewConfig = {
+            uiSwitches: { visualDataEnable: false, checkListEnable: false, proposalsEnable: false },
+            generationConstraints: {
+                predictiveForesightFocus: [],
+                executiveSummaryPerspectives: [],
+                visualDataPerspectives: [],
+                checkListDimensions: [],
+                proposalPerspectives: []
+            }
+        }
     }
 }
-const handleAddDimension = () => {
-    if (newDimension.value && form.humanReviewConfig && !form.humanReviewConfig.reviewDimensions.includes(newDimension.value)) {
-        form.humanReviewConfig.reviewDimensions.push(newDimension.value)
-        newDimension.value = ''
+const handleAddConstraintItem = (field: keyof GenerationConstraints) => {
+    const val = newConstraintItem[field]?.trim()
+    if (!val || !form.humanReviewConfig?.generationConstraints) return
+    const list = form.humanReviewConfig.generationConstraints[field]
+    if (!list.includes(val)) {
+        list.push(val)
+        newConstraintItem[field] = ''
     }
 }
-const handleRemoveDimension = (dim: string) => {
-    if (form.humanReviewConfig) {
-        form.humanReviewConfig.reviewDimensions = form.humanReviewConfig.reviewDimensions.filter(d => d !== dim)
-    }
+const handleRemoveConstraintItem = (field: keyof GenerationConstraints, item: string) => {
+    if (!form.humanReviewConfig?.generationConstraints) return
+    form.humanReviewConfig.generationConstraints[field] =
+        form.humanReviewConfig.generationConstraints[field].filter(d => d !== item)
 }
 
 onMounted(() => fetchList())
@@ -410,10 +457,17 @@ onMounted(() => fetchList())
                             </div>
                         </div>
                         <div v-if="card.humanReviewConfig" class="info-section">
-                            <div class="info-label">审核维度</div>
+                            <div class="info-label">审核模块</div>
                             <div class="tool-list">
-                                <span v-for="d in card.humanReviewConfig.reviewDimensions" :key="d" class="tool-badge review-dim">{{ d }}</span>
-                                <span v-if="!card.humanReviewConfig.reviewDimensions?.length" class="tool-badge none">未配置</span>
+                                <template v-if="card.humanReviewConfig.uiSwitches">
+                                    <span v-if="card.humanReviewConfig.uiSwitches.visualDataEnable" class="tool-badge review-dim">图表</span>
+                                    <span v-if="card.humanReviewConfig.uiSwitches.checkListEnable" class="tool-badge review-dim">清单</span>
+                                    <span v-if="card.humanReviewConfig.uiSwitches.proposalsEnable" class="tool-badge review-dim">方案</span>
+                                    <span v-if="!card.humanReviewConfig.uiSwitches.visualDataEnable && !card.humanReviewConfig.uiSwitches.checkListEnable && !card.humanReviewConfig.uiSwitches.proposalsEnable" class="tool-badge none">纯文本模式</span>
+                                </template>
+                                <template v-else>
+                                    <span class="tool-badge none">旧版配置</span>
+                                </template>
                             </div>
                         </div>
                     </div>
@@ -512,10 +566,18 @@ onMounted(() => fetchList())
                                     </div>
                                 </div>
                                 <div v-if="card.humanReviewConfig" class="info-section">
-                                    <div class="info-label">审核维度</div>
+                                    <div class="info-label">审核模块</div>
                                     <div class="tool-list">
-                                        <span v-for="d in card.humanReviewConfig.reviewDimensions" :key="d" class="tool-badge review-dim">{{ d }}</span>
-                                        <span v-if="!card.humanReviewConfig.reviewDimensions?.length" class="tool-badge none">未配置</span>
+                                        <template v-if="card.humanReviewConfig.uiSwitches">
+                                            <span v-if="card.humanReviewConfig.uiSwitches.visualDataEnable" class="tool-badge review-dim">图表</span>
+                                            <span v-if="card.humanReviewConfig.uiSwitches.checkListEnable" class="tool-badge review-dim">清单</span>
+                                            <span v-if="card.humanReviewConfig.uiSwitches.proposalsEnable" class="tool-badge review-dim">方案</span>
+                                            <span v-if="!card.humanReviewConfig.uiSwitches.visualDataEnable && !card.humanReviewConfig.uiSwitches.checkListEnable && !card.humanReviewConfig.uiSwitches.proposalsEnable" class="tool-badge none">纯文本模式</span>
+                                        </template>
+                                        <template v-else>
+                                            <span v-for="d in (card.humanReviewConfig.reviewDimensions || [])" :key="d" class="tool-badge review-dim">{{ d }}</span>
+                                            <span v-if="!card.humanReviewConfig.reviewDimensions?.length" class="tool-badge none">旧版配置</span>
+                                        </template>
                                     </div>
                                 </div>
                             </div>
@@ -577,25 +639,55 @@ onMounted(() => fetchList())
             <!-- 审核配置（独立于 requireReview 开关） -->
             <el-form-item label="审核配置">
                 <div class="review-config-wrap">
-                    <el-switch v-model="reviewConfigEnabled" active-text="配置审核维度" inactive-text="不配置" @change="handleToggleReviewConfig" />
+                    <el-switch v-model="reviewConfigEnabled" active-text="配置结构化审核" inactive-text="不配置" @change="handleToggleReviewConfig" />
                     <template v-if="reviewConfigEnabled && form.humanReviewConfig">
+                        <!-- UI 模块开关 -->
                         <div class="review-config-section">
-                            <div class="review-config-label">审核维度</div>
-                            <el-input v-model="newDimension" size="small" placeholder="输入维度名称，Enter 添加" @keyup.enter="handleAddDimension" class="mb-2" />
+                            <div class="review-config-label">审核模块开关</div>
+                            <div class="flex flex-wrap gap-4 mt-1">
+                                <el-checkbox v-model="form.humanReviewConfig.uiSwitches!.visualDataEnable">数据可视化 (ECharts)</el-checkbox>
+                                <el-checkbox v-model="form.humanReviewConfig.uiSwitches!.checkListEnable">审核清单 (CheckList)</el-checkbox>
+                                <el-checkbox v-model="form.humanReviewConfig.uiSwitches!.proposalsEnable">建议方案 (Proposals)</el-checkbox>
+                            </div>
+                        </div>
+                        <!-- 生成约束维度 -->
+                        <div class="review-config-section">
+                            <div class="review-config-label">深度洞察方向</div>
+                            <el-input v-model="newConstraintItem.predictiveForesightFocus" size="small" placeholder="如：合规风险预期、潜在业务穿透影响，Enter 添加" @keyup.enter="handleAddConstraintItem('predictiveForesightFocus')" class="mb-2" />
                             <div class="flex flex-wrap gap-1">
-                                <el-tag v-for="d in form.humanReviewConfig.reviewDimensions" :key="d" closable size="small" type="warning" @close="handleRemoveDimension(d)">{{ d }}</el-tag>
+                                <el-tag v-for="d in form.humanReviewConfig.generationConstraints!.predictiveForesightFocus" :key="d" closable size="small" type="danger" @close="handleRemoveConstraintItem('predictiveForesightFocus', d)">{{ d }}</el-tag>
                             </div>
                         </div>
                         <div class="review-config-section">
-                            <div class="review-config-label">审核引导语</div>
-                            <el-input v-model="form.humanReviewConfig.reviewInstruction" type="textarea" :rows="2" placeholder="面向用户的审核引导说明，如：请确认策略的触达方式和目标客群是否符合预期" />
+                            <div class="review-config-label">摘要约束视角</div>
+                            <el-input v-model="newConstraintItem.executiveSummaryPerspectives" size="small" placeholder="如：风险、收益、合规，Enter 添加" @keyup.enter="handleAddConstraintItem('executiveSummaryPerspectives')" class="mb-2" />
+                            <div class="flex flex-wrap gap-1">
+                                <el-tag v-for="d in form.humanReviewConfig.generationConstraints!.executiveSummaryPerspectives" :key="d" closable size="small" type="warning" @close="handleRemoveConstraintItem('executiveSummaryPerspectives', d)">{{ d }}</el-tag>
+                            </div>
                         </div>
-                        <div class="review-config-section">
-                            <div class="review-config-label">自定义摘要 Prompt（可选）</div>
-                            <el-input v-model="form.humanReviewConfig.summaryPrompt" type="textarea" :rows="2" placeholder="覆盖默认的结论提取 Prompt，留空则使用系统默认" />
+                        <div v-if="form.humanReviewConfig.uiSwitches!.visualDataEnable" class="review-config-section">
+                            <div class="review-config-label">图表约束视角</div>
+                            <el-input v-model="newConstraintItem.visualDataPerspectives" size="small" placeholder="如：业绩走势、风险分布，Enter 添加" @keyup.enter="handleAddConstraintItem('visualDataPerspectives')" class="mb-2" />
+                            <div class="flex flex-wrap gap-1">
+                                <el-tag v-for="d in form.humanReviewConfig.generationConstraints!.visualDataPerspectives" :key="d" closable size="small" type="info" @close="handleRemoveConstraintItem('visualDataPerspectives', d)">{{ d }}</el-tag>
+                            </div>
+                        </div>
+                        <div v-if="form.humanReviewConfig.uiSwitches!.checkListEnable" class="review-config-section">
+                            <div class="review-config-label">审核清单维度</div>
+                            <el-input v-model="newConstraintItem.checkListDimensions" size="small" placeholder="如：公告一致性、基金经理变更，Enter 添加" @keyup.enter="handleAddConstraintItem('checkListDimensions')" class="mb-2" />
+                            <div class="flex flex-wrap gap-1">
+                                <el-tag v-for="d in form.humanReviewConfig.generationConstraints!.checkListDimensions" :key="d" closable size="small" type="warning" @close="handleRemoveConstraintItem('checkListDimensions', d)">{{ d }}</el-tag>
+                            </div>
+                        </div>
+                        <div v-if="form.humanReviewConfig.uiSwitches!.proposalsEnable" class="review-config-section">
+                            <div class="review-config-label">建议方案视角</div>
+                            <el-input v-model="newConstraintItem.proposalPerspectives" size="small" placeholder="如：合规、业务优化，Enter 添加" @keyup.enter="handleAddConstraintItem('proposalPerspectives')" class="mb-2" />
+                            <div class="flex flex-wrap gap-1">
+                                <el-tag v-for="d in form.humanReviewConfig.generationConstraints!.proposalPerspectives" :key="d" closable size="small" type="success" @close="handleRemoveConstraintItem('proposalPerspectives', d)">{{ d }}</el-tag>
+                            </div>
                         </div>
                     </template>
-                    <div v-if="!reviewConfigEnabled" class="no-tool-hint">未配置审核维度时，触发审核将使用系统默认的三段式结论提取</div>
+                    <div v-if="!reviewConfigEnabled" class="no-tool-hint">未配置时，触发审核将使用系统默认的纯文本结论提取</div>
                 </div>
             </el-form-item>
             <el-row :gutter="20">

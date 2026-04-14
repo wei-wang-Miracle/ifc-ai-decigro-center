@@ -38,6 +38,60 @@ export interface ThoughtItem {
   conclusion?: string;  // 节点最终结论/输出摘要
 }
 
+// ===== 结构化审核数据类型（对应 PRD Entity B/C）=====
+
+// ECharts 图表配置
+export interface EChartsConfigData {
+  title?: string;
+  chart_type: 'radar' | 'bar' | 'pie' | 'funnel' | 'sankey' | 'line' | 'none';
+  option: Record<string, any>;
+  insight_text: string;
+}
+
+// 审核清单条目
+export interface AuditCheckItemData {
+  item_id: string;
+  task_label: string;
+  ai_observation: string;
+  severity: 'low' | 'medium' | 'high';
+  is_confirmed: boolean;
+}
+
+// 建议方案
+export interface StrategicProposalData {
+  option_id: string;
+  title: string;
+  is_recommond: boolean;
+  recommond_reason: string;
+  effort_estimation: 'low' | 'medium' | 'high';
+  impact_analysis: string;
+}
+
+// Entity B: 结构化审核响应
+export interface StructuredAuditData {
+  summary_title: string;
+  executive_summary: string;
+  advanced_foresight: string;
+  visual_data: EChartsConfigData[];
+  check_list: AuditCheckItemData[];
+  proposals: StrategicProposalData[];
+}
+
+// Entity C: 用户决策载荷
+export interface HumanDecisionPayload {
+  session_id: string;
+  quick_decision_flag: 'approve_all_ai_recommendations' | 'reject_all' | 'custom';
+  accepted: {
+    check_list: { item_id: string; task_label: string; ai_observation: string }[];
+    proposals: { option_id: string; title: string }[];
+  };
+  rejected: {
+    check_list: { item_id: string; task_label: string; ai_observation: string }[];
+    proposals: { option_id: string; title: string }[];
+  };
+  comprehensive_supplementary_notes: string;
+}
+
 // 消息接口定义
 export interface ChatMessage {
   id?: number;
@@ -49,6 +103,10 @@ export interface ChatMessage {
   createTime: Date;
   status?: string;
   requireReview?: boolean;
+  /** 审核已提交（面板保留但禁止交互） */
+  reviewSubmitted?: boolean;
+  /** 提交时的决策标记，用于回显 */
+  reviewDecision?: HumanDecisionPayload['quick_decision_flag'];
   thoughts?: ThoughtItem[];
   agentLog?: any[];
   reviewDetail?: {
@@ -57,6 +115,7 @@ export interface ChatMessage {
     reviewMessage: string;
     agentName: string;
     agentAlias: string;
+    structuredAudit?: StructuredAuditData;
   };
 }
 
@@ -154,7 +213,7 @@ export const useChatStore = defineStore("chat", () => {
         `/ai/chat/sessions/${sessionId}/messages`,
       )) as any;
       if (Array.isArray(data)) {
-        messages.value = data.map((item: any) => ({
+        const parsed = data.map((item: any) => ({
           id: item.id,
           sessionId: item.session_id,
           taskId: item.task_id,
@@ -165,8 +224,27 @@ export const useChatStore = defineStore("chat", () => {
           thoughts: item.thought_log ? JSON.parse(item.thought_log) : undefined,
           agentLog: item.agent_log ? JSON.parse(item.agent_log) : undefined,
           reviewDetail: item.review_detail ? JSON.parse(item.review_detail) : undefined,
-          requireReview: !!item.review_detail
+          requireReview: !!item.review_detail,
+          reviewSubmitted: false as boolean,
+          reviewDecision: undefined as ChatMessage['reviewDecision'],
         }));
+        // 历史消息：检测已提交的审核（后续存在 [审核决策] 用户消息）
+        for (let i = 0; i < parsed.length; i++) {
+          if (parsed[i].requireReview) {
+            // 查找同 taskId 下的后续用户决策消息
+            const followUp = parsed.slice(i + 1).find(
+              m => m.role === 'user' && m.taskId === parsed[i].taskId && m.content.startsWith('[审核决策]')
+            );
+            if (followUp) {
+              parsed[i].reviewSubmitted = true;
+              // 从内容中解析决策类型
+              if (followUp.content.includes('全部接受')) parsed[i].reviewDecision = 'approve_all_ai_recommendations';
+              else if (followUp.content.includes('全部驳回')) parsed[i].reviewDecision = 'reject_all';
+              else parsed[i].reviewDecision = 'custom';
+            }
+          }
+        }
+        messages.value = parsed;
       }
     } catch (error) {
       console.error("获取消息列表失败:", error);

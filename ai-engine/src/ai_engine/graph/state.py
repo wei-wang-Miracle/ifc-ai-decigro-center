@@ -169,6 +169,11 @@ class StepResult(BaseModel):
     conclusion: str = Field(
         default="", description="步骤执行的核心结论（简洁版），用于人工审核时向用户展示"
     )
+    structured_audit: dict | None = Field(
+        default=None,
+        description="结构化审核数据（ProfessionalAuditResponse 序列化后的 dict），"
+        "与 conclusion（纯文本）互补：结构化审核时有值，conclusion 作为 fallback 摘要",
+    )
     error: str = Field(default="", description="执行失败时的错误信息")
     tools_called: list[str] = Field(
         default_factory=list, description="该步骤实际调用的工具名称列表"

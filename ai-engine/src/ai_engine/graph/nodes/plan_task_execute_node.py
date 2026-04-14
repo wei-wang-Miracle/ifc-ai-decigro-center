@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from ...llm_factory import create_creative_llm, create_deterministic_llm, create_extraction_llm
 from ...registry import get_agent_registry, get_tool_registry
+from ..hitl_models import AgentHITLConfig, ProfessionalAuditResponse
 from ..state import AgentState, EvalVerdict, PlanStep, ReviewStatus, StepResult, StepStatus
 from ..subgraphs.registry import get_subgraph, is_subgraph_executor
 
@@ -90,6 +91,115 @@ async def _extract_conclusion(
     except Exception as e:
         print(f"[Executor] 结论提取失败，回退截断: {e}")
         return output[:300] + "…"
+
+
+# ═══════════════════════════════════════════════════════════
+#  结构化审核生成（HITL 场景）
+# ═══════════════════════════════════════════════════════════
+
+
+async def _generate_structured_audit(
+    output: str,
+    step_description: str,
+    tools_called: list[str] | None = None,
+    human_review_config: dict | None = None,
+    config: RunnableConfig = None,
+) -> ProfessionalAuditResponse | None:
+    """根据 HITL 配置生成结构化审核响应。
+
+    当 human_review_config 包含有效的 ui_switches（至少一个模块开启）时，
+    使用 with_structured_output 强制 LLM 输出 ProfessionalAuditResponse。
+    仅启用的模块才要求 LLM 输出对应内容，未启用的模块输出空列表。
+
+    Returns:
+        ProfessionalAuditResponse 对象；解析失败或未启用结构化 HITL 时返回 None。
+    """
+    if not output or not human_review_config:
+        return None
+
+    try:
+        hitl_config = AgentHITLConfig.model_validate(human_review_config)
+    except Exception:
+        return None
+
+    if not hitl_config.has_structured_hitl():
+        return None
+
+    sw = hitl_config.ui_switches
+    gc = hitl_config.generation_constraints
+    tools_desc = f"实际调用的工具: {', '.join(tools_called)}" if tools_called else "未调用任何工具"
+
+    # 动态构建 prompt：仅启用的模块才要求输出
+    prompt_parts = [
+        f"你是一位资深业务专家，请根据以下执行结果生成结构化的专业审核报告。\n",
+        f"## 步骤描述\n{step_description}\n",
+        f"## 工具调用情况\n{tools_desc}\n",
+        f"## 执行输出\n{output[:4000]}\n",
+        "## 输出要求\n",
+        "请务必输出以下字段：",
+        "- summary_title: 简洁的审核标题",
+        "- executive_summary: 专业总结，体现洞察力",
+    ]
+
+    if gc.executive_summary_perspectives:
+        perspectives = "、".join(gc.executive_summary_perspectives)
+        prompt_parts.append(f"  摘要需覆盖以下视角: {perspectives}")
+
+    if gc.predictive_foresight_focus:
+        focus = "、".join(gc.predictive_foresight_focus)
+        prompt_parts.append(f"- advanced_foresight: 请从以下方向提供深度预警: {focus}")
+    else:
+        prompt_parts.append("- advanced_foresight: 超出常规视角的深度预警或机会提示")
+
+    if sw.visual_data_enable:
+        prompt_parts.append(
+            "- visual_data: 生成 ECharts 图表配置列表，每个图表包含 chart_type、"
+            "符合 ECharts 官方规范的 option 对象、以及 insight_text 解读"
+        )
+        if gc.visual_data_perspectives:
+            perspectives = "、".join(gc.visual_data_perspectives)
+            prompt_parts.append(f"  图表需覆盖以下视角: {perspectives}")
+    else:
+        prompt_parts.append("- visual_data: 输出空列表 []")
+
+    if sw.check_list_enable:
+        prompt_parts.append(
+            "- check_list: 结构化审核清单，每项包含 item_id、task_label、"
+            "ai_observation、severity(low/medium/high)"
+        )
+        if gc.check_list_dimensions:
+            dims = "、".join(gc.check_list_dimensions)
+            prompt_parts.append(f"  审核需覆盖以下维度: {dims}")
+    else:
+        prompt_parts.append("- check_list: 输出空列表 []")
+
+    if sw.proposals_enable:
+        prompt_parts.append(
+            "- proposals: 专家级建议列表，每项包含 option_id、title、"
+            "is_recommond、recommond_reason、effort_estimation(low/medium/high)、impact_analysis"
+        )
+        if gc.proposal_perspectives:
+            perspectives = "、".join(gc.proposal_perspectives)
+            prompt_parts.append(f"  建议需覆盖以下视角: {perspectives}")
+    else:
+        prompt_parts.append("- proposals: 输出空列表 []")
+
+    try:
+        llm = create_extraction_llm(max_tokens=2000)
+        structured_llm = llm.with_structured_output(ProfessionalAuditResponse)
+        result: ProfessionalAuditResponse = await structured_llm.ainvoke(
+            [HumanMessage(content="\n".join(prompt_parts))], config=config
+        )
+        print(
+            f"[Executor] 结构化审核生成完成: "
+            f"charts={len(result.visual_data)}, "
+            f"checks={len(result.check_list)}, "
+            f"proposals={len(result.proposals)}"
+        )
+        return result
+    except Exception as e:
+        print(f"[Executor] 结构化审核生成失败，将回退到纯文本结论: {e}")
+        return None
 
 
 # ═══════════════════════════════════════════════════════════
@@ -611,12 +721,30 @@ async def _check_review(
 
     step.status = StepStatus.NEEDS_REVIEW
     human_review_config = agent_config.human_review_config if agent_config else None
-    conclusion = await _extract_conclusion(
-        result.output, step.description, result.tools_called, config,
-        human_review_config=human_review_config,
+
+    # 尝试结构化审核生成（HITL 增强路径）
+    structured_audit = await _generate_structured_audit(
+        result.output, step.description, result.tools_called,
+        human_review_config=human_review_config, config=config,
     )
-    updated_result = result.model_copy(update={"conclusion": conclusion})
-    print(f"[Executor] 步骤 {step.step_id} 标记为需要人工审核")
+
+    if structured_audit is not None:
+        # 结构化审核成功：structured_audit 存完整数据，conclusion 存摘要文本作为 fallback
+        conclusion = structured_audit.executive_summary
+        updated_result = result.model_copy(update={
+            "conclusion": conclusion,
+            "structured_audit": structured_audit.model_dump(),
+        })
+        print(f"[Executor] 步骤 {step.step_id} 标记为需要人工审核(结构化)")
+    else:
+        # 回退到纯文本结论提取（原有逻辑）
+        conclusion = await _extract_conclusion(
+            result.output, step.description, result.tools_called, config,
+            human_review_config=human_review_config,
+        )
+        updated_result = result.model_copy(update={"conclusion": conclusion})
+        print(f"[Executor] 步骤 {step.step_id} 标记为需要人工审核(文本)")
+
     return True, updated_result
 
 
