@@ -21,5 +21,6 @@ logs/
 
 .qoder/
 .agents/
+.claude
 tmp*
 
