@@ -3,7 +3,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
 from langgraph.types import Command
 
-from ...audit import finish_node_trace, start_node_trace, submit_trace
+from ...audit import finish_node_trace, start_node_trace
 from ...config import get_settings
 from ...context import get_context_manager, get_long_term_memory_manager
 from ..state import AgentState
@@ -127,9 +127,6 @@ async def responder_node(state: AgentState, config: RunnableConfig) -> Command:
         )
 
         print(f"[Responder] 已更新实体追踪: session={state.session_id}, intent={intent_type}")
-
-    # 异步提交审计数据
-    submit_trace(state, summary, all_node_traces)
 
     return Command(
         update={

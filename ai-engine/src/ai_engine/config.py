@@ -1,7 +1,5 @@
-import os
-from pathlib import Path
 from functools import lru_cache
-from typing import Literal
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -16,12 +14,12 @@ class Settings(BaseSettings):
     参数: 从 .env 文件或环境变量自动加载
     返回: Settings 单例实例
     """
-    
+
     # ========================================
     # 数据库配置
     # ========================================
-    database_url: str = "postgresql://postgres:123456@127.0.0.1:5432/decigro"
-    
+    database_url: str = "postgresql://heyi_decigro:DBhy$decigro123@198.28.3.90:5432/postgres"
+
     # ========================================
     # LLM 配置
     # ========================================
@@ -29,19 +27,19 @@ class Settings(BaseSettings):
     openai_api_base: str = "https://api.moonshot.cn/v1"
     llm_model: str = "kimi-k2-0711-preview"
     llm_temperature: float = 0.3
-    
+
     # ========================================
     # Bus Kernel 配置
     # ========================================
     bus_kernel_base_url: str = "http://localhost:8080/api/dg"
-    
+
     # ========================================
     # 服务配置
     # ========================================
     ai_engine_host: str = "0.0.0.0"
     ai_engine_port: int = 8001
     ai_engine_debug: bool = True
-    
+
     # 配置来源：自动寻找项目根目录下的 .env
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
